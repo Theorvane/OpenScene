@@ -899,8 +899,8 @@ export function EditScreen({
         /*
           Scrolls, and is capped.
 
-          Five steppers pushed the lanes down behind the ad banner, leaving a
-          strip of timeline too short to work in — the panel took the space from
+          Five steppers pushed the lanes down, leaving a strip of timeline too
+          short to work in — the panel took the space from
           the thing it was meant to be adjusting. Now it takes at most a third
           of the screen and scrolls inside that, so the timeline keeps its room.
         */

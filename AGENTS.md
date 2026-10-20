@@ -36,10 +36,8 @@ npm run build
 - No cloud upload, analytics, account system, crash reporting, or auto-update is
   implemented on the desktop. `mobile/` has three deliberate exceptions, none of
   which exists on the desktop: it calls providers directly — generation runs
-  against the user's own accounts, per operation and behind the spend prompt — it
-  carries the Google Mobile Ads SDK for a banner and an interstitial, which
-  reports device identifiers to Google, and it reports anonymous usage counts to
-  the publisher's own OpenPanel instance.
+  against the user's own accounts, per operation and behind the spend prompt —
+  and it reports anonymous usage counts to the publisher's own OpenPanel instance.
 - Each is an exception to that line rather than a widening of it. Usage reporting
   in particular is bounded by `mobile/src/lib/analytics.ts`: a closed list of
   event names, property values restricted to numbers, booleans and null, and no
