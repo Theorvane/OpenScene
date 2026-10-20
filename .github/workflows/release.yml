@@ -193,15 +193,11 @@ jobs:
     uses: ./.github/workflows/ios-app-store-connect.yml
     secrets: inherit
 
-  # Last, and after iOS on purpose. The two store jobs are not equally
-  # reversible: the iOS job uploads a build and submits nothing, while this one
-  # publishes to the Play production track with status `completed`, which is
-  # live to every user the moment it lands. Run in parallel, an iOS failure
-  # after Play had already published left the release shipped and *untagged* —
-  # `release` never ran — so a later push to `main` re-entered the pipeline and
-  # re-uploaded the same `versionCode`, which Play rejects. Live, unrecorded and
-  # stuck until someone bumped the version. The parallelism was worth less than
-  # that. See RELEASING.md for the smaller residual this does not fix.
+  # Last, and after iOS on purpose. The iOS job uploads a build and submits
+  # nothing; Play may commit a production-track edit that waits for a manual
+  # Send for review action in Play Console. Running these jobs in parallel once
+  # left a Play change committed after iOS failed and the tag job was skipped.
+  # See mobile/RELEASING.md for the remaining recovery procedure.
   google-play:
     needs: [check, build, app-store-connect]
     if: needs.check.outputs.already-released == 'false'
