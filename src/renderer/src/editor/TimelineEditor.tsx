@@ -1,4 +1,6 @@
 import { useEffect, useState, type CSSProperties, type ReactElement, type ReactNode } from 'react';
+import { EditorWorkspace } from '../../../../external/opencut/apps/web/src/components/editor/editor-workspace';
+import { EditorHeader } from '../../../../external/opencut/apps/web/src/components/editor/editor-header';
 
 import { AssetMetadataProbeHost } from './AssetMetadataProbeHost';
 import { EDITOR_INSPECTOR_DOCK_TAB_IDS, getDefaultEditorDockTabs, getDefaultEditorLeftDockTabId } from './dockTabs';
@@ -35,6 +37,8 @@ import { useEditorShortcutPreference } from './useEditorShortcutPreference';
 import type { TimelineEditorController } from './useTimelineEditor';
 import { useTimelineShortcuts } from './useTimelineShortcuts';
 import { useAgentChat } from '../AgentChatContext';
+import { useTheme } from '../ThemeProvider';
+import { THEME_PRESETS, type ThemePresetId } from '../theme';
 import type { TabDefinition } from '../ui';
 
 export type InspectorTabId = (typeof EDITOR_INSPECTOR_DOCK_TAB_IDS)[number];
@@ -93,6 +97,7 @@ function getDefaultInspectorTabId({ selectedAssetId, selectedClipId }: Inspector
 
 export function TimelineEditor({ editor }: TimelineEditorProps): ReactElement {
   const { isBusy: isAgentBusy } = useAgentChat();
+  const { mode: themeMode, preset, setPreset, toggleTheme } = useTheme();
   const [leftDockTabId, setLeftDockTabId] = useState<EditorLeftDockTabId>('project');
   const [inspectorTabId, setInspectorTabId] = useState<InspectorTabId>('selection');
   const { layoutPreference, updateLayoutPreference } = useEditorLayoutPreference();
@@ -123,11 +128,9 @@ export function TimelineEditor({ editor }: TimelineEditorProps): ReactElement {
   };
 
   const workspaceClassName = [
-    'editor-workspace',
-    'editor-workspace--nle',
-    layoutPreference.leftDockVisible ? null : 'editor-workspace--left-dock-hidden',
-    layoutPreference.inspectorVisible ? null : 'editor-workspace--inspector-hidden',
-    `editor-workspace--inspector-${layoutPreference.inspectorPlacement}`
+    layoutPreference.leftDockVisible ? null : 'oc-editor-host--left-hidden',
+    layoutPreference.inspectorVisible ? null : 'oc-editor-host--inspector-hidden',
+    `oc-editor-host--inspector-${layoutPreference.inspectorPlacement}`
   ].filter((className): className is string => className !== null).join(' ');
 
   const workspaceStyle: EditorWorkspaceStyle = {
@@ -210,57 +213,73 @@ export function TimelineEditor({ editor }: TimelineEditorProps): ReactElement {
   });
 
   return (
-    <section className={workspaceClassName} style={workspaceStyle} aria-labelledby="timeline-editor-title">
-      <TimelineEditorLeftDock
+    <EditorWorkspace
+      mode="host"
+      className={workspaceClassName}
+      style={workspaceStyle}
+      labelledBy="timeline-editor-title"
+      header={<EditorHeader
+        brand="OpenScene"
+        projectName={editor.project?.name ?? 'No project'}
+        themeMode={themeMode}
+        themePreset={preset}
+        themeOptions={THEME_PRESETS}
+        onThemeModeToggle={toggleTheme}
+        onThemePresetChange={(next) => setPreset(next as ThemePresetId)}
+        actions={<>
+          <button className="oc-editor-host__save" type="button" onClick={() => { void editor.saveTimeline(); }} disabled={editor.project === null || !editor.hasUnsavedTimeline}>Save{editor.hasUnsavedTimeline ? ' *' : ''}</button>
+          {!floatingExportVisible && <ExportPanel editor={editor} />}
+        </>}
+      />}
+      left={<TimelineEditorLeftDock
         activeTabId={leftDockTabId}
         editor={editor}
         leftDockVisible={layoutPreference.leftDockVisible}
         projectPanelFloating={layoutPreference.floatingPanels.project.floating}
         onActiveTabChange={setLeftDockTabId}
-      />
+      />}
 
-      <EditorLeftDockSplitter leftDockVisible={layoutPreference.leftDockVisible} leftDockWidth={layoutPreference.leftDockWidth} onLeftDockWidthChange={setLeftDockWidth} />
+      leftSplitter={<EditorLeftDockSplitter leftDockVisible={layoutPreference.leftDockVisible} leftDockWidth={layoutPreference.leftDockWidth} onLeftDockWidthChange={setLeftDockWidth} />}
 
-      <AssetMetadataProbeHost
+      auxiliary={<AssetMetadataProbeHost
         failuresByAssetId={editor.metadataProbeFailuresByAssetId}
         onMetadata={editor.updateAssetMetadata}
         onProbeFailure={editor.reportMetadataProbeFailure}
         project={editor.project}
         retryRevisionsByAssetId={editor.metadataProbeRetryRevisionsByAssetId}
-      />
+      />}
 
-      <main className="editor-program-region" id="editor-program-panel" aria-labelledby="timeline-editor-title">
-        {/* Branding stays for accessibility and region labeling but is no longer visible chrome. */}
+      program={<main className="editor-program-region" id="editor-program-panel" aria-labelledby="timeline-editor-title">
+        {/* Keep the monitor's accessible heading while OpenCut renders the visible project header. */}
         <div className="visually-hidden">
           <p className="section-kicker">Local studio</p>
           <h1 id="timeline-editor-title">OpenScene</h1>
           <span className="editor-program-region__subtitle">Timeline editor</span>
         </div>
-        {floatingProgramVisible ? <div className="empty-slate">Program Monitor is floating above the workspace.</div> : <ProgramMonitor editor={editor} exportControl={floatingExportVisible ? null : <ExportPanel editor={editor} />} />}
-        {floatingProgramVisible && !floatingExportVisible && <ExportPanel editor={editor} />}
-      </main>
+        {floatingProgramVisible ? <div className="empty-slate">Program Monitor is floating above the workspace.</div> : <ProgramMonitor editor={editor} />}
+      </main>}
 
-      <EditorProgramSplitter programPercent={layoutPreference.programPercent} onProgramPercentChange={setProgramPercent} />
+      programSplitter={<EditorProgramSplitter programPercent={layoutPreference.programPercent} onProgramPercentChange={setProgramPercent} />}
 
-      {dockedInspectorVisible && inspectorPanel}
+      inspector={dockedInspectorVisible ? inspectorPanel : null}
 
-      <EditorInspectorSplitter
+      inspectorSplitter={<EditorInspectorSplitter
         inspectorPlacement={layoutPreference.inspectorPlacement}
         inspectorVisible={layoutPreference.inspectorVisible}
         inspectorWidth={layoutPreference.inspectorWidth}
         leftDockVisible={layoutPreference.leftDockVisible}
         leftDockWidth={layoutPreference.leftDockWidth}
         onInspectorWidthChange={setInspectorWidth}
-      />
+      />}
 
-      <div className="editor-floating-layer" aria-label="Floating workspace panels">
+      floatingPanels={<div className="editor-floating-layer" aria-label="Floating workspace panels">
         {floatingProjectVisible && renderFloatingPanel({ child: <ProjectRail editor={editor} />, floatingPanel: layoutPreference.floatingPanels.project, panelId: 'project' })}
         {floatingProgramVisible && renderFloatingPanel({ child: <ProgramMonitor editor={editor} />, floatingPanel: layoutPreference.floatingPanels.program, panelId: 'program' })}
         {floatingInspectorVisible && renderFloatingPanel({ child: inspectorPanel, floatingPanel: layoutPreference.floatingPanels.inspector, panelId: 'inspector' })}
         {floatingExportVisible && renderFloatingPanel({ child: <ExportPanel editor={editor} />, floatingPanel: layoutPreference.floatingPanels.export, panelId: 'export' })}
-      </div>
+      </div>}
 
-      <TimelineCanvas id="editor-timeline-panel" editor={editor} />
-    </section>
+      timeline={<TimelineCanvas id="editor-timeline-panel" editor={editor} />}
+    />
   );
 }

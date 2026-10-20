@@ -145,11 +145,7 @@ describe('the iOS module', () => {
 /**
  * That the Android app is assembled by something.
  *
- * It was not, and the gap was expensive twice in one change. The LevelPlay
- * binding does not compile against React Native 0.86 at all, and the Pangle
- * adapter throws `NoSuchMethodError` at init against the wrong SDK version —
- * both while the typecheck and 979 unit tests stayed green, because none of
- * them assemble anything. A review asked for build evidence and was right to.
+ * Typecheck and unit tests cannot prove the native app assembles, so CI does.
  */
 describe('the Android module', () => {
   const read = () => readSource(new URL('../.github/workflows/ci.yml', import.meta.url));
@@ -159,16 +155,6 @@ describe('the Android module', () => {
     expect(yaml).toContain('android-module:');
     expect(yaml).toContain('npx expo prebuild --platform android');
     expect(yaml).toContain('./gradlew assembleDebug');
-  });
-
-  it('checks the mediation adapters actually reached the Gradle files', async () => {
-    // The unit tests read the config plugin's source, which proves what it
-    // intends rather than what it produced. An adapter that never lands in
-    // `app/build.gradle` is a network that silently never bids — and prebuild
-    // is where that would go wrong.
-    const yaml = await read();
-    expect(yaml).toContain('ads-mediation:${artifact}');
-    expect(yaml).toContain('artifact.bytedance.com/repository/pangle');
   });
 
   it('builds without needing the release keystore', async () => {

@@ -15,6 +15,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha }}
+          submodules: true
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -104,12 +105,8 @@ jobs:
   # The Android app is compiled, for the same reason the iOS one is — and this
   # job exists because the reason turned out to be real.
   #
-  # `ironsource-mediation@3.2.0` does not compile against React Native 0.86 at
-  # all (React Native moved `getCurrentActivity()` to Kotlin, where the
-  # synthetic-property form no longer resolves), and the Pangle adapter throws
-  # `NoSuchMethodError` at init against the wrong SDK version. Typecheck and unit
-  # tests were green through both. Only assembling the app says whether the
-  # native side of this repository still builds.
+  # Typecheck and unit tests cannot prove that the native dependencies and
+  # Media3 export module compile. Assemble the app on every pull request.
   #
   # `assembleDebug` needs no keystore — the release signing config falls back to
   # the debug key when the Gradle properties are absent — so this runs on every
@@ -137,18 +134,6 @@ jobs:
       - name: Generate the Android project
         working-directory: mobile
         run: npx expo prebuild --platform android --no-install
-
-      # The config plugin's work, asserted where it lands rather than only in the
-      # unit test that reads the plugin's source: an adapter that never reaches
-      # `app/build.gradle` is a network that silently never bids.
-      - name: Check the mediation adapters reached the Gradle files
-        working-directory: mobile
-        run: |
-          set -euo pipefail
-          for artifact in unityads-adapter applovin-adapter facebook-adapter pangle-adapter; do
-            grep -q "ads-mediation:${artifact}" android/app/build.gradle
-          done
-          grep -q 'artifact.bytedance.com/repository/pangle' android/build.gradle
 
       - name: Build the Android app
         working-directory: mobile/android

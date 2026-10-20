@@ -1,3 +1,3 @@
-OpenScene 0.9.0: mobile release refresh.
+OpenScene 0.10.0: free and ad-free.
 
-This update brings the mobile app to the latest OpenScene release. Your existing projects and editing flow remain available.
+Create and edit videos without a subscription or ads. The banner and post-export ad are gone. AI generation still uses the providers you connect, which may charge your own account.

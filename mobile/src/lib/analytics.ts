@@ -9,8 +9,7 @@
  * declared properties, and the properties are the kind of thing that could be
  * printed on a dashboard without anyone minding.
  *
- * Kept free of React Native so the rule can be tested, the way the ad units and
- * the interstitial decision are.
+ * Kept free of React Native so the reporting rule can be tested directly.
  */
 
 /** The project's public write key. Not a secret: a client has to carry it to report anything. */

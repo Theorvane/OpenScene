@@ -3,7 +3,6 @@ import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 
-import { openAdTestSuite } from '../lib/adsModule';
 import { PROVIDER_KEYS, readSlot } from '../lib/credentials';
 import { useAnalyticsPreference } from '../lib/analyticsClient';
 import { describeSpend, type GenerationSpendView } from '@openvideo/shared/generationSpend';
@@ -87,12 +86,6 @@ export function SettingsScreen({ topInset }: { readonly topInset: number }) {
   };
   const analytics = useAnalyticsPreference();
   const { providers: customProviders, refresh: refreshCustom } = useCustomProviders();
-  /**
-   * What the Test Suite tap did. Null until asked, so the row reads "Open".
-   * Launching it is a native screen appearing over this one, and a launch that
-   * failed looks exactly like a tap that missed — so it says which.
-   */
-  const [testSuite, setTestSuite] = useState<'opening' | 'opened' | 'no-sdk' | 'no-init' | null>(null);
 
   const refresh = useCallback(async (): Promise<void> => {
     const slots = new Set<string>([
@@ -257,78 +250,11 @@ export function SettingsScreen({ topInset }: { readonly topInset: number }) {
         </Pressable>
       </View>
 
-      {/*
-        The only way to see an ad while building.
-
-        LevelPlay publishes no test ad units, so `src/lib/ads.ts` hands a
-        development build none and both placements stay empty — which is
-        indistinguishable from an integration that does not work. The Test Suite
-        is the answer to that: it serves from the dashboard rather than from live
-        inventory, lists every configured network with whether its adapter is
-        actually in this binary, and loads a test ad per placement.
-
-        Behind `__DEV__`, so it is compiled out of a store build rather than
-        merely hidden in one. It is a debugging surface, and a user finding it
-        would be finding ads they cannot dismiss from a screen that explains
-        nothing.
-      */}
-      {__DEV__ && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Ad mediation (development only)</Text>
-          <Text style={styles.sectionBlurb}>
-            LevelPlay’s Test Suite. Shows which of the five networks — ironSource, Unity Ads, AppLovin, Meta, Pangle —
-            actually made it into this binary, and loads a test ad for each placement. Development builds request no
-            live ad, so this is the only place an ad appears before a store build.
-          </Text>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Open the LevelPlay test suite"
-            onPress={() => {
-              setTestSuite('opening');
-              void openAdTestSuite().then(setTestSuite);
-            }}
-            style={press(styles.aboutRow)}
-          >
-            <Text style={styles.aboutLabel}>Test suite</Text>
-            <Text style={[styles.aboutValue, testSuite === null && styles.aboutLink]}>
-              {testSuite === null
-                ? 'Open'
-                : testSuite === 'opening'
-                  ? 'Opening…'
-                  : testSuite === 'opened'
-                    ? 'Opened'
-                    : testSuite === 'no-sdk'
-                      ? 'Needs a development build'
-                      : 'Could not initialise'}
-            </Text>
-          </Pressable>
-        </View>
-      )}
-
-      {/*
-        Who made this, and where to find them.
-
-        An app that carries ads is a published thing rather than a personal
-        build, and both the stores and the ad network expect a publisher a user
-        can identify and reach. The site is the place a privacy policy lives,
-        which serving ads also requires.
-      */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>About</Text>
-        {/*
-          What pays for this, said before anyone has to work it out.
-
-          The app carries a banner and a full-screen ad after an export, and
-          until now nothing in it said why. A user looking for "is this free, and
-          what is the catch" found the ads and no statement — and both stores
-          require an ads declaration, so a listing that declares them while the
-          app never mentions them is a mismatch a reviewer can see. It is one
-          sentence, and it is the honest one.
-        */}
         <Text style={styles.sectionBlurb}>
-          OpenScene is free. Ads pay for it — a banner here, and a full-screen ad after an export finishes, mediated by
-          Unity LevelPlay. There is no paid tier, nothing is unlocked by watching one, and the desktop app has no ads at
-          all.
+          OpenScene is free, with no subscription, paid tier, or ads. AI generation uses providers you connect and may
+          incur charges on your own provider account; each kind asks for spending permission first.
         </Text>
         <View style={styles.aboutRow}>
           <Text style={styles.aboutLabel}>Developer</Text>

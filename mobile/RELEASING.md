@@ -10,7 +10,7 @@ survive `expo prebuild` belongs in a config plugin, as the release signing does.
 | --- | --- |
 | Display name | OpenScene |
 | iOS bundle id / Android applicationId | `com.sloki9637.openscene` |
-| Version | `0.9.0` (`expo.version`) |
+| Version | `0.10.0` (`expo.version`) |
 | iOS build number | `expo.ios.buildNumber` |
 | Android version code | `expo.android.versionCode` |
 
@@ -167,109 +167,27 @@ anonymous one the SDK keeps. Data Safety and App Privacy still have to say so:
 declare app interactions / diagnostics, collected by the developer, used for
 analytics, not linked to identity and not used for tracking. It is on by default
 with a switch in Settings, so it is disclosed rather than consented to; if this
-app ever needs GDPR consent for it, it belongs behind a consent flow of its own —
-the ads no longer bring one, see below. What is sent is bounded by
+app ever needs GDPR consent for it, it belongs behind a consent flow of its own.
+What is sent is bounded by
 `src/lib/analytics.ts` — a closed list of event names and property values that
 can only be numbers, booleans or null, which is why no prompt, file name, path or
 key can reach it.
 
-**Both stores have to be told the app contains ads, separately from the privacy
-answers.** Play has a "Contains ads" declaration on the app content page, which
-also puts an "Ads" badge on the listing; the App Store asks the same question
-when setting up the app's version information. This is not the privacy
-questionnaire and answering that one does not answer this. A listing that does
-not declare ads while the binary serves them is the mismatch enforcement looks
-for, and on Play it is grounds for removal rather than a warning.
+**The new mobile build is ad-free.** Unity LevelPlay and its mediated networks,
+app keys, ad units, SKAdNetwork identifiers, and the ad-only App Transport Security
+exception were removed. Before publishing this build, change the Play Console
+“Contains ads” answer to **No** and update the App Store and Play privacy answers
+so they describe the new binary. Remove advertising identifiers and advertising
+purposes only if no other included SDK requires them. The already-published
+privacy policy must also stop claiming OpenScene serves ads; repository changes
+do not update that external page. Confirm the current policy still covers provider
+requests and optional anonymous usage reporting.
 
-The app says so itself in Settings — "OpenScene is free. Ads pay for it" — which
-is what makes the declaration and the product agree.
-
-**The app shows ads, and that changes the privacy answers.** Ads are mediated by
-Unity LevelPlay (formerly ironSource), with Unity Ads, AppLovin, Meta Audience
-Network and Pangle bidding in through adapters. AdMob and the Google Mobile Ads
-SDK are gone. All five of those SDKs are in the binary and all five report device
-identifiers to their own network. Both stores ask about this directly and the
-answers are no longer "none":
-
-- **Data Safety / App Privacy** must declare device or other identifiers,
-  collected by a third party, used for advertising. Declaring nothing here is
-  the mismatch reviewers look for, and it is checked against the SDKs in the
-  binary rather than against what the form says. The list of third parties is
-  now five names rather than one, and Play's Data Safety form asks for them.
-- **iOS** lists the SKAdNetwork identifiers Unity publishes for the mediated
-  networks — seven of them, in `app.json`, reaching `Info.plist` at prebuild.
-  Source and date are in `README-native.md`; do not hand-edit them.
-- **App Tracking Transparency is not implemented**, deliberately. Without it the
-  networks serve non-personalised ads, which needs no ATT prompt. Adding
-  personalised ads means adding the prompt and the Info.plist string first.
-- **Consent is no longer collected, because there is no longer a CMP.** Google's
-  UMP came with the AdMob binding and left with it. What replaces it is the
-  conservative default rather than a prompt: `ensureAdsReady` declares consent
-  *not* given (`LevelPlay.setConsent(false)`) and sets CCPA's do-not-sell signal
-  before initialising, so every network serves contextual inventory. It fails
-  closed — if either signal cannot be applied, the SDK is never initialised and
-  no ad is requested, rather than serving under the networks' own defaults. Personalised
-  ads in the EU require a certified CMP first — that is a decision, not an
-  omission.
-- **App Transport Security carries an app-wide exception.**
-  `NSAllowsArbitraryLoads` is set in `app.json`, which LevelPlay's integration
-  guide requires: several mediated networks still serve creatives and make
-  tracking calls over plain HTTP, and without it those requests fail silently as
-  no-fill. Apple asks for this to be justified at review, and the justification
-  is exactly that — third-party ad SDKs the app does not control the endpoints
-  of. Nothing OpenScene itself talks to uses HTTP: the AI providers, the update
-  feed and the analytics endpoint are all HTTPS, so the exception widens what the
-  ad SDKs may do and nothing else. It is also why no narrower exception works —
-  the hosts belong to five networks and change without notice.
-
-  If review pushes back, the fallback is `NSAllowsArbitraryLoadsForMedia` plus
-  per-network `NSExceptionDomains`, which each network publishes; expect it to go
-  stale.
-
-**Both placements have been seen to serve — through the Test Suite.** On an
-Android emulator, with the Test Suite's Live/Test switch set to Test, the banner
-unit renders a creative and the interstitial unit loads and plays one. The app
-keys and all four unit ids match the dashboard.
-
-The Test Suite renders ads with its own views, so it cannot verify the app's
-`AdBanner` view. The publisher confirmed that the in-app banner appears on a
-real Android device before the 0.9.0 release. Check it again after changing the
-ad SDK or React Native architecture.
-
-**Only four of the five networks are actually bidding.** The Test Suite lists
-ironSource, Meta, Pangle and UnityAds against both ad units; **AppLovin is
-absent** — the adapter is in the binary, but the network has no instance
-configured for this app in the LevelPlay dashboard. Set it up there, or the store
-build ships an SDK that is declared in the privacy answers and never asked to
-bid.
-
-**Two more to confirm on a real device.** Unity Ads did not initialise on the
-emulator (`gateway_universal / PUBLIC_ERROR_CODE_INIT_UNKNOWN`) even though the
-Test Suite lists it, and LevelPlay's ad-quality connector rejects every Pangle
-SDK version the adapter can use — measurement rather than delivery. Neither
-blocks the other networks; both belong on the list before reading revenue numbers
-as real.
-
-**There are two placements, and the interstitial is the one policy is strict
-about.** Reviewed against the LevelPlay programme policies and each mediated
-network's own; what the implementation does, and why:
-
-| Policy | What the app does |
-| --- | --- |
-| No ad in front of a user-initiated action | The interstitial is presented after the export has produced a file and the result is on screen — never on the Export tap |
-| No ad over loading content | Nothing is presented while the encoder runs |
-| No ad on an unsuccessful action | A failed export shows nothing and releases the ad loaded for it |
-| No impression the user cannot see | Refused unless `AppState` is `active`; an export can run for minutes and people put the phone down |
-| Not repeatedly, in succession | One every five minutes at most |
-| Initialised, with privacy signals set, before the request | `ensureAdsReady` gates the *request*, not the presentation |
-| Nothing requested from a development build | Resolved in `src/lib/ads.ts`, not at the call site — LevelPlay has no test units, so development asks for nothing at all |
-| No accidental clicks | The banner has its own block and a rule above it, clear of the tab bar's five 44pt targets, and is hidden while the keyboard is up |
-| Publisher identifiable, policy reachable | Developer, site, contact, terms and privacy in Settings |
-
-The LevelPlay app keys and the four ad unit ids live in `src/lib/ads.ts` and
-nowhere else. Each one only ever serves the placement and the platform it was
-made for — an interstitial id in a banner slot, or the reverse, is a policy
-violation rather than a rendering bug, so a test asserts they stay distinct.
+There is no app subscription or paid tier. AI providers may charge the user’s own
+account for generation, and the in-app spend permissions still apply. Check that
+store pricing and subscription products reflect the free app separately from
+this source change. Existing builds can continue to display ads until replaced
+through the stores, so review the shipped build and listing together.
 
 **Android export has a real-device preflight for 0.9.0.** The publisher confirmed
 that a clip exports to a playable file on a real Android device. Repeat that
@@ -281,12 +199,6 @@ which layer a segment belongs to and Android builds one Media3 sequence per
 layer. The publisher also confirmed an export with two overlapping video tracks
 on a real Android device before 0.9.0. Repeat this case after changing the
 layered export path.
-
-**The published privacy policy now covers mobile ads.** The OpenScene notice at
-`https://www.sloki9637.com/en/privacy` describes the banner, post-export
-interstitial, Unity LevelPlay mediation, and device identifiers. Recheck the
-published policy and store privacy answers when changing an ad SDK or placement.
-`store/privacy-policy-ads.md` keeps the source text for that disclosure.
 
 **Age rating** — user-supplied prompts reach a generative model, so both stores
 treat it as user-generated content. Expect questions about moderation; the

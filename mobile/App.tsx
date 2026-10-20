@@ -11,7 +11,6 @@ import { AgentScreen } from './src/screens/AgentScreen';
 import { EditScreen } from './src/screens/EditScreen';
 import { ImageScreen } from './src/screens/ImageScreen';
 import { LibraryScreen } from './src/screens/LibraryScreen';
-import { AdBanner } from './src/components/AdBanner';
 import { PlanScreen } from './src/screens/PlanScreen';
 import { CreationStageNav } from './src/components/CreationStageNav';
 import { ProjectsScreen } from './src/screens/ProjectsScreen';
@@ -23,7 +22,6 @@ import { modeForProjectType } from '@openvideo/shared/projectTypes';
 import { useProject } from './src/lib/useProject';
 import { exportReviewSummary } from '@openvideo/shared/exportReview';
 import { deliverExport, exportTimeline } from './src/lib/exportComposition';
-import { prepareExportAd, showExportAd } from './src/lib/exportAd';
 import { track } from './src/lib/analyticsClient';
 import { isExportAvailable } from './modules/video-export';
 import {
@@ -220,10 +218,6 @@ function Shell() {
     // four times is four pieces of work.
     track('export_started', { seconds: pictureSeconds, clips: current.timeline.tracks.reduce((n, t) => n + t.clips.length, 0) });
     const startedAt = Date.now();
-    // Requested while the encoder runs, because that wait is the only window
-    // there is: an interstitial asked for at the moment it is shown either makes
-    // the user wait again or shows nothing.
-    prepareExportAd();
     const rendered = await exportTimeline({
       timeline: current.timeline,
       // The project's own choice, and absent means the footage decides — a cut
@@ -249,7 +243,6 @@ function Shell() {
       // No message: a failure reason is written for the person reading it and
       // can name a file or a path.
       track('export_failed', { seconds: pictureSeconds });
-      void showExportAd(false);
       return;
     }
     const delivery = await deliverExport(rendered.uri);
@@ -267,18 +260,6 @@ function Shell() {
           }
         : { kind: 'failed', message: delivery.message }
     );
-    /*
-      After the result is on screen, and only if there is one.
-
-      Before the export would be an ad in front of an action the user just
-      asked for, arriving under a thumb still travelling toward the button they
-      pressed; during it would be an ad over a progress state. Both are what
-      the mediated networks' interstitial policies are written about. Finishing
-      is the one genuine break this app has.
-
-      A failed export still calls this — with `false`, which shows nothing and
-      releases the ad that was loaded for a moment that did not arrive.
-    */
     track(delivery.ok ? 'export_finished' : 'export_failed', {
       seconds: pictureSeconds,
       tookMs: Date.now() - startedAt,
@@ -288,7 +269,6 @@ function Shell() {
       // aggregate rather than one bug report at a time.
       matchedCut: rendered.review.checked ? rendered.review.ok : null
     });
-    void showExportAd(delivery.ok);
   };
 
   const canExport = isExportAvailable && pictureSeconds > 0 && exportState.kind !== 'running';
@@ -410,10 +390,6 @@ function Shell() {
         {tab === 'agent' && <AgentScreen topInset={0} keyboardOffset={bodyTop} projectId={route.projectId} />}
         {tab === 'library' && <LibraryScreen topInset={0} keyboardOffset={bodyTop} projectId={route.projectId} onOpenEditor={sendToEditing} />}
       </View>
-
-      {/* Above the bar rather than over the content: it never covers the
-          timeline, and the bar keeps its own border between the two. */}
-      <AdBanner />
 
       <View accessibilityRole="tablist" style={[styles.tabBar, { paddingBottom: insets.bottom, height: 60 + insets.bottom }]}>
         {PROJECT_TABS.filter(({ id }) => isTabInWorkspace(id, workspaceMode) && (workspaceMode !== 'create' || !isCreationTool(id) || id === 'video')).map(({ id, label, Icon }) => {

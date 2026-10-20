@@ -83,6 +83,8 @@ flowchart LR
 
 The **renderer** collects intent and renders editor state; it never receives raw IPC, FFmpeg execution paths or arguments, or stored provider credentials and OAuth tokens. The **preload** layer exposes only the typed `window.videoTool` bridge. The **main process** owns local projects, secrets, job lifecycle, local FFmpeg execution, and the TypeMCP tool surface. Editing rules, composition, validation, and generation planning live in the portable **shared core**, which desktop and mobile use together.
 
+The separate [OpenCut rewrite](https://github.com/Theorvane/OpenCut) is pinned at `external/opencut` as a Git submodule for integration work. Run `git submodule update --init external/opencut` if you need its source. OpenScene now imports its editor tool rail, media library view, and edit-point controls from that pinned source; see [the integration boundary](docs/opencut-integration.md).
+
 Project folders, imports, generated results, chats, and exports remain local. A connected provider is contacted only for an operation you explicitly start: in a generation studio, that is the visible **Generate** action; for an agent-initiated mutation or job, the Edit Agent asks for approval before execution. The Program Monitor is a best-effort review surface; local FFmpeg MP4 export is the authoritative saved output.
 
 ## The workspace
@@ -173,14 +175,10 @@ surface genuinely cannot do something it says so rather than failing quietly —
 in the composition is not implemented on iOS yet, so the app refuses those exports there instead of
 producing a video with the picture missing.
 
-**The mobile app is paid for by ads.** That is the business model, not an incidental feature: a
-banner above the tab bar and a full-screen ad after a finished export, mediated by Unity LevelPlay
-with Unity Ads, AppLovin, Meta and Pangle bidding into it. There is no paid tier and nothing is
-unlocked by watching one. The app also reports anonymous usage counts to the publisher's own server.
-
-**The desktop app has neither.** No ads, no analytics, no account — the difference is deliberate, and
-it is why the two surfaces declare different things to different reviewers. Both are described under
-[your data](#where-your-data-lives); the usage counts have a switch in Settings, the ads do not.
+**OpenScene is free on desktop and mobile**, with no subscription, paid tier, or ads. AI generation
+uses the provider account you connect and can incur that provider's charges; spending approval stays
+explicit. The mobile app reports anonymous usage counts to the publisher's own server, with a switch
+in Settings. The desktop app has no analytics. See [your data](#where-your-data-lives).
 
 ```bash
 cd mobile
@@ -243,10 +241,7 @@ VIDEO_TOOL_RECORDINGS_DIR=/absolute/path/to/recordings npm run dev
 
 The renderer talks to the main process through a narrow typed `window.videoTool` bridge. Raw `ipcRenderer`, FFmpeg executable paths and arguments, stored credentials, and OAuth tokens stay outside it. Some safe display paths and an API key entered in Settings cross through explicit typed operations; a picked reference image, for example, crosses as bytes, never as a path.
 
-- **The mobile app carries ads; the desktop does not.** The Google Mobile Ads SDK is in the
-  mobile binary and reports device identifiers to Google — a banner above the tab bar and one
-  interstitial after a finished export. Consent is gathered through Google's UMP before any ad is
-  requested. There is no switch for this one; it is how the mobile app is paid for.
+- **No advertising SDK.** Neither app requests ads or includes an ad mediation dependency.
 - **No account, no crash reporting.** The desktop app sends nothing about you anywhere.
   The mobile app reports anonymous usage counts — which screens are opened, whether an
   export ran and finished — to the publisher's own server, never to a third party, and
