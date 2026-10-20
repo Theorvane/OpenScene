@@ -66,7 +66,7 @@ type Client = {
 let client: Client | null | undefined;
 
 /**
- * Loaded lazily, like the ad SDK and for the same reason: a top-level import of
+ * Loaded lazily: a top-level import of
  * something the runtime cannot provide takes the app down while the module
  * graph is still loading, before a screen ever mounts. The platform-neutral
  * core client is intentional: the React Native adapter currently calls an Expo
