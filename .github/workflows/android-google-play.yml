@@ -88,3 +88,6 @@ jobs:
           releaseFiles: mobile/android/app/build/outputs/bundle/release/app-release.aab
           track: ${{ inputs.track }}
           status: ${{ inputs.release_status }}
+          # The production environment sets this to true when Play requires a
+          # manual Send for review action after the edit is committed.
+          changesNotSentForReview: ${{ vars.GOOGLE_PLAY_CHANGES_NOT_SENT_FOR_REVIEW == 'true' }}

@@ -69,21 +69,22 @@ version skips all release and store-distribution work.
 The iOS job builds an IPA and uploads it to App Store Connect. It never submits
 an app for review: that remains an explicit App Store Connect action after build
 processing and metadata review. The Android job uploads the signed AAB to the
-Google Play **production** track with status `completed` — live to every user
-the moment it lands.
+Google Play **production** track with status `completed`. When the
+`GOOGLE_PLAY_CHANGES_NOT_SENT_FOR_REVIEW` environment variable is `true`, the
+edit is committed but needs **Send for review** in Play Console's Publishing
+overview. The update is not live merely because the workflow passed. If managed
+publishing is enabled, publish the approved changes there too.
 
-**The Android job runs after the iOS one, not beside it.** They are not equally
-reversible, and the irreversible step should be the last one that can fail: Play
-must never publish a release that iOS could not. Run in parallel, an iOS failure
-after Play had already published left the release shipped and untagged, and a
-later push to `main` re-uploaded the same `versionCode`, which Play rejects.
+**The Android job runs after the iOS one, not beside it.** An iOS failure must
+not leave a Play edit committed without a release record. Previously the Play
+upload could go live while iOS failed, leaving the release untagged and a later
+push to `main` unable to reuse the same `versionCode`.
 
-One smaller gap remains, which ordering cannot close. If Play publishes and the
-tagging job then fails, the release is live and unrecorded. Re-running the
-workflow is safe for the tag — it asks origin before pushing — but it re-enters
-the store jobs, and Play refuses a `versionCode` it already has. If that happens,
-raise `version`, `buildNumber` and `versionCode` and release again; the published
-build is fine, only the record of it is missing.
+One smaller gap remains, which ordering cannot close. If Play commits and the
+tagging job then fails, the edit is pending review and unrecorded as a GitHub
+release. Re-running the workflow is safe for the tag — it asks origin before
+pushing — but it re-enters the store jobs. Raise `buildNumber` and `versionCode`
+before another upload; if the version was already tagged, raise `version` too.
 
 Create the `app-store-production` GitHub Environment and restrict it to the `main`
 branch. It has no required-reviewer gate: once a new `main` release reaches this
@@ -112,6 +113,9 @@ this environment, the Play production upload runs automatically. Store the follo
 values as environment configuration (not in the repository):
 
 - Variable: `ANDROID_PACKAGE_NAME` (`com.sloki9637.openscene`).
+- Variable: `GOOGLE_PLAY_CHANGES_NOT_SENT_FOR_REVIEW` (`true` when Play requires
+  manual review submission; otherwise `false` or unset). For the v0.10.0
+  recovery this must be `true` because Play rejected automatic submission.
 - Secrets: `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`,
   `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`, and
   `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON`.
