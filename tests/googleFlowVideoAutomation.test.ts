@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { WebContents } from 'electron';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -222,7 +223,7 @@ describe('Google Flow browser video automation', () => {
     });
   });
 
-  it('assigns Start and End frames through separate Chromium file choosers', async () => {
+  it.each(['cdp', 'dom'])('assigns Start and End frames consistently via %s', async (transport) => {
     const promptInput = { x: 10, y: 700, width: 300, height: 50 };
     const config = { x: 20, y: 800, width: 300, height: 40 };
     const start = { x: 100, y: 600, width: 100, height: 40 };
@@ -248,7 +249,7 @@ describe('Google Flow browser video automation', () => {
       state, state, state, { ...state, submit }, { ...state, submit, videos: [oldVideo, newVideo] }
     ];
     const executeJavaScript = vi.fn().mockImplementation(async (script: string) => {
-      if (script.includes('input[type="file"]')) return false;
+      if (script.includes('input[type="file"]')) return transport === 'dom';
       return states.shift() ?? { ...state, submit, videos: [oldVideo, newVideo] };
     });
     let attached = false;
@@ -283,7 +284,7 @@ describe('Google Flow browser video automation', () => {
       executeJavaScript,
       insertText: vi.fn(async () => undefined),
       sendInputEvent,
-      debugger: debuggerApi
+      ...(transport === 'cdp' ? { debugger: debuggerApi } : {})
     } as unknown as WebContents, {
       prompt: 'Move between approved endpoints', model: 'veo-3.1-quality', operation: 'start_end',
       aspectRatio: '16:9', durationSeconds: 8, timeoutMs: 10_000,
@@ -291,12 +292,24 @@ describe('Google Flow browser video automation', () => {
     });
 
     await expect(operation).resolves.toBe(newVideo.src);
+    if (transport === 'dom') {
+      const scripts = executeJavaScript.mock.calls.map(([script]) => script as string)
+        .filter((script) => script.includes('input[type="file"]'));
+      expect(scripts).toHaveLength(2);
+      for (const [index, reference] of [FIRST_FRAME, LAST_FRAME].entries()) {
+        expect(scripts[index]).toContain(`openscene-ref-v1-${createHash('sha256').update(Buffer.from(reference.base64, 'base64')).digest('hex')}.png`);
+        expect(scripts[index]).not.toContain(reference.displayName);
+      }
+      expect(debuggerApi.sendCommand).not.toHaveBeenCalled();
+      return;
+    }
     const setFileCalls = debuggerApi.sendCommand.mock.calls
       .filter(([method]) => method === 'DOM.setFileInputFiles');
     expect(setFileCalls).toHaveLength(2);
     expect(setFileCalls.map(([, params]) => (params as { backendNodeId: number }).backendNodeId)).toEqual([101, 102]);
     expect(setFileCalls.map(([, params]) => ((params as { files: string[] }).files[0] ?? '').replace(/\\/g, '/').split('/').at(-1)))
-      .toEqual(['01-first.png', '01-last.png']);
+      .toEqual([FIRST_FRAME, LAST_FRAME].map((reference) =>
+        `openscene-ref-v1-${createHash('sha256').update(Buffer.from(reference.base64, 'base64')).digest('hex')}.png`));
     expect(debuggerApi.attach).toHaveBeenCalledTimes(2);
     expect(debuggerApi.detach).toHaveBeenCalledTimes(2);
   }, 15_000);

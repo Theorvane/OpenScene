@@ -2,6 +2,7 @@ import type { KeyboardInputEvent, Rectangle, WebContents } from 'electron';
 import type { GoogleFlowImageModel } from '../shared/browserSession';
 import type { ReferenceImageSelection } from '../shared/providerSeams';
 import { BrowserGenerationActionRequiredError } from './browserGenerationAction';
+import { prepareGoogleFlowReference } from './googleFlowReference';
 import {
   uploadReferencesThroughChromiumFileChooser,
   type ChromiumFileChooserDiagnostic,
@@ -820,21 +821,15 @@ async function configureGeneration(
   onConfiguration({ step: 'complete' });
 }
 
-function safeReferenceName(reference: ReferenceImageSelection, index: number): string {
-  const extension = reference.mimeType === 'image/png' ? 'png' : reference.mimeType === 'image/webp' ? 'webp' : 'jpg';
-  const base = reference.displayName.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 70).replace(/\.+$/, '');
-  return `${base || `reference-${index + 1}`}.${extension}`;
-}
-
 async function injectImageFiles(webContents: WebContents, references: readonly ReferenceImageSelection[]): Promise<boolean> {
   const injected = await webContents.executeJavaScript(`(() => {
     const input = [...document.querySelectorAll('input[type="file"]')]
       .find((candidate) => !candidate.disabled && (!candidate.accept || candidate.accept.includes('image')));
     if (!(input instanceof HTMLInputElement)) return false;
     const transfer = new DataTransfer();
-    const references = ${JSON.stringify(references.map((reference, index) => ({
+    const references = ${JSON.stringify(references.map((reference) => ({
       base64: reference.base64,
-      displayName: safeReferenceName(reference, index),
+      displayName: prepareGoogleFlowReference(reference).fileName,
       mimeType: reference.mimeType
     })))};
     for (const reference of references) {

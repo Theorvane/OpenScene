@@ -7,6 +7,7 @@ import {
 import type { ReferenceImageSelection } from '../shared/providerSeams';
 import type { VideoOperation } from '../shared/mediaCapabilityRegistry';
 import { BrowserGenerationActionRequiredError } from './browserGenerationAction';
+import { prepareGoogleFlowReference } from './googleFlowReference';
 import {
   uploadReferencesThroughChromiumFileChooser,
   type ChromiumFileChooserDiagnostic,
@@ -180,13 +181,7 @@ async function configure(webContents: WebContents, ready: AutomationState, input
   pressKey(webContents, 'ESCAPE');
 }
 
-function safeReferenceName(reference: ReferenceImageSelection, index: number): string {
-  const extension = reference.mimeType === 'image/png' ? 'png' : reference.mimeType === 'image/webp' ? 'webp' : 'jpg';
-  const base = reference.displayName.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 70).replace(/\.+$/, '');
-  return `${base || `reference-${index + 1}`}.${extension}`;
-}
-
-async function injectImageFile(webContents: WebContents, reference: ReferenceImageSelection, index: number): Promise<void> {
+async function injectImageFile(webContents: WebContents, reference: ReferenceImageSelection): Promise<void> {
   const script = `(() => {
     const input = [...document.querySelectorAll('input[type="file"]')]
       .find((candidate) => !candidate.disabled && (!candidate.accept || candidate.accept.includes('image')));
@@ -195,7 +190,7 @@ async function injectImageFile(webContents: WebContents, reference: ReferenceIma
     const bytes = new Uint8Array(binary.length);
     for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
     const transfer = new DataTransfer();
-    transfer.items.add(new File([bytes], ${JSON.stringify(safeReferenceName(reference, index))}, { type: ${JSON.stringify(reference.mimeType)} }));
+    transfer.items.add(new File([bytes], ${JSON.stringify(prepareGoogleFlowReference(reference).fileName)}, { type: ${JSON.stringify(reference.mimeType)} }));
     input.files = transfer.files;
     input.dispatchEvent(new Event('change', { bubbles: true }));
     return true;
@@ -233,7 +228,7 @@ async function attachReferences(
         uploads.push(upload);
       } else {
         await delay(500);
-        await injectImageFile(webContents, references[index]!, index);
+        await injectImageFile(webContents, references[index]!);
       }
     }
     return {
