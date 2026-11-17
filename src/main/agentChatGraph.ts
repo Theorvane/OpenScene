@@ -22,6 +22,7 @@ import type { OpenAiAuthMode, ReasoningEffort } from '../shared/openAiAuth';
  * text rather than two drifting copies of it.
  */
 export const GENERATION_COST_POLICY =
+  'For newly AI-generated media only; this policy does not apply to editing imported project footage. ' +
   'Generation spends real money on user provider account. Never start video generation from bare request. Order:\n' +
   '1. Length. Ask target length if user not said. Never assume.\n' +
   '2. Shots. Call planVideoScenario for legal shot lengths and start times. Never compute shot lengths yourself. ' +
@@ -35,10 +36,16 @@ export const GENERATION_COST_POLICY =
   'User explicitly says skip estimate: do it, say plainly you generate without cost check. ' +
   'Same steps for image and speech at their scale.';
 
+export const EXISTING_FOOTAGE_EDIT_POLICY =
+  'Existing-footage montages are local timeline edits. When a project already has imported video assets and the user asks for a montage, frag movie, highlight reel, or cut, prefer those assets unless the user explicitly asks for newly generated footage. ' +
+  'Inspect relevant source clips with watchProjectVideo when their content is unclear, and use project/timeline tools to place and trim existing asset IDs. ' +
+  'Do not call planVideoScenario, estimateGenerationCost, createVideoJob, createImageJob, or createSpeechJob for a cut assembled from existing project footage. ' +
+  'If the requested duration conflicts with the requested source clips, ask before changing the timeline. Never pass an Edit Agent model ID to a media-generation tool.';
+
 const AGENT_CHAT_SYSTEM_PROMPT =
   'OpenScene in-app agent. You drive the whole editor through tools: read project timeline, add, trim, and remove ' +
   'clips, adjust clip effects, start FFmpeg export. ' +
-  'You own generation end to end. To add generated media: call createVideoJob, createImageJob, or createSpeechJob, ' +
+  'You own generation end to end only when the user explicitly requests newly generated media. To add generated media: call createVideoJob, createImageJob, or createSpeechJob, ' +
   'poll getJobStatus until completed, call importGeneratedResult, then place the returned assetId with ' +
   'addClipToTimeline. Never ask the user to do those steps by hand. ' +
   'Generation runs against the cloud provider connected in Settings; none connected fails with an explicit error. ' +
@@ -49,6 +56,8 @@ const AGENT_CHAT_SYSTEM_PROMPT =
   'Keep replies short. Say what you do before calling a tool.' +
   '\n\n' +
   AGENT_SCOPE_POLICY +
+  '\n\n' +
+  EXISTING_FOOTAGE_EDIT_POLICY +
   '\n\n' +
   GENERATION_COST_POLICY;
 
