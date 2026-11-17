@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { WebContents } from 'electron';
 import { existsSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -157,7 +158,7 @@ describe('Google Flow browser image automation', () => {
     });
   });
 
-  it('uploads world style first and every character reference through Chromium in one ordered multiple-file selection', async () => {
+  it.each(['cdp', 'dom'])('uploads ordered references with consistent names via %s', async (transport) => {
     const input = { x: 10, y: 700, width: 300, height: 50 };
     const config = { x: 20, y: 800, width: 260, height: 40 };
     const uploadLauncher = { x: 35, y: 810, width: 36, height: 36 };
@@ -190,7 +191,7 @@ describe('Google Flow browser image automation', () => {
       { ...editorState, submit }, { ...editorState, submit, images: [oldImage, newImage] }
     ];
     const executeJavaScript = vi.fn().mockImplementation(async (script: string) => {
-      if (script.includes('input[type="file"]')) return false;
+      if (script.includes('input[type="file"]')) return transport === 'dom';
       return states.shift() ?? { ...editorState, submit, images: [oldImage, newImage] };
     });
     const insertText = vi.fn(async () => undefined);
@@ -225,7 +226,7 @@ describe('Google Flow browser image automation', () => {
       executeJavaScript,
       insertText,
       sendInputEvent,
-      debugger: debuggerApi
+      ...(transport === 'cdp' ? { debugger: debuggerApi } : {})
     } as unknown as WebContents, {
       prompt: 'Create a storyboard frame', model: 'nano-banana-2', aspectRatio: '16:9', timeoutMs: 10_000,
       referenceImages: [
@@ -239,14 +240,24 @@ describe('Google Flow browser image automation', () => {
     });
 
     await expect(operation).resolves.toBe(newImage.src);
+    if (transport === 'dom') {
+      const uploadScript = executeJavaScript.mock.calls.map(([script]) => script as string)
+        .find((script) => script.includes('input[type="file"]'))!;
+      expect(uploadScript).toContain(`openscene-ref-v1-${createHash('sha256').update('WORLD').digest('hex')}.png`);
+      expect(uploadScript).toContain(`openscene-ref-v1-${createHash('sha256').update('THOK').digest('hex')}.jpg`);
+      expect(uploadScript).toContain(`openscene-ref-v1-${createHash('sha256').update('BUK').digest('hex')}.webp`);
+      expect(uploadScript).not.toMatch(/world-style|thok\.jpeg|buk\.webp/);
+      expect(debuggerApi.sendCommand).not.toHaveBeenCalled();
+      return;
+    }
     const setFilesCall = debuggerApi.sendCommand.mock.calls.find(([method]) => method === 'DOM.setFileInputFiles');
     expect(setFilesCall).toBeDefined();
     const files = (setFilesCall![1] as { files: string[]; backendNodeId: number }).files;
     expect((setFilesCall![1] as { backendNodeId: number }).backendNodeId).toBe(73);
     expect(files.map((file) => file.replace(/\\/g, '/').split('/').at(-1))).toEqual([
-      '01-world-style.png',
-      '02-thok.jpg',
-      '03-buk.webp'
+      `openscene-ref-v1-${createHash('sha256').update('WORLD').digest('hex')}.png`,
+      `openscene-ref-v1-${createHash('sha256').update('THOK').digest('hex')}.jpg`,
+      `openscene-ref-v1-${createHash('sha256').update('BUK').digest('hex')}.webp`
     ]);
     expect(existsSync(dirname(files[0]!))).toBe(false);
     expect(debuggerApi.attach).toHaveBeenCalledWith('1.3');

@@ -1,9 +1,9 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { extname, join } from 'node:path';
+import { join } from 'node:path';
 import type { Debugger, Event, WebContents } from 'electron';
 import type { ReferenceImageSelection } from '../shared/providerSeams';
-import { REFERENCE_IMAGE_MAX_BYTES } from './referenceImagePicker';
+import { prepareGoogleFlowReference } from './googleFlowReference';
 
 const TEMPORARY_DIRECTORY_PREFIX = 'openscene-flow-reference-';
 
@@ -47,33 +47,6 @@ function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-function safeReferenceName(reference: ReferenceImageSelection, index: number): string {
-  const extension = reference.mimeType === 'image/png' ? '.png' : reference.mimeType === 'image/webp' ? '.webp' : '.jpg';
-  const originalExtension = extname(reference.displayName);
-  const stem = reference.displayName.slice(0, originalExtension.length === 0 ? undefined : -originalExtension.length)
-    .replace(/[^a-zA-Z0-9._-]/g, '_')
-    .slice(0, 64)
-    .replace(/^\.+|\.+$/g, '');
-  return `${String(index + 1).padStart(2, '0')}-${stem || 'reference'}${extension}`;
-}
-
-function decodeReference(reference: ReferenceImageSelection): Buffer {
-  if (!['image/png', 'image/jpeg', 'image/webp'].includes(reference.mimeType)) {
-    throw new Error(`Google Flow cannot upload the reference MIME type ${reference.mimeType}.`);
-  }
-  if (reference.base64.length > Math.ceil(REFERENCE_IMAGE_MAX_BYTES * 4 / 3) + 4) {
-    throw new Error(`The reference image ${reference.displayName} is larger than ${REFERENCE_IMAGE_MAX_BYTES / (1024 * 1024)} MB.`);
-  }
-  if (!/^[a-zA-Z0-9+/]*={0,2}$/.test(reference.base64) || reference.base64.length % 4 === 1) {
-    throw new Error(`The reference image ${reference.displayName} is not valid base64 data.`);
-  }
-  const bytes = Buffer.from(reference.base64, 'base64');
-  if (bytes.length === 0 || bytes.length > REFERENCE_IMAGE_MAX_BYTES) {
-    throw new Error(`The reference image ${reference.displayName} must be between 1 byte and ${REFERENCE_IMAGE_MAX_BYTES / (1024 * 1024)} MB.`);
-  }
-  return bytes;
-}
-
 async function stageReferences(references: readonly ReferenceImageSelection[]): Promise<{
   readonly directory: string;
   readonly files: readonly string[];
@@ -82,8 +55,12 @@ async function stageReferences(references: readonly ReferenceImageSelection[]): 
   try {
     const files: string[] = [];
     for (let index = 0; index < references.length; index += 1) {
-      const target = join(directory, safeReferenceName(references[index]!, index));
-      await writeFile(target, decodeReference(references[index]!), { flag: 'wx', mode: 0o600 });
+      const reference = prepareGoogleFlowReference(references[index]!);
+      // Separate directories retain duplicate bytes and order without changing the stable basename.
+      const slot = join(directory, String(index));
+      await mkdir(slot, { mode: 0o700 });
+      const target = join(slot, reference.fileName);
+      await writeFile(target, reference.bytes, { flag: 'wx', mode: 0o600 });
       files.push(target);
     }
     return { directory, files };
