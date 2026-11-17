@@ -158,7 +158,12 @@ describe('Google Flow browser image automation', () => {
     });
   });
 
-  it.each(['cdp', 'dom'])('uploads ordered references with consistent names via %s', async (transport) => {
+  it.each([
+    ['cdp', 'ready'], ['dom', 'ready'],
+    ['cdp', 'missing'], ['dom', 'missing'],
+    ['dom', 'extra'], ['dom', 'busy'], ['dom', 'unknown'], ['dom', 'stale'], ['dom', 'unrecognized']
+  ])('gates ordered references via %s with %s attachments', async (transport, outcome) => {
+    if (transport === 'dom') vi.useFakeTimers();
     const input = { x: 10, y: 700, width: 300, height: 50 };
     const config = { x: 20, y: 800, width: 260, height: 40 };
     const uploadLauncher = { x: 35, y: 810, width: 36, height: 36 };
@@ -174,6 +179,7 @@ describe('Google Flow browser image automation', () => {
     const editorState = {
       url: 'https://labs.google/fx/tools/flow/project/example', input,
       configButton: { rectangle: config, text: 'Video 720p 8s x2' },
+      referenceAttachments: outcome === 'unrecognized' ? undefined : { visibleCount: outcome === 'stale' ? 1 : 0, readyCount: 0, busy: false },
       uploadLauncher, tabs: [], menuItems: [], images: [oldImage]
     };
     const uploadMenuState = { ...editorState, uploadChoice };
@@ -182,17 +188,27 @@ describe('Google Flow browser image automation', () => {
       configButton: { rectangle: config, text: 'Nano Banana 2 Landscape x1' },
       tabs: selectedTabs
     };
+    const attachedState = { ...editorState, submit, referenceAttachments: {
+      visibleCount: outcome === 'extra' ? 4 : 3,
+      readyCount: outcome === 'missing' ? 2 : outcome === 'extra' ? 4 : 3,
+      busy: outcome === 'busy'
+    } };
+    const finalState = outcome === 'unknown' ? { ...attachedState, referenceAttachments: undefined } : attachedState;
+    let observedReady = false;
     const states = [
       editorState, editorState, editorState, editorState,
       panelState, panelState, panelState, panelState,
       editorState,
       uploadMenuState,
       editorState,
-      { ...editorState, submit }, { ...editorState, submit, images: [oldImage, newImage] }
+      { ...editorState, submit, referenceAttachments: { visibleCount: 1, readyCount: 1, busy: false } },
+      finalState, { ...finalState, images: [oldImage, newImage] }
     ];
     const executeJavaScript = vi.fn().mockImplementation(async (script: string) => {
       if (script.includes('input[type="file"]')) return transport === 'dom';
-      return states.shift() ?? { ...editorState, submit, images: [oldImage, newImage] };
+      const state = states.shift() ?? { ...finalState, images: [oldImage, newImage] };
+      if (state.referenceAttachments?.readyCount === 3 && !state.referenceAttachments?.busy) observedReady = true;
+      return state;
     });
     const insertText = vi.fn(async () => undefined);
     const referenceUploadSteps: string[] = [];
@@ -221,7 +237,11 @@ describe('Google Flow browser image automation', () => {
         if (event === 'message') messageListeners.delete(listener);
       })
     };
-    const sendInputEvent = vi.fn();
+    const sendInputEvent = vi.fn((event) => {
+      if (event.type === 'mouseDown' && event.x === 1120 && event.y === 820) {
+        expect(observedReady).toBe(true);
+      }
+    });
     const operation = automateGoogleFlowImageGeneration({
       executeJavaScript,
       insertText,
@@ -239,7 +259,22 @@ describe('Google Flow browser image automation', () => {
       }
     });
 
+    // DOM fallback has no filesystem staging; run its polling deterministically.
+    void operation.catch(() => undefined);
+    if (transport === 'dom') await vi.runAllTimersAsync();
+    if (outcome !== 'ready') {
+      await expect(operation).rejects.toThrow(['stale', 'unrecognized'].includes(outcome!)
+        ? 'Clear the composer and retry' : 'No generation was submitted');
+      expect(sendInputEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'mouseDown', x: 1120, y: 820 }));
+      if (transport === 'cdp') {
+        const call = debuggerApi.sendCommand.mock.calls.find(([method]) => method === 'DOM.setFileInputFiles');
+        const files = (call![1] as { files: string[] }).files;
+        expect(existsSync(dirname(files[0]!))).toBe(false);
+      }
+      return;
+    }
     await expect(operation).resolves.toBe(newImage.src);
+    expect(sendInputEvent).toHaveBeenCalledWith(expect.objectContaining({ type: 'mouseDown', x: 1120, y: 820 }));
     if (transport === 'dom') {
       const uploadScript = executeJavaScript.mock.calls.map(([script]) => script as string)
         .find((script) => script.includes('input[type="file"]'))!;
