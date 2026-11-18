@@ -41,6 +41,19 @@ describe('the desktop', () => {
     expect(jobs).toContain("model.executionPath === 'api'\n    ? await reserveSpend(estimateSpeechCost({ modelId }), request.acceptUnknownCost)");
   });
 
+  it('reports a failed ledger read and does not initially display unlimited spending', async () => {
+    const main = await readRepo('src/main/index.ts');
+    const readHandler = main.slice(main.indexOf('ipcMain.handle(IPC_CHANNELS.generationSpendGet,'), main.indexOf('ipcMain.handle(IPC_CHANNELS.generationSpendSetCap,'));
+    expect(readHandler).toContain('try {');
+    expect(readHandler).toContain("return fail('UNKNOWN_ERROR'");
+    const settings = await readRepo('src/renderer/src/SpendSettings.tsx');
+    expect(settings).toContain('useState<GenerationSpendView | null>(null)');
+    expect(settings).toContain('setFailure(response.error.message)');
+    expect(settings).toContain('disabled={view === null}');
+    expect(settings).toContain('Spending record unavailable or loading.');
+    expect(settings).toContain('.catch(() => {');
+  });
+
   it('lets the agent read the limit but never set it', async () => {
     const server = await readRepo('src/main/openVideoMcpServer.ts');
     expect(server).toContain('async getGenerationSpend()');

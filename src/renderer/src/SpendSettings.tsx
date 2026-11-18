@@ -10,19 +10,23 @@ import { Button, MetadataList, StatusCard } from './ui';
  * that can raise its own limit does not have one.
  */
 
-const EMPTY: GenerationSpendView = { total: { amountUsd: 0, entryCount: 0, unpricedCount: 0 } };
-
 export function SpendSettings(): ReactElement {
-  const [view, setView] = useState<GenerationSpendView>(EMPTY);
+  const [view, setView] = useState<GenerationSpendView | null>(null);
   const [draft, setDraft] = useState('');
   const [failure, setFailure] = useState('');
 
   useEffect(() => {
     let cancelled = false;
     void window.videoTool.getGenerationSpend().then((response) => {
-      if (cancelled || !response.ok) return;
+      if (cancelled) return;
+      if (!response.ok) {
+        setFailure(response.error.message);
+        return;
+      }
       setView(response.value);
       setDraft(response.value.capUsd === undefined ? '' : String(response.value.capUsd));
+    }).catch(() => {
+      if (!cancelled) setFailure('Could not load the spending record. API generation requires a readable record.');
     });
     return () => {
       cancelled = true;
@@ -31,13 +35,19 @@ export function SpendSettings(): ReactElement {
 
   const apply = useCallback(async (capUsd: number | null) => {
     setFailure('');
-    const response = await window.videoTool.setGenerationSpendCap(capUsd);
-    if (response.ok) {
-      setView(response.value);
-      setDraft(response.value.capUsd === undefined ? '' : String(response.value.capUsd));
-      return;
+    try {
+      const response = await window.videoTool.setGenerationSpendCap(capUsd);
+      if (response.ok) {
+        setView(response.value);
+        setDraft(response.value.capUsd === undefined ? '' : String(response.value.capUsd));
+        return;
+      }
+      setFailure(response.error.message);
+      setView(null);
+    } catch {
+      setFailure('Could not save the spending limit. Reload Settings to check the record.');
+      setView(null);
     }
-    setFailure(response.error.message);
   }, []);
 
   const save = useCallback(() => {
@@ -60,7 +70,7 @@ export function SpendSettings(): ReactElement {
     <>
       <MetadataList
         items={[
-          { term: 'This month', description: describeSpend(view.total, view.capUsd) },
+          { term: 'This month', description: view === null ? 'Spending record unavailable or loading.' : describeSpend(view.total, view.capUsd) },
           {
             term: 'Counted',
             description: 'Video, image, and speech jobs sent to a provider. Local generation costs nothing and is not counted.'
@@ -79,18 +89,19 @@ export function SpendSettings(): ReactElement {
           type="number"
           min="0"
           step="1"
-          placeholder="No limit"
+          placeholder={view === null ? "Unavailable" : "No limit"}
+          disabled={view === null}
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
         />
       </div>
       {failure.length > 0 ? <StatusCard tone="danger">{failure}</StatusCard> : null}
-      <StatusCard tone={view.capUsd === undefined ? 'warning' : 'neutral'}>
+      {view !== null ? <StatusCard tone={view.capUsd === undefined ? 'warning' : 'neutral'}>
         {view.capUsd === undefined
           ? 'No limit is set, so nothing bounds what generation can spend once a provider is connected.'
           : `Jobs that would take this month past $${view.capUsd.toFixed(2)} are refused before they reach a provider.`}
-      </StatusCard>
-      <Button variant="default" onClick={save}>Save limit</Button>
+      </StatusCard> : null}
+      <Button variant="default" onClick={save} disabled={view === null}>Save limit</Button>
     </>
   );
 }

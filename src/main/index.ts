@@ -411,11 +411,15 @@ async function installIpcHandlers(): Promise<void> {
     own limit does not have one.
   */
   ipcMain.handle(IPC_CHANNELS.generationSpendGet, async () => {
-    const ledger = await generationSpendStore.read();
-    return ok({
-      total: await generationSpendStore.monthToDate(),
-      ...(ledger.capUsd === undefined ? {} : { capUsd: ledger.capUsd })
-    });
+    try {
+      const ledger = await generationSpendStore.read();
+      return ok({
+        total: await generationSpendStore.monthToDate(),
+        ...(ledger.capUsd === undefined ? {} : { capUsd: ledger.capUsd })
+      });
+    } catch (err) {
+      return fail('UNKNOWN_ERROR', err instanceof Error ? err.message : 'Failed to read the spending record');
+    }
   });
 
   ipcMain.handle(IPC_CHANNELS.generationSpendSetCap, async (_event, capUsd: number | null) => {

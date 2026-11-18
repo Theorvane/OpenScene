@@ -51,25 +51,12 @@ describe('the spending record on disk', () => {
     expect(removed.entries).toHaveLength(1);
   });
 
-  it('treats a corrupt file as no record rather than refusing to generate', async () => {
-    expect(parseLedger('{ not json')).toEqual({ entries: [] });
-    // Entries that are not entries are dropped; the ones that are survive.
-    expect(
-      parseLedger(
-        JSON.stringify({
-          capUsd: 10,
-          entries: [
-            { id: 'a', state: 'charged', at: '2026-08-01T00:00:00.000Z', kind: 'video', modelId: 'sora-2', basis: '' },
-            { nonsense: true }
-          ]
-        })
-      )
-    ).toEqual({
-      capUsd: 10,
-      entries: [{ id: 'a', state: 'charged', at: '2026-08-01T00:00:00.000Z', kind: 'video', modelId: 'sora-2', basis: '' }]
-    });
-    // A ceiling of zero or below is no ceiling, not a ceiling of nothing.
+  it('refuses corrupt history rather than dropping charges or a cap', () => {
+    expect(() => parseLedger('{ not json')).toThrow('spending record');
+    expect(() => parseLedger(JSON.stringify({ capUsd: 10, entries: [{ nonsense: true }] }))).toThrow('spending record');
+    // Keep the historical meaning of an explicitly non-positive ceiling.
     expect(parseLedger(JSON.stringify({ capUsd: 0, entries: [] })).capUsd).toBeUndefined();
+    expect(parseLedger(JSON.stringify({ capUsd: -1, entries: [] })).capUsd).toBeUndefined();
   });
 
   it('reads a file written by an older build without losing its charges', async () => {
