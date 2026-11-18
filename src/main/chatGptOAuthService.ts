@@ -82,6 +82,7 @@ export class ChatGptOAuthService {
   private activeAuthorization: AbortController | null = null;
   private activeStatus: ChatGptOAuthStatus | null = null;
   private credentialOperation: Promise<void> = Promise.resolve();
+  private sessionGeneration = 0;
 
   constructor(directory: string, dependencies: ChatGptOAuthServiceDependencies = {}) {
     this.tokenStore = new ChatGptOAuthTokenStore(directory);
@@ -99,6 +100,8 @@ export class ChatGptOAuthService {
     if (this.activeAuthorization !== null) {
       throw new ChatGptOAuthServiceError('authorization_in_progress', 'Codex device authorization is already in progress.');
     }
+    // A new authorization must not be overwritten by an older refresh.
+    this.sessionGeneration += 1;
     const controller = new AbortController();
     this.activeAuthorization = controller;
     try {
@@ -140,7 +143,12 @@ export class ChatGptOAuthService {
   }
 
   async acquireCredentials(): Promise<ChatGptCodexCredentials> {
+    const generation = this.sessionGeneration;
+    // Observe earlier clears/saves before reading a session. Do not wait on network refreshes.
+    await this.credentialOperation;
+    this.assertCurrentSession(generation);
     const stored = await this.tokenStore.load();
+    this.assertCurrentSession(generation);
     if (stored === null) throw new ChatGptOAuthServiceError('not_authenticated', 'Codex is not connected.');
     const tokens = stored.expiresAt - this.now() <= REFRESH_WINDOW_MS
       ? await refreshTokens({
@@ -152,14 +160,30 @@ export class ChatGptOAuthService {
           signal: AbortSignal.timeout(30_000)
         })
       : stored;
-    if (tokens !== stored) await this.serializeCredentialOperation(() => this.tokenStore.save(tokens));
+    if (tokens !== stored) {
+      await this.serializeCredentialOperation(async () => {
+        this.assertCurrentSession(generation);
+        await this.tokenStore.save(tokens);
+      });
+    }
+    this.assertCurrentSession(generation);
     return { accessToken: tokens.accessToken, accountId: tokens.accountId };
   }
 
   async logout(): Promise<ChatGptOAuthStatus> {
+    // Invalidate even requests that have not reached the persistence queue yet.
+    this.sessionGeneration += 1;
     this.cancelAuthorization();
     await this.serializeCredentialOperation(() => this.tokenStore.clear());
     return { kind: 'disconnected' };
+  }
+
+  private assertCurrentSession(generation: number): void {
+    if (generation !== this.sessionGeneration) {
+      throw new ChatGptOAuthServiceError(
+        'not_authenticated', 'Codex session changed. Request credentials again.'
+      );
+    }
   }
 
   private serializeCredentialOperation(action: () => Promise<void>): Promise<void> {
@@ -196,6 +220,8 @@ export class ChatGptOAuthService {
           if (controller.signal.aborted || this.activeAuthorization !== controller) {
             throw new DOMException('The operation was aborted.', 'AbortError');
           }
+          // Also invalidate acquisitions started while authorization was pending.
+          this.sessionGeneration += 1;
           await this.tokenStore.save(tokens);
         });
         return;
