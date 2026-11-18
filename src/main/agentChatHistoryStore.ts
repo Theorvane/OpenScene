@@ -38,6 +38,7 @@ export type RecordAgentChatInput = {
  */
 export class AgentChatHistoryStore {
   private readonly projects: ProjectStore;
+  private readonly operations = new Map<string, Promise<void>>();
 
   constructor(projects: ProjectStore) {
     this.projects = projects;
@@ -48,25 +49,26 @@ export class AgentChatHistoryStore {
     const title = deriveTitle(messages);
     if (title === null) return;
 
-    const directory = await this.projects.resolveDirectory(input.projectId);
-    const conversations = await readHistoryFile(directory);
-    const existing = conversations.find((conversation) => conversation.id === input.conversationId);
     const timestamp = now.toISOString();
-    const updated: AgentChatStoredConversation = {
-      id: input.conversationId,
-      title,
-      createdAt: existing?.createdAt ?? timestamp,
-      updatedAt: timestamp,
-      messages
-    };
-    const next = [updated, ...conversations.filter((conversation) => conversation.id !== input.conversationId)]
-      .slice(0, MAX_CONVERSATIONS_PER_PROJECT);
-    await writeHistoryFile(directory, next);
+    const conversationId = input.conversationId;
+    return this.enqueue(input.projectId, async (directory) => {
+      const conversations = await readHistoryFile(directory);
+      const existing = conversations.find((conversation) => conversation.id === conversationId);
+      const updated: AgentChatStoredConversation = {
+        id: conversationId,
+        title,
+        createdAt: existing?.createdAt ?? timestamp,
+        updatedAt: timestamp,
+        messages
+      };
+      const next = [updated, ...conversations.filter((conversation) => conversation.id !== conversationId)]
+        .slice(0, MAX_CONVERSATIONS_PER_PROJECT);
+      await writeHistoryFile(directory, next);
+    });
   }
 
   async list(projectId: string): Promise<readonly AgentChatStoredConversation[]> {
-    const directory = await this.projects.resolveDirectory(projectId);
-    return readHistoryFile(directory);
+    return this.enqueue(projectId, readHistoryFile);
   }
 
   async listAllProjects(): Promise<readonly AgentChatHistoryEntry[]> {
@@ -100,12 +102,27 @@ export class AgentChatHistoryStore {
 
   /** Forgets one conversation. Returns false when it was already gone. */
   async delete(projectId: string, conversationId: string): Promise<boolean> {
-    const directory = await this.projects.resolveDirectory(projectId);
-    const conversations = await readHistoryFile(directory);
-    const remaining = conversations.filter((conversation) => conversation.id !== conversationId);
-    if (remaining.length === conversations.length) return false;
-    await writeHistoryFile(directory, remaining);
-    return true;
+    return this.enqueue(projectId, async (directory) => {
+      const conversations = await readHistoryFile(directory);
+      const remaining = conversations.filter((conversation) => conversation.id !== conversationId);
+      if (remaining.length === conversations.length) return false;
+      await writeHistoryFile(directory, remaining);
+      return true;
+    });
+  }
+
+  private enqueue<T>(projectId: string, action: (directory: string) => Promise<T>): Promise<T> {
+    // Enqueue before resolving the directory: asynchronous path validation must
+    // not reorder IPC requests. Atomic rename alone cannot protect a read/modify/write.
+    const previous = this.operations.get(projectId) ?? Promise.resolve();
+    const next = previous.then(async () => action(await this.projects.resolveDirectory(projectId)));
+    // Keep failure visible to this caller, without poisoning subsequent requests.
+    const settled = next.then(() => undefined, () => undefined);
+    this.operations.set(projectId, settled);
+    void settled.then(() => {
+      if (this.operations.get(projectId) === settled) this.operations.delete(projectId);
+    });
+    return next;
   }
 }
 
