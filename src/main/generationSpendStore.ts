@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, rename, rm, type FileHandle } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 import { randomUUID } from 'node:crypto';
@@ -58,24 +58,39 @@ function isEntry(value: unknown): value is SpendEntry {
     typeof entry.id === 'string' &&
     (entry.state === undefined || entry.state === 'pending' || entry.state === 'charged') &&
     typeof entry.at === 'string' &&
+    Number.isFinite(Date.parse(entry.at)) &&
+    new Date(entry.at).toISOString() === entry.at &&
     (entry.kind === 'video' || entry.kind === 'image' || entry.kind === 'speech') &&
     typeof entry.modelId === 'string' &&
     typeof entry.basis === 'string' &&
-    (entry.amountUsd === undefined || (typeof entry.amountUsd === 'number' && Number.isFinite(entry.amountUsd)))
+    (entry.amountUsd === undefined || (typeof entry.amountUsd === 'number' && Number.isFinite(entry.amountUsd) && entry.amountUsd >= 0))
   );
 }
 
-/** A ledger that will not parse reads as empty: no record is not a spent record. */
+export class GenerationSpendStoreError extends Error {
+  override readonly name = 'GenerationSpendStoreError';
+}
+
+const INVALID_RECORD = 'The spending record is invalid. Restore or repair it before generating; it has not been reset.';
+
+/** Never silently discard a ceiling or charge from an existing record. */
 export function parseLedger(text: string): SpendLedger {
   try {
     const parsed: unknown = JSON.parse(text);
-    if (typeof parsed !== 'object' || parsed === null) return { entries: [] };
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      throw new GenerationSpendStoreError(INVALID_RECORD);
+    }
     const raw = parsed as { capUsd?: unknown; entries?: unknown };
-    const entries = Array.isArray(raw.entries) ? raw.entries.filter(isEntry) : [];
-    const capUsd = typeof raw.capUsd === 'number' && Number.isFinite(raw.capUsd) && raw.capUsd > 0 ? raw.capUsd : undefined;
-    return { entries, ...(capUsd === undefined ? {} : { capUsd }) };
-  } catch {
-    return { entries: [] };
+    if (!Array.isArray(raw.entries) || !raw.entries.every(isEntry) ||
+        (raw.capUsd !== undefined && (typeof raw.capUsd !== 'number' || !Number.isFinite(raw.capUsd)))) {
+      throw new GenerationSpendStoreError(INVALID_RECORD);
+    }
+    // Non-positive caps meant unlimited in older builds; preserve that meaning.
+    const capUsd = typeof raw.capUsd === 'number' && raw.capUsd > 0 ? raw.capUsd : undefined;
+    return { entries: raw.entries, ...(capUsd === undefined ? {} : { capUsd }) };
+  } catch (error) {
+    if (error instanceof GenerationSpendStoreError) throw error;
+    throw new GenerationSpendStoreError(INVALID_RECORD, { cause: error });
   }
 }
 
@@ -117,12 +132,16 @@ export class GenerationSpendStore {
   }
 
   async read(): Promise<SpendLedger> {
+    let text: string;
     try {
-      return parseLedger(await readFile(this.filePath, 'utf8'));
-    } catch {
-      // A machine that has never generated has no file, which is not an error.
-      return { entries: [] };
+      text = await readFile(this.filePath, 'utf8');
+    } catch (error) {
+      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+        return { entries: [] };
+      }
+      throw new GenerationSpendStoreError('Could not read the spending record. Generation is blocked until it is readable.', { cause: error });
     }
+    return parseLedger(text);
   }
 
   /** The month-to-date figure a ceiling is measured against. */
@@ -195,7 +214,27 @@ export class GenerationSpendStore {
   }
 
   private async write(ledger: SpendLedger): Promise<void> {
-    await mkdir(dirname(this.filePath), { recursive: true });
-    await writeFile(this.filePath, JSON.stringify(ledger, null, 2), 'utf8');
+    const directory = dirname(this.filePath);
+    await mkdir(directory, { recursive: true });
+    const temporaryPath = `${this.filePath}.${randomUUID()}.tmp`;
+    let temporary: FileHandle | undefined;
+    let created = false;
+    try {
+      // Readers see only complete snapshots, even if writing or syncing fails.
+      temporary = await open(temporaryPath, 'wx', 0o600);
+      created = true;
+      await temporary.writeFile(JSON.stringify(ledger, null, 2), 'utf8');
+      await temporary.sync();
+      await temporary.close();
+      temporary = undefined;
+      await rename(temporaryPath, this.filePath);
+    } catch (error) {
+      try {
+        await temporary?.close();
+      } finally {
+        if (created) await rm(temporaryPath, { force: true });
+      }
+      throw error;
+    }
   }
 }
