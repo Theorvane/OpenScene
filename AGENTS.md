@@ -131,3 +131,7 @@ Every change after the initial repository bootstrap follows this sequence. Never
 8. Promote vetted `dev` to release-only `main` through a separate reviewed release pull request. Verify `main` contains the release commit before publication.
 9. Store listings are filled in from `store/`, not written into the consoles from memory. One file per store per language — `store/app-store/whats-new.<locale>.txt`, `store/google-play/release-notes.<locale>.txt` — and both stores carry the same set of languages. The App Store text may not name another platform — App Review refuses it under Guideline 2.3.10, and `tests/storeReleaseNotes.test.ts` refuses it first.
 10. The version in `package.json` is the release decision. Bump it on `dev` before promoting: the push to `main` tags `v<version>`, creates a `release/v<version>` branch, packages macOS, Windows, and Linux on their own runners, and publishes the release with every artifact attached. Promoting without a bump republishes nothing, by design.
+
+## Local FFmpeg editing skill
+
+For authorized repository-side video/audio work, read `.agents/skills/ffmpeg-skill/SKILL.md` and `docs/ffmpeg-skill-integration.md`. The pinned upstream tools are for coding agents, not automatically registered in-app tools. Preserve originals, plan from measured metadata and verify outputs; do not install dependencies, download models or start MCP servers implicitly. The in-app workflow is adapted in `src/shared/ffmpegEditingWorkflow.ts` and respects each surface's existing tool/approval boundaries.

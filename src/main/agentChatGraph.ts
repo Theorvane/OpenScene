@@ -11,6 +11,7 @@ import {
 } from '@langchain/core/messages';
 import type { DynamicStructuredTool } from '@langchain/core/tools';
 import { Annotation, END, MemorySaver, START, StateGraph, interrupt } from '@langchain/langgraph';
+import { FFMPEG_EDITING_WORKFLOW } from '../shared/ffmpegEditingWorkflow';
 import { AGENT_SCOPE_POLICY } from '../shared/agentScope';
 import type { AgentToolCallProposal, AgentToolApprovalDecision } from '../shared/agentChat';
 import { parseEditAgentProjectContext, type EditAgentContextAsset, type EditAgentProjectContext } from '../shared/editAgentContext';
@@ -58,6 +59,8 @@ const AGENT_CHAT_SYSTEM_PROMPT =
   AGENT_SCOPE_POLICY +
   '\n\n' +
   EXISTING_FOOTAGE_EDIT_POLICY +
+  '\n\n' +
+  FFMPEG_EDITING_WORKFLOW +
   '\n\n' +
   GENERATION_COST_POLICY;
 
