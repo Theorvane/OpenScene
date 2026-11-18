@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
@@ -35,18 +35,18 @@ function parsePersistedLocations(raw: unknown): Record<string, string> {
 export class ProjectLocationRegistry {
   private readonly filePath: string;
   private locations: Record<string, string> | null = null;
+  private work: Promise<void> = Promise.resolve();
 
   constructor(filePath: string) {
     this.filePath = resolve(filePath);
   }
 
   async get(projectId: string): Promise<string | null> {
-    const locations = await this.load();
-    return locations[projectId] ?? null;
+    return this.enqueue(async () => (await this.load())[projectId] ?? null);
   }
 
   async entries(): Promise<ReadonlyMap<string, string>> {
-    return new Map(Object.entries(await this.load()));
+    return this.enqueue(async () => new Map(Object.entries(await this.load())));
   }
 
   async register(projectId: string, directory: string): Promise<void> {
@@ -56,17 +56,22 @@ export class ProjectLocationRegistry {
     if (!isAbsolute(directory)) {
       throw new ProjectStoreError('Project locations must be absolute directories.');
     }
-    const locations = await this.load();
-    locations[projectId] = resolve(directory);
-    await this.persist(locations);
+    const resolved = resolve(directory);
+    await this.enqueue(async () => {
+      const locations = await this.load();
+      await this.persist({ ...locations, [projectId]: resolved });
+    });
   }
 
   async unregister(projectId: string): Promise<boolean> {
-    const locations = await this.load();
-    if (locations[projectId] === undefined) return false;
-    delete locations[projectId];
-    await this.persist(locations);
-    return true;
+    return this.enqueue(async () => {
+      const locations = await this.load();
+      if (locations[projectId] === undefined) return false;
+      const candidate = { ...locations };
+      delete candidate[projectId];
+      await this.persist(candidate);
+      return true;
+    });
   }
 
   private async load(): Promise<Record<string, string>> {
@@ -85,11 +90,24 @@ export class ProjectLocationRegistry {
   }
 
   private async persist(locations: Record<string, string>): Promise<void> {
-    this.locations = locations;
     const payload: PersistedLocations = { schemaVersion: LOCATIONS_SCHEMA_VERSION, locations };
     await mkdir(dirname(this.filePath), { recursive: true, mode: 0o700 });
     const temporaryFile = join(dirname(this.filePath), `.project-locations.${randomUUID()}.tmp`);
-    await writeFile(temporaryFile, `${JSON.stringify(payload, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
-    await rename(temporaryFile, this.filePath);
+    try {
+      await writeFile(temporaryFile, `${JSON.stringify(payload, null, 2)}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+      await rename(temporaryFile, this.filePath);
+      this.locations = locations;
+    } catch (error) {
+      await rm(temporaryFile, { force: true });
+      throw error;
+    }
+  }
+
+  // One registry is shared by desktop project services. Queue the entire
+  // transaction, including cold loads and reads, not just the final rename.
+  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.work.then(operation);
+    this.work = result.then(() => undefined, () => undefined);
+    return result;
   }
 }
