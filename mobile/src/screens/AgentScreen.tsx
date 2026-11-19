@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 
 import { LLM_PROVIDERS, POPULAR_LLM_PROVIDER_IDS, getLlmCatalogProvider } from '@openvideo/shared/llmProviders';
+import { FFMPEG_EDITING_WORKFLOW } from '@openvideo/shared/ffmpegEditingWorkflow';
 import { AGENT_SCOPE_POLICY } from '@openvideo/shared/agentScope';
 
 import { readSlot } from '../lib/credentials';
@@ -71,8 +72,9 @@ const SYSTEM_PROMPT =
   '\n\n' +
   CAPABILITIES +
   '\n\n' +
-  // The same scope both surfaces answer to, from the shared core rather than
-  // written twice and left to drift.
+  // Shared editing workflow and scope; neither surface maintains its own copy.
+  FFMPEG_EDITING_WORKFLOW +
+  '\n\n' +
   AGENT_SCOPE_POLICY;
 
 type Pending = { readonly proposal: ToolCallProposal; readonly cost: string };

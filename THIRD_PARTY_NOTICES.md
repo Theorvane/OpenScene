@@ -75,3 +75,35 @@ For distribution, choose and document one of these paths:
 - mobile workspace: 18 advisories (11 moderate, 7 high).
 
 No automatic `npm audit fix` was run. Each advisory must be triaged on an issue-scoped branch because forced upgrades may change Electron, Expo or native SDK behavior.
+
+## ffmpeg-skill repository tools and workflow
+
+- Upstream: https://github.com/kajisho5/ffmpeg-skill
+- Version: 3.13.1; commit: 3145261a1c19f399b9520fad7fdac741871e1426
+- Copyright: 2026 kajisho5
+- License: MIT; complete notice: `.agents/skills/ffmpeg-skill/LICENSE`
+- Snapshot provenance and file hashes: `.agents/skills/ffmpeg-skill/UPSTREAM.json`
+
+The repository includes the Python tools and documentation for coding-agent use. The packaged app uses only a compact adapted editing workflow, not the upstream scripts or MCP server. See `docs/ffmpeg-skill-integration.md`.
+
+MIT License
+
+Copyright (c) 2026 kajisho5
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

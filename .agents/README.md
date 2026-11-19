@@ -10,3 +10,5 @@ Files:
 - `docs.md`: documentation style and scope notes.
 
 Keep these files short. They are guidance, not a second README.
+
+- `skills/ffmpeg-skill/SKILL.md`: pinned upstream local FFmpeg editing skill; integration/capability boundaries in `docs/ffmpeg-skill-integration.md`.
