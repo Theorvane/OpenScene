@@ -74,7 +74,8 @@ export class TranscriptionService {
 
   private update(jobId: string, patch: Partial<TranscriptionJob>): void {
     const current = this.jobs.get(jobId);
-    if (current !== undefined) this.jobs.set(jobId, { ...current, ...patch });
+    // Cancellation is terminal, including late progress/error callbacks.
+    if (current !== undefined && current.status !== 'cancelled') this.jobs.set(jobId, { ...current, ...patch });
   }
 
   private log(jobId: string, event: string, details: Readonly<Record<string, unknown>> = {}, level: 'info' | 'error' = 'info'): void {
@@ -91,16 +92,20 @@ export class TranscriptionService {
     let source: OpenedAssetPlaybackSource | null = null;
     let heartbeat: NodeJS.Timeout | undefined;
     try {
+      controller.signal.throwIfAborted();
       const asset = await this.dependencies.getAsset(input.projectId, input.assetId);
+      controller.signal.throwIfAborted();
       if (asset === null) throw new Error('The selected source asset is no longer available.');
       if (asset.kind !== 'audio' && asset.kind !== 'video') throw new Error('Automatic subtitles require an audio or video asset.');
       const [ffmpeg, whisper] = await Promise.all([
         (this.dependencies.discoverFfmpeg ?? discoverFfmpeg)(),
         (this.dependencies.resolveRuntime ?? resolveWhisperCppRuntime)()
       ]);
+      controller.signal.throwIfAborted();
       if (ffmpeg.kind === 'unavailable') throw new Error(`${ffmpeg.reason} Configure VIDEO_TOOL_FFMPEG_PATH and restart OpenScene.`);
       if (!whisper.status.ready || whisper.runtime === undefined) throw new Error(whisper.status.reason ?? 'whisper.cpp is not ready.');
       source = await this.dependencies.openAsset(input.projectId, input.assetId);
+      controller.signal.throwIfAborted();
       if (source === null) throw new Error('The selected source file is no longer available.');
       this.log(jobId, 'runtime.ready', {
         executable: whisper.runtime.executableName,
@@ -121,10 +126,13 @@ export class TranscriptionService {
         language: input.language,
         signal: controller.signal,
         onStage: (status) => {
+          if (controller.signal.aborted) return;
           this.update(jobId, { status, updatedAt: new Date().toISOString() });
           this.log(jobId, `process.${status}`);
         },
-        onProgress: (progressPercent) => this.update(jobId, { progressPercent, updatedAt: new Date().toISOString() })
+        onProgress: (progressPercent) => {
+          if (!controller.signal.aborted) this.update(jobId, { progressPercent, updatedAt: new Date().toISOString() });
+        }
       });
       if (controller.signal.aborted) return;
       const completedAt = new Date().toISOString();

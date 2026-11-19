@@ -222,7 +222,9 @@ export async function transcribeOpenedAsset(input: {
   const normalizedPath = join(temporaryDirectory, 'normalized.wav');
   const outputPrefix = join(temporaryDirectory, 'transcript');
   try {
-    await pipeline(input.source.file.createReadStream({ autoClose: false }), createWriteStream(sourcePath, { flags: 'wx', mode: 0o600 }));
+    input.signal.throwIfAborted();
+    await pipeline(input.source.file.createReadStream({ autoClose: false }), createWriteStream(sourcePath, { flags: 'wx', mode: 0o600 }), { signal: input.signal });
+    input.signal.throwIfAborted();
     await input.source.file.close();
     input.onStage('normalizing');
     await runProcess({
