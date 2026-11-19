@@ -1,5 +1,6 @@
 import { safeStorage } from 'electron';
-import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { mkdir, open, readFile, rename, rm, unlink, type FileHandle } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
 
@@ -77,6 +78,8 @@ function publicStatus(record: BrowserSessionSecretRecord | null, providerId: Bro
 }
 
 export class BrowserSessionVault {
+  private work: Promise<unknown> = Promise.resolve();
+
   constructor(
     private readonly directory: string,
     private readonly encryption: SafeStorageAdapter = safeStorage
@@ -110,23 +113,55 @@ export class BrowserSessionVault {
   }
 
   async save(recordInput: BrowserSessionSecretRecord): Promise<BrowserSessionStatus> {
-    this.requireEncryption();
+    // Parse before queueing: the caller cannot mutate the deferred snapshot.
     const record = browserSessionRecordSchema.parse(recordInput);
     assertRecordPolicy(record);
-    const encrypted = this.encryption.encryptString(JSON.stringify(record));
-    await mkdir(this.directory, { recursive: true });
-    await writeFile(this.filePath(record.providerId), encrypted);
-    return publicStatus(record, record.providerId, new Date());
+    return this.enqueue(async () => {
+      this.requireEncryption();
+      const encrypted = this.encryption.encryptString(JSON.stringify(record));
+      await mkdir(this.directory, { recursive: true, mode: 0o700 });
+      const temporaryPath = join(this.directory, `.encrypted_browser_session_${record.providerId}.${randomUUID()}.tmp`);
+      let temporary: FileHandle | undefined;
+      let created = false;
+      try {
+        // Publish only complete ciphertext; never truncate the committed slot.
+        temporary = await open(temporaryPath, 'wx', 0o600);
+        created = true;
+        await temporary.writeFile(encrypted);
+        await temporary.sync();
+        await temporary.close();
+        temporary = undefined;
+        await rename(temporaryPath, this.filePath(record.providerId));
+      } catch (error) {
+        try {
+          await temporary?.close();
+        } finally {
+          if (created) await rm(temporaryPath, { force: true });
+        }
+        throw error;
+      }
+      return publicStatus(record, record.providerId, new Date());
+    });
   }
 
-  async clear(providerId: BrowserSessionProviderId): Promise<void> {
-    try {
-      await unlink(this.filePath(providerId));
-    } catch (error) {
-      if (!isMissingFile(error)) {
-        throw new BrowserSessionVaultError('Could not remove encrypted browser session.', { cause: error });
+  clear(providerId: BrowserSessionProviderId): Promise<void> {
+    return this.enqueue(async () => {
+      try {
+        await unlink(this.filePath(providerId));
+      } catch (error) {
+        if (!isMissingFile(error)) {
+          throw new BrowserSessionVaultError('Could not remove encrypted browser session.', { cause: error });
+        }
       }
-    }
+    });
+  }
+
+  private enqueue<T>(action: () => Promise<T>): Promise<T> {
+    // The service owns one vault. Clear must follow prior saves; a failed
+    // mutation must not prevent later saves or clears from running.
+    const operation = this.work.then(action);
+    this.work = operation.then(() => undefined, () => undefined);
+    return operation;
   }
 
   private filePath(providerId: BrowserSessionProviderId): string {
