@@ -302,7 +302,7 @@ export class BrowserSessionService {
           providerId,
           kind: 'needs_user_action',
           origin: policy.applicationOrigin,
-          reason: 'A sign-in window or background provider operation is active.'
+          reason: 'A sign-in window, background provider operation, or session cleanup is active.'
         } satisfies BrowserSessionStatus;
       }
       return this.vault.getStatus(providerId);
@@ -316,7 +316,7 @@ export class BrowserSessionService {
         providerId,
         kind: 'needs_user_action',
         origin: policy.applicationOrigin,
-        reason: 'A sign-in window is already open.'
+        reason: 'A sign-in window, background provider operation, or session cleanup is already active.'
       };
     }
 
@@ -427,7 +427,8 @@ export class BrowserSessionService {
         };
       }
 
-      return this.vault.save({
+      // Keep provider ownership until persistence settles, including failures.
+      return await this.vault.save({
         version: 1,
         providerId,
         storedAt: new Date().toISOString(),
@@ -928,11 +929,18 @@ export class BrowserSessionService {
         providerId,
         kind: 'needs_user_action',
         origin: policy.applicationOrigin,
-        reason: 'Close the active sign-in window before clearing this session.'
+        reason: 'Wait for the active sign-in, background operation, or session cleanup before clearing this session.'
       };
     }
-    await this.vault.clear(providerId);
-    await session.fromPartition(partitionFor(providerId), { cache: false }).clearStorageData();
-    return this.vault.getStatus(providerId);
+    // Claim ownership before the first await so new operations cannot restore
+    // or persist cookies halfway through logout. Other providers stay independent.
+    this.activeProviders.add(providerId);
+    try {
+      await this.vault.clear(providerId);
+      await session.fromPartition(partitionFor(providerId), { cache: false }).clearStorageData();
+      return await this.vault.getStatus(providerId);
+    } finally {
+      this.activeProviders.delete(providerId);
+    }
   }
 }
