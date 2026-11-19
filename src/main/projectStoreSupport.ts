@@ -1,5 +1,5 @@
 import { constants } from 'node:fs';
-import { lstat, open, realpath, rename, rm, type FileHandle } from 'node:fs/promises';
+import { link, lstat, open, realpath, rename, rm, type FileHandle } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
@@ -143,7 +143,11 @@ export async function writeProjectSnapshot(rootDirectory: string, snapshot: Loca
   return writeProjectSnapshotAtDirectory(projectDirectory(rootDirectory, snapshot.id), snapshot);
 }
 
-export async function writeProjectSnapshotAtDirectory(projectDirectoryPath: string, snapshot: LocalProjectSnapshot): Promise<void> {
+export async function writeProjectSnapshotAtDirectory(
+  projectDirectoryPath: string,
+  snapshot: LocalProjectSnapshot,
+  publication: 'replace' | 'create' = 'replace'
+): Promise<void> {
   const directory = resolve(projectDirectoryPath);
   const projectFile = join(directory, PROJECT_FILE_NAME);
   const temporaryFile = join(directory, `.${PROJECT_FILE_NAME}.${randomUUID()}.tmp`);
@@ -179,7 +183,15 @@ export async function writeProjectSnapshotAtDirectory(projectDirectoryPath: stri
     ) {
       throw new ProjectStoreError('Project snapshot changed before it could be published.');
     }
-    await rename(temporaryFile, projectFile);
+    if (publication === 'create') {
+      // A same-directory hard link publishes complete bytes without replacing
+      // any existing entry (including a dangling symlink). Never fall back to
+      // replacing rename when the filesystem does not support this operation.
+      await link(temporaryFile, projectFile);
+      await rm(temporaryFile, { force: true });
+    } else {
+      await rename(temporaryFile, projectFile);
+    }
   } catch (error) {
     await temporaryFileHandle?.close();
     await rm(temporaryFile, { force: true });
