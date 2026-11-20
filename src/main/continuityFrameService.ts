@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, extname, join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
@@ -14,7 +14,7 @@ import { discoverFfmpeg, type FfmpegDiscoveryResult } from './ffmpegDiscovery';
 import { startFfmpegExportProcess, type FfmpegExecution } from './ffmpegExportProcess';
 import { fail, ok } from './ipcResponses';
 import type { ProjectStore } from './projectStore';
-import { REFERENCE_IMAGE_MAX_BYTES } from './referenceImagePicker';
+import { readBoundedReferenceImage, readBoundedReferenceImageHandle, REFERENCE_IMAGE_MAX_BYTES, ReferenceImageTooLargeError } from './boundedReferenceImage';
 
 const FRAME_EXTRACTION_TIMEOUT_MS = 60_000;
 const FRAME_PROCESS_SETTLE_TIMEOUT_MS = 2_500;
@@ -189,7 +189,7 @@ export class ContinuityFrameService {
         });
         try {
           await this.runExtraction({ executablePath: runtime.executablePath, sourcePath: stagedSourcePath, outputPath, sourceTimeMs: candidateTimeMs });
-          const candidateBytes = await readFile(outputPath);
+          const candidateBytes = await readBoundedReferenceImage(outputPath);
           if (isJpeg(candidateBytes) && candidateBytes.byteLength <= REFERENCE_IMAGE_MAX_BYTES) {
             sourceTimeMs = candidateTimeMs;
             bytes = candidateBytes;
@@ -259,8 +259,11 @@ export class ContinuityFrameService {
       if (source.byteLength > REFERENCE_IMAGE_MAX_BYTES) {
         return fail('INVALID_INPUT', `The saved project image is larger than ${REFERENCE_IMAGE_MAX_BYTES / (1024 * 1024)}MB.`);
       }
-      return referenceFromBytes(asset, await source.file.readFile());
-    } catch {
+      return referenceFromBytes(asset, await readBoundedReferenceImageHandle(source.file));
+    } catch (error) {
+      if (error instanceof ReferenceImageTooLargeError) {
+        return fail('INVALID_INPUT', `The saved project image is larger than ${REFERENCE_IMAGE_MAX_BYTES / (1024 * 1024)}MB.`);
+      }
       return fail('ASSET_NOT_FOUND', 'The saved project image could not be read.');
     } finally {
       await source?.file.close().catch(() => undefined);
