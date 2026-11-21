@@ -6,7 +6,7 @@
 
 - [ComfyUI 작업 공간 안내](https://docs.comfy.org/interface/overview): 왼쪽 라이브러리, 중앙 그래프, 선택 대상의 보조 패널, 별도의 캔버스 조작 기능을 참고했다.
 - [Concat](https://github.com/jub0t/Concat)과 공개 편집 화면: 미디어·미리보기·속성·멀티트랙 편집을 구분하는 전통적 편집기 구성을 참고했다. Concat 코드나 디자인 자산은 가져오지 않았다.
-- [REA 조사 기록](rea-editor-evidence.md): 스킬과 CLI를 실제 사용했으나 Windows 정책이 네이티브 모듈을 차단했다. REA의 의미 분석 결과를 확보한 것으로 주장하지 않는다. 현재 화면에 대한 관찰은 소스 읽기와 Electron 실행 검증에 근거한다.
+- [REA 조사 기록](rea-editor-evidence.md): Windows의 네이티브 실행 제한을 유지하고 격리된 Linux 환경에서 REA 분석을 완료했다. 빌드 아티팩트의 메뉴 생성·IPC 노출 경로와 실제 Electron 메뉴 트리를 대조했다. 렌더러 번들 전체의 의미 분석 한계는 해당 기록에 구분했다.
 
 ## 구현된 메뉴 트리
 
