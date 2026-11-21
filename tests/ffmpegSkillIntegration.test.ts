@@ -50,12 +50,14 @@ describe('pinned ffmpeg-skill integration', () => {
     expect(systemText).toContain(FFMPEG_EDITING_WORKFLOW);
   });
 
-  it('shares the same policy with mobile without changing its capabilities', () => {
+  it('shares the same policy with mobile while keeping editing behind tool approval', () => {
     const mobile = read('mobile/src/screens/AgentScreen.tsx');
     expect(mobile).toContain('@openvideo/shared/ffmpegEditingWorkflow');
     expect(mobile).toMatch(/FFMPEG_EDITING_WORKFLOW\s*\+\s*'\\n\\n'\s*\+\s*AGENT_SCOPE_POLICY/);
-    expect(mobile).toContain('You cannot edit the timeline');
-    expect(mobile).toContain('You cannot export');
+    expect(mobile).toContain('edit_project');
+    expect(mobile).toContain('export_project');
+    expect(mobile).toContain('approval');
+    expect(mobile).toContain('Video frame and speech inspection through chat are available in the desktop Edit Agent');
     expect(FFMPEG_EDITING_WORKFLOW).toContain('42 tools are NOT registered in-app tools');
     expect(FFMPEG_EDITING_WORKFLOW).toContain('An export job ID means started, not completed or verified');
     expect(FFMPEG_EDITING_WORKFLOW).toContain('respecting every approval gate');

@@ -1,0 +1,76 @@
+{
+  "after": {
+    "id": "ev_8a07d0cc0e1554dba015fa1ddd6daf696b3e03f5b5b740310f7656d842e843f0",
+    "sha": "de76351f27169acd32d121b5816857c6b8727c1cb6888a88802d61836f07bf17",
+    "statistics": {
+      "findings": 196,
+      "invalid_utf8_files": 0,
+      "modules": 0,
+      "nested_asar_containers": 0,
+      "parse_failures": 0,
+      "parsed_javascript_files": 3,
+      "relevant_files": 4,
+      "skipped_javascript_files": 0,
+      "text_bytes_read": 2889608,
+      "visited_ast_nodes": 153879
+    },
+    "summary": {
+      "browser_windows": 1,
+      "context_bridge_apis": 1,
+      "electron_semantics": "partial",
+      "explicit_web_preferences": 6,
+      "exposed_api_members": 58,
+      "ipc": {
+        "ambiguous_renderer_transmissions": 55,
+        "dynamic_channel_operations": 10,
+        "literal_channels": 58,
+        "main_handlers": 7,
+        "operations": 68,
+        "paired_renderer_transmissions": 0,
+        "renderer_listeners": 6,
+        "renderer_transmissions": 55,
+        "unpaired_literal_renderer_transmissions": 0
+      },
+      "native_addon_bindings": 0,
+      "preload_entrypoints": 0,
+      "protocol_registrations": 2,
+      "resolved_native_addon_bindings": 0,
+      "resolved_utility_entrypoints": 0,
+      "sender_validation_observations": 0,
+      "utility_processes": 0,
+      "v8_cached_data_compilations": 0
+    },
+    "semantic_nodes": 11120
+  },
+  "trace": {
+    "id": "ev_db7862527eacdf91d668249c4cf64c08c9f6f103c2750426417ca4fbc9da3d67",
+    "summary": {
+      "matched_seeds": 1,
+      "traced_nodes": 3,
+      "traced_edges": 2,
+      "terminal_paths": 1,
+      "native_handoffs": 0,
+      "observed_facts": 0,
+      "inferred_facts": 5,
+      "unknown_facts": 0,
+      "unavailable_facts": 0
+    }
+  },
+  "comparison": {
+    "id": "ev_e04dfc3968e77c5babf04c4bc99acc8c736f53bed33b88197ec1122ddefab11a",
+    "summary": {
+      "unchanged": 0,
+      "added": 0,
+      "removed": 0,
+      "changed": 2,
+      "unknown": 407
+    },
+    "coverage": {
+      "left_graph_status": "partial",
+      "right_graph_status": "partial",
+      "left_graph_omitted_count": null,
+      "right_graph_omitted_count": null,
+      "status": "partial"
+    }
+  }
+}

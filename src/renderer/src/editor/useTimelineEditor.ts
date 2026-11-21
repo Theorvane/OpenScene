@@ -1,20 +1,27 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import type { AiProjectDocument } from '../../../shared/aiProjectDomain';
+import { applyTitleAppearanceToAutomaticCaptions } from '../../../shared/captionStyle';
+import { detachVideoAudioOnTimeline } from '../../../shared/detachVideoAudio';
+import type { NarrationPlan } from '../../../shared/narrationPlan';
+import { applySubtitleCues } from '../../../shared/subtitleWorkflow';
+import { clipDurationMs, clipTimelineEndMs } from '../../../shared/timelineClipGeometry';
+import { isValidClipEffects } from '../../../shared/timelineEffects';
 import {
   addTrack,
   addTrackBeside,
-  removeTrack,
-  renameTrack,
   deleteClip,
   moveClip,
   placeClip,
+  removeTrack,
+  renameTrack,
   splitClip,
-  trimClipLeft,
   timelineDurationMs,
+  trimClipLeft,
   trimClipRight,
   updateClipEffects
 } from '../../../shared/timelineLogic';
-import { isValidClipEffects } from '../../../shared/timelineEffects';
+import { addTitle, removeTitle, titleAt, updateTitle } from '../../../shared/timelineTitleLogic';
 import {
   cutNearest,
   removeTransitionAtCut,
@@ -22,32 +29,26 @@ import {
   transitionForCut,
   type TimelineCut
 } from '../../../shared/timelineTransitionLogic';
-import { DEFAULT_CLIP_EFFECTS } from '../../../shared/timelineTypes';
 import type {
   ClipEffects,
   LocalProjectSnapshot,
   LocalProjectSummary,
-  MediaAsset,
   MediaKind,
   TimelineDocument,
   TransitionType
 } from '../../../shared/timelineTypes';
-import { clipDurationMs, clipTimelineEndMs } from '../../../shared/timelineClipGeometry';
-import { addTitle, removeTitle, titleAt, updateTitle } from '../../../shared/timelineTitleLogic';
-import { applyTitleAppearanceToAutomaticCaptions } from '../../../shared/captionStyle';
-import { applySubtitleCues } from '../../../shared/subtitleWorkflow';
-import type { NarrationPlan } from '../../../shared/narrationPlan';
+import { DEFAULT_CLIP_EFFECTS } from '../../../shared/timelineTypes';
 import { applyTranscriptionCues, type TranscriptionDraft } from '../../../shared/transcription';
+import { connectVideoClips } from '../../../shared/videoCanvas';
+import { applyCanvasBlock } from '../../../shared/videoCanvasBlocks';
+import { EMPTY_CANVAS_GRAPH, parseVideoCanvasGraph, type VideoCanvasGraph } from '../../../shared/videoCanvasGraph';
+import { applyEditorOperations } from '../../../shared/editorOperations';
 import { errorMessage, type StatusMessage } from '../appTypes';
 import { createTimelineHistory, pushTimelineHistory, redoTimelineHistory, undoTimelineHistory, type TimelineHistory } from './editorTimelineHistory';
-import { clampPlayheadMs, findClipSelection, findFirstCompatibleTrack, insertionStartForTrack, mediaAssetReady, nextTrackName, placeReadyAssetOnTimeline } from './editorTimelineView';
+import { findClipSelection, findFirstCompatibleTrack, insertionStartForTrack, mediaAssetReady, nextTrackName, placeReadyAssetOnTimeline } from './editorTimelineView';
 import { metadataProbeFailureMessage } from './mediaLoadFailures';
 import { useProjectAssetImports } from './useProjectAssetImports';
 import { useTimelinePlayback } from './useTimelinePlayback';
-import type { AiProjectDocument } from '../../../shared/aiProjectDomain';
-import { detachVideoAudioOnTimeline } from '../../../shared/detachVideoAudio';
-import { assembleApprovedProductionCut, buildApprovedProductionAssemblyPlan } from '../../../shared/productionWorkflow';
-import { pipelineBaseRequest } from '../../../shared/writerPipeline';
 
 type TimelineUpdate = (timeline: TimelineDocument) => TimelineDocument | null;
 
@@ -218,7 +219,7 @@ export function useTimelineEditor() {
     setStatusMessage({ tone: 'danger', text: errorMessage(response.error) });
   }, [invokeWhileBusy, project, refreshProjects, setLoadedProject]);
 
-  const { importAssets, importRecordingResult, importAiResult } = useProjectAssetImports({ project, setIsBusy, setProject, setSelectedAssetId, setStatusMessage });
+  const { importAssets, importRecordingResult } = useProjectAssetImports({ project, setIsBusy, setProject, setSelectedAssetId, setStatusMessage });
 
   const replaceTimeline = useCallback((update: TimelineUpdate, successText: string, rejectionText?: string): TimelineDocument | null => {
     if (project === null) return null;
@@ -284,10 +285,12 @@ export function useTimelineEditor() {
     a rule that refuses silently is the thing this editor keeps being caught by.
   */
   const addTitleAtPlayhead = useCallback(() => {
-    replaceTimeline(
-      (timeline) => addTitle(timeline, { id: createOpaqueId('title'), atMs: playback.playheadMs }),
+    const id = createOpaqueId('title');
+    const result = replaceTimeline(
+      (timeline) => addTitle(timeline, { id, atMs: playback.playheadMs }),
       'Added a title.'
     );
+    return result === null ? null : id;
   }, [playback.playheadMs, replaceTimeline]);
 
   const editTitle = useCallback(
@@ -370,42 +373,6 @@ export function useTimelineEditor() {
     setSelectedAssetId(asset.id);
     setSelectedClipId(placement.clip.id);
     setSelectedClipIds([placement.clip.id]);
-    return true;
-  }, [playback, project, replaceTimeline]);
-
-  const assembleApprovedWriterShots = useCallback((): boolean => {
-    if (project === null) return false;
-    const plan = buildApprovedProductionAssemblyPlan(project.ai, project.assets.map((asset) => ({
-      id: asset.id,
-      kind: asset.kind,
-      durationMs: asset.metadata?.durationMs ?? null
-    })));
-    if (!plan.ok) {
-      setStatusMessage({ tone: 'warning', text: plan.reason });
-      return false;
-    }
-    const target = project.timeline.tracks.find((track) => track.kind === 'video');
-    if (target === undefined) {
-      setStatusMessage({ tone: 'warning', text: 'Add a video track before assembling the approved production cut.' });
-      return false;
-    }
-    const assembled = assembleApprovedProductionCut({
-      timeline: project.timeline,
-      plan,
-      targetTrackId: target.id,
-      allowExistingPrefix: pipelineBaseRequest(project.ai.writerPipeline)?.productionScope !== undefined,
-      clipIdForShot: () => createOpaqueId('production-clip')
-    });
-    if (!assembled.ok) {
-      setStatusMessage({ tone: 'warning', text: assembled.reason });
-      return false;
-    }
-    const timeline = replaceTimeline(
-      () => assembled.timeline,
-      `Assembled ${plan.shots.length} approved Writer shot(s) in production order.`
-    );
-    if (timeline === null) return false;
-    playback.setPlayheadMs(Math.max(0, timelineDurationMs(timeline) - plan.totalDurationMs), timeline);
     return true;
   }, [playback, project, replaceTimeline]);
 
@@ -760,11 +727,34 @@ export function useTimelineEditor() {
   }, [project, refreshProjects]);
 
   return {
+    applyEditingOperations: (operations: readonly unknown[]): boolean => {
+      if (project === null) return false;
+      const result = applyEditorOperations(project.timeline, operations, project.assets);
+      if (!result.success) { setStatusMessage({ tone: 'warning', text: result.error }); return false; }
+      return replaceTimeline(() => result.timeline, 'Workspace edits applied. Use Undo to restore.') !== null;
+    },
+    updateCanvasGraph: (graph: VideoCanvasGraph) => replaceTimeline((timeline) => {
+      const parsed = parseVideoCanvasGraph(graph);
+      return parsed === null ? null : { ...timeline, canvas: parsed };
+    }, 'Canvas workflow updated.'),
+    applyCanvasBlock: (blockId: string): boolean => {
+      if (project === null) return false;
+      const result = applyCanvasBlock(project.timeline, project.timeline.canvas ?? EMPTY_CANVAS_GRAPH, blockId);
+      if (!result.success) {
+        setStatusMessage({ tone: 'warning', text: result.error });
+        return false;
+      }
+      return replaceTimeline(() => result.timeline, 'Block output applied to the timeline.') !== null;
+    },
+    connectVideoClips: (fromId: string, toId: string) => replaceTimeline(
+      (timeline) => connectVideoClips(timeline, fromId, toId),
+      'Connected clips. The video track now plays continuously in the new order.'
+    ),
     addTimelineTrack, removeTimelineTrack, renameTimelineTrack, insertTimelineTrack, createProject, deleteCurrentProject, deleteSelectedClip, duplicateSelectedClip, hasUnsavedTimeline, importAssets,
-    importRecordingResult, importAiResult, isBusy, metadataProbeFailuresByAssetId, metadataProbeRetryRevisionsByAssetId, moveSelectedClip, newProjectName,
+    importRecordingResult, isBusy, metadataProbeFailuresByAssetId, metadataProbeRetryRevisionsByAssetId, moveSelectedClip, newProjectName,
     cutAtPlayhead, transitionAtPlayhead, setTransitionAtPlayhead, removeTransitionAtPlayhead,
     addTitleAtPlayhead, editTitle, deleteTitle, applyTitleStyleToAutomaticCaptions, titleAtPlayhead, applyNarrationSubtitles, applyTranscriptionSubtitles,
-    openProject, openProjectFolder, renameProject, placeSelectedAsset, placeAssetOnTimeline, assembleApprovedWriterShots, project, projects, refreshProjects, reportMetadataProbeFailure, retryAssetMetadataProbe, saveTimeline, saveAiProjectDocument,
+    openProject, openProjectFolder, renameProject, placeSelectedAsset, placeAssetOnTimeline, project, projects, refreshProjects, reportMetadataProbeFailure, retryAssetMetadataProbe, saveTimeline, saveAiProjectDocument,
     clearSelection, goToTimelineEnd, goToTimelineStart, selectAllClips, selectedAsset, selectedAssetId, selectedClip, selectedClipId, selectedClipIds,
     setNewProjectName, setSelectedAssetId, setSelectedClipId: selectClip,
     splitSelectedClip, statusMessage, trimSelectedClip, updateAssetMetadata, updateSelectedClipEffects, detachSelectedClipAudio,

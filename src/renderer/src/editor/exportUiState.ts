@@ -149,7 +149,7 @@ export function getExportStatusView(input: ExportUiInput): ExportStatusView {
         };
       }
       return {
-        detail: review === undefined || review.checked ? ready : `${ready} ${exportReviewSummary(review)}`,
+        detail: review === undefined ? ready : `${ready} ${exportReviewSummary(review)}`,
         progressValue: 100,
         title: 'Export complete',
         tone: 'success'

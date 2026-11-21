@@ -1,6 +1,6 @@
 import { useEffect, useState, type CSSProperties, type ReactElement, type ReactNode } from 'react';
 import { EditorWorkspace } from '../../../../external/opencut/apps/web/src/components/editor/editor-workspace';
-import { EditorHeader } from '../../../../external/opencut/apps/web/src/components/editor/editor-header';
+import { EditorHeader } from './EditorWorkbenchHeader';
 
 import { AssetMetadataProbeHost } from './AssetMetadataProbeHost';
 import { EDITOR_INSPECTOR_DOCK_TAB_IDS, getDefaultEditorDockTabs, getDefaultEditorLeftDockTabId } from './dockTabs';
@@ -40,11 +40,15 @@ import { useAgentChat } from '../AgentChatContext';
 import { useTheme } from '../ThemeProvider';
 import { THEME_PRESETS, type ThemePresetId } from '../theme';
 import type { TabDefinition } from '../ui';
+import { VideoConnectionCanvas } from './VideoConnectionCanvas';
+import './videoCanvas.css';
+import './editorWorkbench.css';
 
 export type InspectorTabId = (typeof EDITOR_INSPECTOR_DOCK_TAB_IDS)[number];
 
 type TimelineEditorProps = {
   readonly editor: TimelineEditorController;
+  readonly onProjectSettings?: () => void;
 };
 
 const INSPECTOR_TAB_LABELS: Readonly<Record<InspectorTabId, string>> = {
@@ -57,7 +61,7 @@ function getInspectorTabs(editor: TimelineEditorController): readonly TabDefinit
 
   return EDITOR_INSPECTOR_DOCK_TAB_IDS.map((tabId) => {
     const dockTab = dockTabs?.find((tab) => tab.id === tabId);
-    const label = dockTab?.label ?? INSPECTOR_TAB_LABELS[tabId];
+    const label = tabId === 'selection' ? 'Clip' : dockTab?.label ?? INSPECTOR_TAB_LABELS[tabId];
     // Without a project there is nothing to inspect at all.
     const disabled = editor.project === null ? true : dockTab?.disabled === true;
 
@@ -95,13 +99,50 @@ function getDefaultInspectorTabId({ selectedAssetId, selectedClipId }: Inspector
   return 'selection';
 }
 
-export function TimelineEditor({ editor }: TimelineEditorProps): ReactElement {
+export function TimelineEditor({ editor, onProjectSettings }: TimelineEditorProps): ReactElement {
+  const [editorView, setEditorView] = useState<'timeline' | 'canvas'>(() => {
+    try {
+      return localStorage.getItem('openvideo-editor-view') === 'canvas' ? 'canvas' : 'timeline';
+    } catch {
+      return 'timeline';
+    }
+  });
+  const canvasMode = editorView === 'canvas';
+  useEffect(() => {
+    const closeOutside = (event: globalThis.PointerEvent) => {
+      document.querySelectorAll<HTMLDetailsElement>('details.workbench-menu[open]').forEach(menu => {
+        if (!menu.contains(event.target as Node)) menu.open = false;
+      });
+    };
+    const closeWithEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      document.querySelectorAll<HTMLDetailsElement>('details.workbench-menu[open]').forEach(menu => {
+        if (menu.contains(document.activeElement)) menu.querySelector('summary')?.focus();
+        menu.open = false;
+      });
+    };
+    document.addEventListener('pointerdown', closeOutside);
+    document.addEventListener('keydown', closeWithEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeOutside);
+      document.removeEventListener('keydown', closeWithEscape);
+    };
+  }, []);
   const { isBusy: isAgentBusy } = useAgentChat();
   const { mode: themeMode, preset, setPreset, toggleTheme } = useTheme();
   const [leftDockTabId, setLeftDockTabId] = useState<EditorLeftDockTabId>('project');
   const [inspectorTabId, setInspectorTabId] = useState<InspectorTabId>('selection');
   const { layoutPreference, updateLayoutPreference } = useEditorLayoutPreference();
   const { shortcutPreferences } = useEditorShortcutPreference();
+  const selectEditorView = (view: 'timeline' | 'canvas'): void => {
+    editor.setIsPlaying(false);
+    setEditorView(view);
+    try {
+      localStorage.setItem('openvideo-editor-view', view);
+    } catch {
+      // The selected view remains usable when browser storage is unavailable.
+    }
+  };
   const inspectorTabs = getInspectorTabs(editor);
   const projectIdentity = editor.project?.id ?? '';
   const selectedAssetIdentity = editor.selectedAsset?.id ?? '';
@@ -128,7 +169,8 @@ export function TimelineEditor({ editor }: TimelineEditorProps): ReactElement {
   };
 
   const workspaceClassName = [
-    layoutPreference.leftDockVisible ? null : 'oc-editor-host--left-hidden',
+    canvasMode ? 'oc-editor-host--canvas' : null,
+    canvasMode || !layoutPreference.leftDockVisible ? 'oc-editor-host--left-hidden' : null,
     layoutPreference.inspectorVisible ? null : 'oc-editor-host--inspector-hidden',
     `oc-editor-host--inspector-${layoutPreference.inspectorPlacement}`
   ].filter((className): className is string => className !== null).join(' ');
@@ -202,6 +244,8 @@ export function TimelineEditor({ editor }: TimelineEditorProps): ReactElement {
 
   useEditorNativeMenuCommands({
     editor,
+    canvasMode,
+    shortcutPreferences,
     isAgentBusy,
     layoutPreference,
     onApplyFloatingPreset: applyFloatingPreset,
@@ -227,11 +271,31 @@ export function TimelineEditor({ editor }: TimelineEditorProps): ReactElement {
         onThemeModeToggle={toggleTheme}
         onThemePresetChange={(next) => setPreset(next as ThemePresetId)}
         actions={<>
+          <div className="editor-view-switch" role="group" aria-label="Editor mode">
+            <button type="button" aria-pressed={!canvasMode} onClick={() => selectEditorView('timeline')}>Timeline</button>
+            <button type="button" aria-pressed={canvasMode} onClick={() => selectEditorView('canvas')}>Canvas</button>
+          </div>
+          <details className="workbench-menu">
+            <summary>Project</summary>
+            <div className="workbench-menu__popover">
+              <button type="button" onClick={onProjectSettings}>Project settings</button>
+              <button type="button" disabled={!editor.hasUnsavedTimeline || isAgentBusy || editor.isBusy} onClick={() => { void editor.saveTimeline(); }}>Save project</button>
+            </div>
+          </details>
+          <details className="workbench-menu">
+            <summary>View</summary>
+            <div className="workbench-menu__popover">
+              <span className="workbench-menu__label">WORKSPACE PANELS</span>
+              <button type="button" disabled={canvasMode} aria-pressed={layoutPreference.leftDockVisible} onClick={() => updateLayoutPreference(toggleEditorLeftDock)}>Media library {layoutPreference.leftDockVisible ? '✓' : ''}</button>
+              <button type="button" disabled={canvasMode} aria-pressed={layoutPreference.inspectorVisible} onClick={() => updateLayoutPreference(toggleEditorInspector)}>Inspector {layoutPreference.inspectorVisible ? '✓' : ''}</button>
+              <button type="button" onClick={resetLayout}>Reset layout</button>
+            </div>
+          </details>
           <button className="oc-editor-host__save" type="button" onClick={() => { void editor.saveTimeline(); }} disabled={editor.project === null || !editor.hasUnsavedTimeline}>Save{editor.hasUnsavedTimeline ? ' *' : ''}</button>
           {!floatingExportVisible && <ExportPanel editor={editor} />}
         </>}
       />}
-      left={<TimelineEditorLeftDock
+      left={canvasMode ? null : <TimelineEditorLeftDock
         activeTabId={leftDockTabId}
         editor={editor}
         leftDockVisible={layoutPreference.leftDockVisible}
@@ -239,7 +303,7 @@ export function TimelineEditor({ editor }: TimelineEditorProps): ReactElement {
         onActiveTabChange={setLeftDockTabId}
       />}
 
-      leftSplitter={<EditorLeftDockSplitter leftDockVisible={layoutPreference.leftDockVisible} leftDockWidth={layoutPreference.leftDockWidth} onLeftDockWidthChange={setLeftDockWidth} />}
+      leftSplitter={canvasMode ? null : <EditorLeftDockSplitter leftDockVisible={layoutPreference.leftDockVisible} leftDockWidth={layoutPreference.leftDockWidth} onLeftDockWidthChange={setLeftDockWidth} />}
 
       auxiliary={<AssetMetadataProbeHost
         failuresByAssetId={editor.metadataProbeFailuresByAssetId}
@@ -256,14 +320,20 @@ export function TimelineEditor({ editor }: TimelineEditorProps): ReactElement {
           <h1 id="timeline-editor-title">OpenScene</h1>
           <span className="editor-program-region__subtitle">Timeline editor</span>
         </div>
-        {floatingProgramVisible ? <div className="empty-slate">Program Monitor is floating above the workspace.</div> : <ProgramMonitor editor={editor} />}
+        <div className="editor-view" hidden={!canvasMode}>
+          {editor.project !== null && <VideoConnectionCanvas key={editor.project.id} editor={editor}
+            locked={isAgentBusy || editor.isBusy} onPreview={() => selectEditorView('timeline')} />}
+        </div>
+        <div className="editor-view" hidden={canvasMode}>
+            {floatingProgramVisible ? <div className="empty-slate">Program Monitor is floating above the workspace.</div> : <ProgramMonitor editor={editor} />}
+        </div>
       </main>}
 
-      programSplitter={<EditorProgramSplitter programPercent={layoutPreference.programPercent} onProgramPercentChange={setProgramPercent} />}
+      programSplitter={canvasMode ? null : <EditorProgramSplitter programPercent={layoutPreference.programPercent} onProgramPercentChange={setProgramPercent} />}
 
-      inspector={dockedInspectorVisible ? inspectorPanel : null}
+      inspector={!canvasMode && dockedInspectorVisible ? inspectorPanel : null}
 
-      inspectorSplitter={<EditorInspectorSplitter
+      inspectorSplitter={canvasMode ? null : <EditorInspectorSplitter
         inspectorPlacement={layoutPreference.inspectorPlacement}
         inspectorVisible={layoutPreference.inspectorVisible}
         inspectorWidth={layoutPreference.inspectorWidth}
@@ -272,14 +342,14 @@ export function TimelineEditor({ editor }: TimelineEditorProps): ReactElement {
         onInspectorWidthChange={setInspectorWidth}
       />}
 
-      floatingPanels={<div className="editor-floating-layer" aria-label="Floating workspace panels">
+      floatingPanels={canvasMode ? null : <div className="editor-floating-layer" aria-label="Floating workspace panels">
         {floatingProjectVisible && renderFloatingPanel({ child: <ProjectRail editor={editor} />, floatingPanel: layoutPreference.floatingPanels.project, panelId: 'project' })}
         {floatingProgramVisible && renderFloatingPanel({ child: <ProgramMonitor editor={editor} />, floatingPanel: layoutPreference.floatingPanels.program, panelId: 'program' })}
         {floatingInspectorVisible && renderFloatingPanel({ child: inspectorPanel, floatingPanel: layoutPreference.floatingPanels.inspector, panelId: 'inspector' })}
         {floatingExportVisible && renderFloatingPanel({ child: <ExportPanel editor={editor} />, floatingPanel: layoutPreference.floatingPanels.export, panelId: 'export' })}
       </div>}
 
-      timeline={<TimelineCanvas id="editor-timeline-panel" editor={editor} />}
+      timeline={canvasMode ? null : <TimelineCanvas id="editor-timeline-panel" editor={editor} />}
     />
   );
 }

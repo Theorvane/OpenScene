@@ -1,0 +1,40 @@
+{
+  "verifiedDate": "2026-11-21",
+  "timezone": "Asia/Seoul",
+  "sourceCommit": "3a714966bb957129fff90d1da4b0860f6420be32",
+  "environment": {
+    "node": "24.22.3",
+    "ffmpeg": "7.1.5-0+deb13u1",
+    "ffprobe": "7.1.5-0+deb13u1",
+    "rea": "6.10.1",
+    "image": "sha256:332e3f703581447a2916d88c6158eb245c120ca29f70dd8a7c6abd52204df314"
+  },
+  "tests": {
+    "files": 186,
+    "passed": 1143,
+    "failed": 0,
+    "skipped": 0,
+    "success": true
+  },
+  "typechecks": [
+    "desktop-node",
+    "desktop-web",
+    "mobile"
+  ],
+  "output": {
+    "sha256": "3f8e8aa6c92c7e1074c5c0e1195695e724e4aef274fbb4944dace0bdf55b35c5",
+    "durationSeconds": 6.3,
+    "videoCodec": "h264",
+    "width": 640,
+    "height": 360,
+    "fps": 30.0,
+    "frames": 189,
+    "audioCodec": "aac",
+    "channels": 2,
+    "sampleRate": 22050
+  },
+  "menuRuntime": {
+    "nativeMenuSha256": "8f9fd6cec4dcdbd1424d0c1eab80d88492f87bd5605381d6f69e10924a509407",
+    "rendererMenuSha256": "cb5016ce99dc99967de9c2d39a63444101ccb70081ce5305550180dff20eb685"
+  }
+}

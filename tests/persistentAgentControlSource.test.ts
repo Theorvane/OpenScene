@@ -15,7 +15,7 @@ async function readSource(url: URL): Promise<string> {
 }
 
 describe('persistent agent control surface', () => {
-  it('renders the chat sidebar collapsible with a persisted rail while keeping conversation state in the provider', async () => {
+  it('toggles the sidebar from application chrome while keeping conversation state in the provider', async () => {
     const [appShell, panel, styles] = await Promise.all([
       readSource(APP_SHELL_SOURCE_URL),
       readSource(AGENT_PANEL_SOURCE_URL),
@@ -23,10 +23,10 @@ describe('persistent agent control surface', () => {
     ]);
 
     expect(appShell).toContain('<AgentChatPanel width={chatPanelWidth} onCollapse={() => setChatPanelCollapsed(true)} />');
-    expect(appShell).toContain('{showChatPanel && chatPanelCollapsed && (');
+    expect(appShell).toContain('aria-expanded={!chatPanelCollapsed}');
     expect(appShell).toContain('{showChatPanel && !chatPanelCollapsed && (');
-    expect(appShell).toContain('className="agent-chat-collapsed-rail__button"');
-    expect(appShell).toContain('onClick={() => setChatPanelCollapsed(false)}');
+    expect(appShell).toContain('onClick={() => setChatPanelCollapsed(!chatPanelCollapsed)}');
+    expect(appShell).toContain('>Assistant</Button>');
     expect(appShell).toContain('aria-controls="app-shell-agent-chat"');
     expect(panel).toContain('aria-label="Collapse agent chat sidebar"');
     expect(panel).not.toContain('isOpen');

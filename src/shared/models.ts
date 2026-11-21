@@ -13,6 +13,7 @@ export type AppErrorCode =
   | 'TTS_UNAVAILABLE'
   | 'TTS_RESULT_UNAVAILABLE' | 'EXPORT_RESULT_UNAVAILABLE'
   | 'INVALID_INPUT'
+  | 'FONT_UNAVAILABLE'
   | 'PERMISSION_DENIED'
   | 'RECORDER_UNAVAILABLE' | 'EXPORT_UNAVAILABLE'
   /* The cut itself cannot be rendered, as opposed to the runtime being absent. */

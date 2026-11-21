@@ -10,7 +10,9 @@ If you discover a potential vulnerability, limit public discussion to a non-sens
 
 ## Scope and Safety
 
-OpenScene is a local-first desktop application. Reports involving Electron security boundaries, preload/IPC exposure, local file handling, FFmpeg invocation, bundled dependencies, or accidental network behavior are in scope.
+OpenScene is a local video editor with desktop and mobile surfaces. Reports involving Electron isolation, preload/IPC exposure, registered agent-tool dispatch, approval gates, project/graph validation, local file handling, media runtimes, credential storage, native export, bundled dependencies or accidental network behavior are in scope.
+
+Project edits use typed, bounded operations. Canvas parameters and source evidence must not become arbitrary filesystem paths, command arguments or model instructions. Selected external-provider requests may include authorized project context, frames or transcripts; report data escaping that boundary. Mobile anonymous usage reporting is separately bounded in `mobile/src/lib/analytics.ts`.
 
 Do not test against systems, accounts, files, or media you do not own or have explicit permission to assess. Do not publish credentials, tokens, private file paths, user recordings, voice samples, or exploit material.
 

@@ -72,6 +72,7 @@ win:
 deb:
   packageName: openscene
 nsis:
+  include: build/installer.nsh
   oneClick: false
   allowToChangeInstallationDirectory: true
   # Named without spaces, or Windows cannot update itself.
