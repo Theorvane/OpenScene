@@ -1,5 +1,6 @@
 {
   "repository": "https://github.com/kajisho5/ffmpeg-skill",
+  "managedFork": "https://github.com/Theorvane/ffmpeg-skill",
   "commit": "3145261a1c19f399b9520fad7fdac741871e1426",
   "version": "3.13.1",
   "license": "MIT",
