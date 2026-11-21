@@ -28,12 +28,15 @@ function ClipPicture({ projectId, asset, clip }: { projectId: string; asset: Med
     <span className="video-node__placeholder">{asset.kind === 'image' && url ? <img src={url} alt={asset.displayName} /> : 'Preview loading'}</span>;
 }
 
-export function VideoConnectionCanvas({ editor, locked }: { editor: TimelineEditorController; locked: boolean }) {
+export function VideoConnectionCanvas({ editor, locked, onPreview }: {
+  editor: TimelineEditorController;
+  locked: boolean;
+  onPreview: () => void;
+}) {
   const project = editor.project!;
   const storageKey = `openvideo-canvas-layout-${project.id}`;
   const [positions, setPositions] = useState<Positions>(() => readPositions(storageKey));
   const [zoom, setZoom] = useState(1);
-  const [expanded, setExpanded] = useState(false);
   const [fromId, setFromId] = useState<string | null>(null);
   const [toId, setToId] = useState<string | null>(null);
   const [assetId, setAssetId] = useState('');
@@ -86,7 +89,7 @@ export function VideoConnectionCanvas({ editor, locked }: { editor: TimelineEdit
     setToId(id);
   };
 
-  return <section className={`video-canvas${expanded ? ' video-canvas--expanded' : ''}`} aria-label="Video connection canvas">
+  return <section className="video-canvas" aria-label="Video connection canvas">
     <div className="video-canvas__toolbar">
       <strong>Canvas</strong>
       <select aria-label="Media to add to canvas" value={assetId} onChange={(event) => setAssetId(event.target.value)}>
@@ -98,7 +101,6 @@ export function VideoConnectionCanvas({ editor, locked }: { editor: TimelineEdit
       <button type="button" aria-label="Zoom out canvas" onClick={() => setZoom(Math.max(.4, zoom - .1))}>−</button>
       <button type="button" onClick={() => setZoom(1)}>{Math.round(zoom * 100)}%</button>
       <button type="button" aria-label="Zoom in canvas" onClick={() => setZoom(Math.min(1.8, zoom + .1))}>+</button>
-      <button type="button" aria-pressed={expanded} onClick={() => setExpanded(!expanded)}>{expanded ? 'Restore' : 'Expand'}</button>
     </div>
     <div className="video-canvas__scroll" tabIndex={0} aria-label="Scrollable canvas">
       <div style={{ width: width * zoom, height: height * zoom }}>
@@ -120,6 +122,7 @@ export function VideoConnectionCanvas({ editor, locked }: { editor: TimelineEdit
               editor.setSelectedClipId(clip.id);
               editor.setSelectedAssetId(clip.assetId);
               editor.setPlayheadMs(clip.timelineStartMs);
+              onPreview();
             }} aria-label={`Preview ${asset?.displayName ?? 'clip'}`}>
               {asset && <ClipPicture projectId={project.id} asset={asset} clip={clip} />}
             </button>

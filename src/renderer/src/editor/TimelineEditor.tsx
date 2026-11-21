@@ -99,13 +99,29 @@ function getDefaultInspectorTabId({ selectedAssetId, selectedClipId }: Inspector
 }
 
 export function TimelineEditor({ editor, onProjectSettings }: TimelineEditorProps): ReactElement {
-  const [canvasVisible, setCanvasVisible] = useState(true);
+  const [editorView, setEditorView] = useState<'timeline' | 'canvas'>(() => {
+    try {
+      return localStorage.getItem('openvideo-editor-view') === 'canvas' ? 'canvas' : 'timeline';
+    } catch {
+      return 'timeline';
+    }
+  });
+  const canvasMode = editorView === 'canvas';
   const { isBusy: isAgentBusy } = useAgentChat();
   const { mode: themeMode, preset, setPreset, toggleTheme } = useTheme();
   const [leftDockTabId, setLeftDockTabId] = useState<EditorLeftDockTabId>('project');
   const [inspectorTabId, setInspectorTabId] = useState<InspectorTabId>('selection');
   const { layoutPreference, updateLayoutPreference } = useEditorLayoutPreference();
   const { shortcutPreferences } = useEditorShortcutPreference();
+  const selectEditorView = (view: 'timeline' | 'canvas'): void => {
+    editor.setIsPlaying(false);
+    setEditorView(view);
+    try {
+      localStorage.setItem('openvideo-editor-view', view);
+    } catch {
+      // The selected view remains usable when browser storage is unavailable.
+    }
+  };
   const inspectorTabs = getInspectorTabs(editor);
   const projectIdentity = editor.project?.id ?? '';
   const selectedAssetIdentity = editor.selectedAsset?.id ?? '';
@@ -132,6 +148,7 @@ export function TimelineEditor({ editor, onProjectSettings }: TimelineEditorProp
   };
 
   const workspaceClassName = [
+    canvasMode ? 'oc-editor-host--canvas' : null,
     layoutPreference.leftDockVisible ? null : 'oc-editor-host--left-hidden',
     layoutPreference.inspectorVisible ? null : 'oc-editor-host--inspector-hidden',
     `oc-editor-host--inspector-${layoutPreference.inspectorPlacement}`
@@ -231,7 +248,10 @@ export function TimelineEditor({ editor, onProjectSettings }: TimelineEditorProp
         onThemeModeToggle={toggleTheme}
         onThemePresetChange={(next) => setPreset(next as ThemePresetId)}
         actions={<>
-          <button type="button" aria-pressed={canvasVisible} onClick={() => setCanvasVisible(!canvasVisible)}>Canvas</button>
+          <div className="editor-view-switch" role="group" aria-label="Editor mode">
+            <button type="button" aria-pressed={!canvasMode} onClick={() => selectEditorView('timeline')}>Timeline</button>
+            <button type="button" aria-pressed={canvasMode} onClick={() => selectEditorView('canvas')}>Canvas</button>
+          </div>
           <button type="button" onClick={onProjectSettings}>Project settings</button>
           <button className="oc-editor-host__save" type="button" onClick={() => { void editor.saveTimeline(); }} disabled={editor.project === null || !editor.hasUnsavedTimeline}>Save{editor.hasUnsavedTimeline ? ' *' : ''}</button>
           {!floatingExportVisible && <ExportPanel editor={editor} />}
@@ -262,19 +282,20 @@ export function TimelineEditor({ editor, onProjectSettings }: TimelineEditorProp
           <h1 id="timeline-editor-title">OpenScene</h1>
           <span className="editor-program-region__subtitle">Timeline editor</span>
         </div>
-        <div className={canvasVisible ? 'video-workbench' : 'video-workbench video-workbench--preview'}>
-          {canvasVisible && editor.project !== null && <VideoConnectionCanvas key={editor.project.id} editor={editor} locked={isAgentBusy} />}
-          <div className="video-workbench__monitor">
+        <div className="editor-view" hidden={!canvasMode}>
+          {editor.project !== null && <VideoConnectionCanvas key={editor.project.id} editor={editor}
+            locked={isAgentBusy || editor.isBusy} onPreview={() => selectEditorView('timeline')} />}
+        </div>
+        <div className="editor-view" hidden={canvasMode}>
             {floatingProgramVisible ? <div className="empty-slate">Program Monitor is floating above the workspace.</div> : <ProgramMonitor editor={editor} />}
-          </div>
         </div>
       </main>}
 
-      programSplitter={<EditorProgramSplitter programPercent={layoutPreference.programPercent} onProgramPercentChange={setProgramPercent} />}
+      programSplitter={canvasMode ? null : <EditorProgramSplitter programPercent={layoutPreference.programPercent} onProgramPercentChange={setProgramPercent} />}
 
-      inspector={dockedInspectorVisible ? inspectorPanel : null}
+      inspector={!canvasMode && dockedInspectorVisible ? inspectorPanel : null}
 
-      inspectorSplitter={<EditorInspectorSplitter
+      inspectorSplitter={canvasMode ? null : <EditorInspectorSplitter
         inspectorPlacement={layoutPreference.inspectorPlacement}
         inspectorVisible={layoutPreference.inspectorVisible}
         inspectorWidth={layoutPreference.inspectorWidth}
@@ -283,14 +304,14 @@ export function TimelineEditor({ editor, onProjectSettings }: TimelineEditorProp
         onInspectorWidthChange={setInspectorWidth}
       />}
 
-      floatingPanels={<div className="editor-floating-layer" aria-label="Floating workspace panels">
+      floatingPanels={canvasMode ? null : <div className="editor-floating-layer" aria-label="Floating workspace panels">
         {floatingProjectVisible && renderFloatingPanel({ child: <ProjectRail editor={editor} />, floatingPanel: layoutPreference.floatingPanels.project, panelId: 'project' })}
         {floatingProgramVisible && renderFloatingPanel({ child: <ProgramMonitor editor={editor} />, floatingPanel: layoutPreference.floatingPanels.program, panelId: 'program' })}
         {floatingInspectorVisible && renderFloatingPanel({ child: inspectorPanel, floatingPanel: layoutPreference.floatingPanels.inspector, panelId: 'inspector' })}
         {floatingExportVisible && renderFloatingPanel({ child: <ExportPanel editor={editor} />, floatingPanel: layoutPreference.floatingPanels.export, panelId: 'export' })}
       </div>}
 
-      timeline={<TimelineCanvas id="editor-timeline-panel" editor={editor} />}
+      timeline={canvasMode ? null : <TimelineCanvas id="editor-timeline-panel" editor={editor} />}
     />
   );
 }

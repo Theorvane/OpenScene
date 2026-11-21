@@ -1,6 +1,45 @@
-.video-workbench { display: flex; min-height: 0; height: 100%; gap: 1px; overflow: hidden; }
-.video-canvas.video-canvas--expanded { position: fixed; inset: 52px 12px 12px; z-index: 50; width: auto; border: 1px solid var(--border-strong); border-radius: 10px; resize: none; box-shadow: 0 12px 60px #0005; }
-.video-workbench__monitor { flex: 1; min-width: 200px; min-height: 0; overflow: auto; }
+.editor-view {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+.editor-view[hidden] { display: none; }
+.editor-view-switch {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-inset);
+}
+.editor-view-switch button {
+  padding: 5px 10px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted-foreground);
+  font: inherit;
+  cursor: pointer;
+}
+.editor-view-switch button[aria-pressed="true"] {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+.editor-view-switch button:focus-visible { outline: 2px solid var(--primary); }
+.oc-editor-host.oc-editor-host--canvas {
+  display: grid;
+  grid-template-areas: "header header header" "left leftsplit program";
+  grid-template-columns: var(--editor-left-dock-width, 260px) 8px minmax(0, 1fr);
+  grid-template-rows: 42px minmax(0, 1fr);
+  overflow: hidden;
+}
+.oc-editor-host.oc-editor-host--canvas.oc-editor-host--left-hidden {
+  grid-template-areas: "header" "program";
+  grid-template-columns: minmax(0, 1fr);
+}
+.oc-editor-host--canvas > .oc-editor-host__timeline,
+.oc-editor-host--canvas > .oc-editor-host__inspector { display: none; }
+.oc-editor-host--canvas .video-canvas { width: 100%; height: 100%; resize: none; }
 .video-canvas { flex: 1.6; min-width: 270px; display: flex; flex-direction: column; background: var(--surface-inset); color: var(--foreground); border-right: 1px solid var(--border); resize: horizontal; overflow: hidden; }
 .video-canvas button, .video-canvas select { color: inherit; background: var(--surface-control); border: 1px solid var(--border); border-radius: 5px; padding: 5px 8px; font: inherit; cursor: pointer; }
 .video-canvas select { min-width: 80px; max-width: 160px; }
@@ -29,4 +68,3 @@
 .video-canvas__empty { position: absolute; top: 60px; left: 40px; max-width: 300px; }
 .video-canvas__empty h2 { font-size: 20px; }
 .video-canvas__empty p { font-size: 13px; color: var(--muted-foreground); }
-@media (max-width: 1000px) { .video-workbench { flex-direction: column; } .video-canvas { min-height: 220px; resize: none; } }
