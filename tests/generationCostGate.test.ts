@@ -97,8 +97,8 @@ describe('generation cost policy', () => {
     expect(GENERATION_COST_POLICY).toMatch(/must not misread/);
   });
 
-  it('reaches the model instead of only existing as a constant', () => {
-    expect(graphSource).toContain('GENERATION_COST_POLICY;');
+  it('keeps legacy generation policy out of the editing prompt', () => {
+    expect(graphSource).not.toContain('GENERATION_COST_POLICY;');
   });
 });
 

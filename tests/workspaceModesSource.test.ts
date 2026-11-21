@@ -4,18 +4,14 @@ import { describe, expect, it } from 'vitest';
 const source = (path: string): string => readFileSync(new URL('../' + path, import.meta.url), 'utf8');
 
 describe('workspace integration contracts', () => {
-  it('uses the shared mode contract on both surfaces', () => {
-    for (const path of ['src/renderer/src/App.tsx', 'mobile/App.tsx']) {
-      const app = source(path);
-      expect(app).toContain('shared/workspaceModes');
-      expect(app).toContain('workspaceTabForMode(');
-      expect(app).toContain('Open in editor');
-    }
+  it('opens the editing surface on desktop and mobile', () => {
+    expect(source('src/renderer/src/App.tsx')).toContain('<TimelineEditor editor={editor}');
+    expect(source('mobile/App.tsx')).toContain('<CanvasScreen projectId={route.projectId}');
   });
 
   it('retains mobile studios within one project, hides them from accessibility, and pauses hidden editing', () => {
     const app = source('mobile/App.tsx');
-    for (const tab of ['edit', 'writer', 'video', 'voice', 'image']) {
+    for (const tab of ['edit']) {
       expect(app).toContain(`<RetainedScreen active={tab === '${tab}'}>`);
     }
     expect(app).toContain('key={route.projectId}');

@@ -12,11 +12,11 @@ describe('product workspace entrances', () => {
   it('uses the saved project type when opening a card and the selected type for new projects', () => {
     const desktop = readFileSync('src/renderer/src/ProjectsPage.tsx', 'utf8');
     const mobile = readFileSync('mobile/src/screens/ProjectsScreen.tsx', 'utf8');
-    expect(desktop).toContain('onOpenProject?.(item.id, modeForProjectType(item.projectType, entrance))');
-    expect(desktop).toContain('onOpenProjectFolder?.(entrance)');
-    expect(mobile).toContain('onOpen(project.id, modeForProjectType(project.projectType, entrance))');
+    expect(desktop).toContain("onOpenProject?.(item.id, 'edit')");
+    expect(desktop).toContain("onOpenProjectFolder?.('edit')");
+    expect(mobile).toContain("onOpen(project.id, 'edit')");
     for (const source of [desktop, mobile]) {
-      expect(source).toContain('WORKSPACE_EXPERIENCES[mode].description');
+      expect(source).not.toContain('Choose a project type');
       expect(source).not.toContain('aiGenerateVideo(');
     }
   });

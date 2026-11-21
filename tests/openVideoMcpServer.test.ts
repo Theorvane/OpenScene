@@ -560,6 +560,26 @@ describe('OpenScene TypeMCP Server and Tool declarations', () => {
     });
   });
 
+  it('saves an approved canvas connection and notifies the open editor', async () => {
+    const server = new OpenVideoMcpServer();
+    server.setServices(projectStore);
+    const project = await projectStore.create({ name: 'Connected clips' });
+    const asset = videoAsset();
+    await projectStore.registerAsset(project.id, asset);
+    const first = await server.addClipToTimeline({ projectId: project.id, assetId: asset.id, durationSeconds: 2 });
+    const second = await server.addClipToTimeline({ projectId: project.id, assetId: asset.id, durationSeconds: 3 });
+    if (!first.success || !second.success) throw new Error('Test clips could not be placed.');
+    const updates: string[] = [];
+    server.setProjectTimelineChangeNotifier((id) => updates.push(id));
+    expect(await server.connectTimelineClips({
+      projectId: project.id, fromClipId: second.clipId!, toClipId: first.clipId!
+    })).toMatchObject({ success: true });
+    const saved = await projectStore.open(project.id);
+    expect(saved?.timeline.tracks.find((track) => track.kind === 'video')?.clips.map((clip) => [clip.id, clip.timelineStartMs]))
+      .toEqual([[second.clipId, 0], [first.clipId, 3000]]);
+    expect(updates).toEqual([project.id]);
+  });
+
   it('watchProjectVideo rejects non-video assets, missing assets, and missing duration without touching FFmpeg', async () => {
     const server = new OpenVideoMcpServer();
     let extractorCalls = 0;

@@ -8,7 +8,7 @@ describe('Settings workspace source contract', () => {
   it('organizes settings into the requested local-first sections and reads only safe FFmpeg readiness', async () => {
     const source = await readFile(SETTINGS_SOURCE_URL, 'utf8');
 
-    for (const heading of ['Appearance', 'Local Tools', 'Voice', 'Video', 'Providers', 'Models', 'Edit Agent', 'Data & Privacy']) {
+    for (const heading of ['Appearance', 'Local Tools', 'Voice', 'Providers', 'Models', 'Edit Agent', 'Data & Privacy']) {
       expect(source).toContain(`title: '${heading}'`);
     }
     expect(source).toContain('window.videoTool.getFfmpegRuntimeStatus');
@@ -17,8 +17,8 @@ describe('Settings workspace source contract', () => {
     expect(source).not.toContain('AiDomainModelSelector domain="voice-generation"');
     expect(source).not.toContain('AiDomainModelSelector domain="video-generation"');
     expect(source).toContain('AiDomainModelSelector domain="edit-agent"');
-    expect(source).toContain('managed inside the Voice Generation workspace');
-    expect(source).toContain('managed inside the Video Generation workspace');
+    expect(source).toContain('Local voice runtimes can be configured for narration.');
+    expect(source).not.toContain("title: 'Video'");
     expect(source).not.toMatch(/executablePath|argv|args:/);
   });
 

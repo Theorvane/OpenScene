@@ -264,7 +264,7 @@ describe('mobile touch and keyboard source contract', () => {
     // Measured, not assumed: the bar carries the top inset and grows a row
     // whenever an export result is showing.
     expect(app).toContain('onLayout={(event) => setBodyTop(event.nativeEvent.layout.y)}');
-    for (const screen of ['PlanScreen', 'VoiceScreen', 'ImageScreen', 'AgentScreen']) {
+    for (const screen of ['AgentScreen']) {
       expect(app, `${screen} must be told where the body starts`).toMatch(
         new RegExp(`<${screen}[^>]*keyboardOffset=\\{bodyTop\\}`, 's')
       );

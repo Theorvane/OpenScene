@@ -27,10 +27,10 @@ describe('domain generation studio wiring', () => {
     expect(video).toContain('modelId: targetModelId');
     expect(video).toContain("{ id: 'motion_control', label: 'Motion' }");
     expect(video).toContain('aiGetComfyUiMotionStatus()');
-    expect(app).toContain('projectAssets={editor.project?.assets ?? []}');
+    expect(app).not.toContain('<VideoGenerationWorkspace');
     expect(video).not.toContain('LlmModelSelectorBar');
     expect(voice).not.toContain('LlmModelSelectorBar');
-    expect(app).toContain('editor.project !== null && (');
+    expect(app).toContain('<TimelineEditor editor={editor}');
     expect(app).not.toContain('editor.project!.ai');
   });
 });
