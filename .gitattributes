@@ -1,0 +1,4 @@
+# Shell entry points must also run from a Windows checkout mounted into Linux.
+scripts/media-analysis/*.sh text eol=lf
+# Pinned upstream bytes are verified against UPSTREAM.json, including line ends.
+.agents/skills/ffmpeg-skill/** -text

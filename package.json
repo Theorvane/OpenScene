@@ -9,6 +9,7 @@
     "dev": "electron-vite dev",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test": "vitest run",
+    "verify:media-analysis": "powershell -NoProfile -File scripts/verify-media-analysis.ps1",
     "build": "npm run typecheck && electron-vite build",
     "preview": "electron-vite preview",
     "package": "npm run build && electron-builder --publish never",

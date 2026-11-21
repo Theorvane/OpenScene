@@ -49,6 +49,8 @@ npm run typecheck
 
 The build command creates application output. Use npm run package for desktop packages.
 
+The [Linux media-analysis environment](docs/media-analysis-environment.md) runs FFprobe-dependent tests and REA without changing Windows application-control settings. With Docker Desktop running, use `npm run verify:media-analysis`; add `-- -AnalyzeEditor` to analyze the current `out/` build. It verifies a Git snapshot with separate Linux dependencies.
+
 ## Project compatibility
 
 Projects created by earlier versions retain their imported media and saved timeline. Legacy AI metadata is decoded to preserve project readability. New media generation, production boards and generation provider automation have been removed.
