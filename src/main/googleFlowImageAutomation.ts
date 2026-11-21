@@ -2,6 +2,7 @@ import type { KeyboardInputEvent, Rectangle, WebContents } from 'electron';
 import type { GoogleFlowImageModel } from '../shared/browserSession';
 import type { ReferenceImageSelection } from '../shared/providerSeams';
 import { BrowserGenerationActionRequiredError } from './browserGenerationAction';
+import { buildGoogleFlowReferenceAttachmentsProbe, googleFlowReferencesReady, type GoogleFlowReferenceAttachments } from './googleFlowReferenceAttachments';
 import { prepareGoogleFlowReference } from './googleFlowReference';
 import {
   uploadReferencesThroughChromiumFileChooser,
@@ -57,6 +58,7 @@ export type GoogleFlowAutomationState = {
   readonly agentSettingsClose?: Rectangle;
   readonly agentToggle?: RectangleWithText;
   readonly configButton?: RectangleWithText;
+  readonly referenceAttachments?: GoogleFlowReferenceAttachments;
   readonly uploadLauncher?: Rectangle;
   readonly uploadChoice?: Rectangle;
   readonly modelDropdown?: RectangleWithText;
@@ -138,6 +140,7 @@ export function buildGoogleFlowStateProbeScript(): string {
     const promptEntry = explicitPromptEntry
       || inputs.find(({ rectangle }) => rectangle.width > 100 && rectangle.y > viewH * 0.45);
     const input = promptEntry?.rectangle;
+    const referenceAttachments = ${buildGoogleFlowReferenceAttachmentsProbe()};
 
     const projectLinks = visible('a[href*="/fx/tools/flow/project/"], a[href*="/project/"]');
     const projectLink = projectLinks.find(({ rectangle }) => rectangle.width > 50 && rectangle.height > 30);
@@ -441,6 +444,7 @@ export function buildGoogleFlowStateProbeScript(): string {
       ...(agentSettingsCloseEntry ? { agentSettingsClose: agentSettingsCloseEntry.rectangle } : {}),
       ...(agentToggle ? { agentToggle } : {}),
       ...(configButton ? { configButton } : {}),
+      ...(referenceAttachments ? { referenceAttachments } : {}),
       ...(uploadLauncherEntry ? { uploadLauncher: uploadLauncherEntry.rectangle } : {}),
       ...(uploadChoiceEntry ? { uploadChoice: uploadChoiceEntry.rectangle } : {}),
       ...(modelDropdown ? { modelDropdown } : {}),
@@ -853,6 +857,10 @@ async function attachImageReferences(
   onDiagnostic: (details: ChromiumFileChooserDiagnostic) => void
 ): Promise<ChromiumFileChooserUpload | null> {
   let state = await readState(webContents);
+  // A stale attachment must not satisfy the later count gate. Do not clear user media.
+  if (!state.referenceAttachments || state.referenceAttachments.visibleCount !== 0 || state.referenceAttachments.busy) {
+    throw new Error('Google Flow reference composer is unavailable, busy, or already contains attachments. Clear the composer and retry.');
+  }
   if (state.uploadLauncher === undefined && state.uploadChoice === undefined) {
     throw new Error('Google Flow Image does not expose an upload control for the selected reference images.');
   }
@@ -887,7 +895,7 @@ async function attachImageReferences(
   throw new Error('Google Flow opened its media library, but OpenScene could not find the Upload media action. The Flow UI may have changed; close the worker and retry after updating OpenScene.');
 }
 
-async function fillPrompt(webContents: WebContents, prompt: string, deadline: number): Promise<AutomationState> {
+async function fillPrompt(webContents: WebContents, prompt: string, deadline: number, expectedReferences = 0): Promise<AutomationState> {
   let promptInserted = false;
   while (Date.now() < deadline) {
     const state = await readState(webContents);
@@ -906,8 +914,12 @@ async function fillPrompt(webContents: WebContents, prompt: string, deadline: nu
       promptInserted = true;
       continue;
     }
-    if (promptInserted && state.submit !== undefined) return state;
+    if (promptInserted && state.submit !== undefined
+      && (expectedReferences === 0 || googleFlowReferencesReady(state.referenceAttachments, expectedReferences))) return state;
     await delay(POLL_INTERVAL_MS);
+  }
+  if (expectedReferences > 0) {
+    throw new Error('Google Flow reference attachment did not complete before the timeout. No generation was submitted. Clear the composer and retry.');
   }
   throw new Error('Google Flow loaded, but OpenScene could not find its prompt and Create controls. The Flow UI may have changed.');
 }
@@ -965,7 +977,10 @@ export async function automateGoogleFlowImageGeneration(
       });
     }
 
-    ready = await fillPrompt(webContents, input.prompt, deadline);
+    ready = await fillPrompt(webContents, input.prompt, deadline, references.length);
+    if (references.length > 0) {
+      input.onProgress?.('configuring', Date.now() - startedAt, { step: 'references_attached', referenceCount: references.length });
+    }
     input.onProgress?.('configuring', Date.now() - startedAt, { step: 'prompt_filled' });
     const existingImages = new Set(ready.images.map((image) => image.src));
     clickAt(webContents, ready.submit!);
