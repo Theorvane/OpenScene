@@ -120,9 +120,17 @@ export async function measureExportedFile(input: MeasureExportInput): Promise<Ex
       resolve(measurement);
     };
 
-    const child = spawn(probePath, [...ffprobeArgs(input.filePath)], { stdio: ['ignore', 'pipe', 'ignore'] });
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(probePath, [...ffprobeArgs(input.filePath)], { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
+    } catch {
+      // Windows application control may refuse spawn synchronously. As with an
+      // unavailable probe, keep the completed MP4 and report it as unchecked.
+      finish(null);
+      return;
+    }
     let stdout = '';
-    child.stdout.on('data', (chunk: Buffer) => {
+    child.stdout?.on('data', (chunk: Buffer) => {
       stdout += chunk.toString('utf8');
     });
     const timeout = setTimeout(() => {
