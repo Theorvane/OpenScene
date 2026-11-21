@@ -40,6 +40,8 @@ import type {
 import { DEFAULT_CLIP_EFFECTS } from '../../../shared/timelineTypes';
 import { applyTranscriptionCues, type TranscriptionDraft } from '../../../shared/transcription';
 import { connectVideoClips } from '../../../shared/videoCanvas';
+import { applyCanvasBlock } from '../../../shared/videoCanvasBlocks';
+import { EMPTY_CANVAS_GRAPH, parseVideoCanvasGraph, type VideoCanvasGraph } from '../../../shared/videoCanvasGraph';
 import { errorMessage, type StatusMessage } from '../appTypes';
 import { createTimelineHistory, pushTimelineHistory, redoTimelineHistory, undoTimelineHistory, type TimelineHistory } from './editorTimelineHistory';
 import { findClipSelection, findFirstCompatibleTrack, insertionStartForTrack, mediaAssetReady, nextTrackName, placeReadyAssetOnTimeline } from './editorTimelineView';
@@ -722,6 +724,19 @@ export function useTimelineEditor() {
   }, [project, refreshProjects]);
 
   return {
+    updateCanvasGraph: (graph: VideoCanvasGraph) => replaceTimeline((timeline) => {
+      const parsed = parseVideoCanvasGraph(graph);
+      return parsed === null ? null : { ...timeline, canvas: parsed };
+    }, 'Canvas workflow updated.'),
+    applyCanvasBlock: (blockId: string): boolean => {
+      if (project === null) return false;
+      const result = applyCanvasBlock(project.timeline, project.timeline.canvas ?? EMPTY_CANVAS_GRAPH, blockId);
+      if (!result.success) {
+        setStatusMessage({ tone: 'warning', text: result.error });
+        return false;
+      }
+      return replaceTimeline(() => result.timeline, 'Block output applied to the timeline.') !== null;
+    },
     connectVideoClips: (fromId: string, toId: string) => replaceTimeline(
       (timeline) => connectVideoClips(timeline, fromId, toId),
       'Connected clips. The video track now plays continuously in the new order.'

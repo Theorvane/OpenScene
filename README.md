@@ -6,11 +6,13 @@ OpenScene is a local video editor with a timeline, a connected video canvas and 
 
 - Import video, audio and images into a project.
 - Use **Timeline** for preview, trim, split, tracks, titles, effects and MP4 export.
-- Use **Canvas** to arrange clip cards and connect their playback order.
+- Use **Canvas** to connect clips and function blocks: join videos, join audio, mix audio, or combine video with audio.
 - Preview a card to return to its selected clip in Timeline.
 - Save and reopen the same sequence in either mode.
 
 A canvas connection moves its target after the source and closes gaps on that video track. Other tracks and titles retain their positions. Source ranges, playback speed and clip keyframe offsets are preserved. Card coordinates are a device-local layout preference.
+
+Choose a function in **Function block**, then **Add block**. Select a clip's **Output** and the block's matching video or audio input. Block outputs can feed other blocks, for example `Join videos → Video + audio ← Mix audio`. Join and mix blocks accept 2–8 inputs. **Apply block** arranges the connected clips from 0 seconds on output tracks; Timeline provides preview, undo and export. Original video sound remains alongside added audio. Unconnected clips and titles keep their positions. Block positions and connections are saved with the project; source card positions stay local. Reusing a clip twice in one output requires duplicating it in Timeline first.
 
 ## Editing assistant
 
@@ -49,7 +51,7 @@ The build command creates application output. Use npm run package for desktop pa
 
 Projects created by earlier versions retain their imported media and saved timeline. Legacy AI metadata is decoded to preserve project readability. New media generation, production boards and generation provider automation have been removed.
 
-The mobile app provides Edit, Canvas, Library and the editing assistant. Mobile Canvas applies the same clip connection rule with a compact sequence view. Frame and speech inspection through chat are desktop capabilities.
+The mobile app provides Edit, Canvas, Library and the editing assistant. Mobile Canvas uses the same four function blocks and connection rules in a compact touch layout. Frame and speech inspection through chat are desktop capabilities.
 
 ## Architecture
 

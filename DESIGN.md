@@ -16,6 +16,10 @@ A connection preserves source ranges and speed. Keyframes move with the clip. Tr
 
 Selecting a card's preview selects the shared clip and opens Timeline. Timeline edits and approved assistant edits update the same sequence shown on Canvas.
 
+Function blocks follow the typed input/output approach of [ComfyUI](https://github.com/Comfy-Org/ComfyUI). Join videos, Join audio and Mix audio accept 2–8 matching inputs; Video + audio accepts one video and one audio input. Blocks can be chained. Audio connections use a distinct color. Missing inputs, incompatible media, cycles and duplicate source use are rejected before applying. Disconnect, remove and add-input controls keep graph editing explicit.
+
+The shared evaluator resolves clips, playback speed, source ranges and keyframe offsets into lanes. Apply moves connected clips into output tracks starting at zero, retaining audio gain, pan and mute per lane. Other clips and titles keep their positions; invalidated transitions are dropped. Video sound remains enabled. Applying does not rewrite source files. Blocks, their positions and edges are optional timeline metadata and participate in save and undo; source card coordinates remain local. Older timelines without graph metadata continue to open.
+
 ## Project and assistant boundaries
 
 Opening a project leads directly to editing. Existing generation projects remain readable through the legacy project codec. The active interface offers imported media, clip editing, source analysis and export.
@@ -26,4 +30,4 @@ Project mutations require approval. Provider credentials are stored through the 
 
 ## Mobile
 
-Edit, Canvas, Library and the assistant are project views. Canvas uses the shared connection rule and a compact sequence layout. Desktop frame inspection and speech analysis remain explicitly unavailable in mobile chat.
+Edit, Canvas, Library and the assistant are project views. Canvas uses the shared evaluator with the same four function blocks in a compact touch layout, including typed connections, input expansion, disconnect, removal, apply and undo. Free card positioning remains desktop-only. Desktop frame inspection and speech analysis remain explicitly unavailable in mobile chat.
