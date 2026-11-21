@@ -7,6 +7,7 @@ import type { AppSettings, CaptureSource } from '../shared/models';
 import { SourceCatalog, type RawCaptureSource } from '../shared/sourceCatalog';
 import type { MediaKind } from '../shared/timelineTypes';
 import { installApplicationMenu } from './applicationMenu';
+import { readTitleFontData } from './titleFontData';
 import { AssetLibraryStore } from './assetLibraryStore';
 import { registerAudioDetachIpcHandler } from './audioDetachIpcHandlers';
 import { AudioDetachService } from './audioDetachService';
@@ -281,6 +282,7 @@ function installDisplayMediaHandler(): void {
 }
 
 async function installIpcHandlers(): Promise<void> {
+  ipcMain.handle(IPC_CHANNELS.getTitleFontData, (_event, input: unknown) => readTitleFontData(input));
   registerCaptureIpcHandlers({
     ipcMain,
     shell,

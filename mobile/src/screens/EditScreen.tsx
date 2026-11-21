@@ -9,6 +9,7 @@ import { snapTimelinePosition } from '@openvideo/shared/timelineSnapping';
 import { titlesAt } from '@openvideo/shared/titlePreviewLayout';
 import { DEFAULT_SUBTITLE_DELIVERY } from '@openvideo/shared/subtitleDelivery';
 import { selectedVisualEffect, VISUAL_EFFECT_PRESETS, visualEffectValues } from '@openvideo/shared/visualEffectPresets';
+import { DEFAULT_TITLE_SHADOW, TITLE_FONT_FAMILIES, TITLE_FONT_LABELS } from '@openvideo/shared/titleTypography';
 import { metadataPrivacyPlan } from '@openvideo/shared/metadataPrivacy';
 import { applyCaptionPreset, CAPTION_PLACEMENTS, CAPTION_STYLE_PRESETS, isAutomaticCaptionId, resolvedTitleStyle, type CaptionPresetId } from '@openvideo/shared/captionStyle';
 import { countTimelineAssetUsage, DEFAULT_MEDIA_LIBRARY_FILTERS, type MediaLibraryFilters } from '@openvideo/shared/mediaLibraryView';
@@ -1163,6 +1164,7 @@ function TitlePanel({
 }) {
   const lengthMs = title.timelineEndMs - title.timelineStartMs;
   const titleStyle = resolvedTitleStyle(title);
+  const shadow = titleStyle.shadow ?? DEFAULT_TITLE_SHADOW;
   return (
     <ScrollView
       style={[styles.inspector, { maxHeight }]}
@@ -1207,6 +1209,15 @@ function TitlePanel({
         ))}
       </View>
       <Text style={styles.panelNote}>Title-safe anchor</Text>
+      <Text style={styles.panelNote}>Font family</Text>
+      <View style={styles.captionChoiceRow}>
+        {TITLE_FONT_FAMILIES.map(family => <Pressable key={family} accessibilityRole="button" accessibilityLabel={`Title font ${TITLE_FONT_LABELS[family]}`}
+          accessibilityState={{ selected: (titleStyle.fontFamily ?? 'sans') === family }}
+          onPress={() => onChange({ style: { ...titleStyle, fontFamily: family } })}
+          style={press([styles.captionChoice, (titleStyle.fontFamily ?? 'sans') === family && styles.captionChoiceOn])}>
+          <Text style={styles.captionChoiceText}>{TITLE_FONT_LABELS[family]}</Text>
+        </Pressable>)}
+      </View>
       <View style={styles.captionChoiceRow}>
         {CAPTION_PLACEMENTS.map((placement) => (
           <Pressable key={placement} accessibilityRole="button" accessibilityState={{ selected: titleStyle.placement === placement }}
@@ -1254,6 +1265,23 @@ function TitlePanel({
       <Stepper label="Box padding" value={`${Math.round(titleStyle.paddingPx)}px`}
         onDown={() => onChange({ style: { ...titleStyle, paddingPx: Math.max(0, titleStyle.paddingPx - 2) } })}
         onUp={() => onChange({ style: { ...titleStyle, paddingPx: Math.min(64, titleStyle.paddingPx + 2) } })} />
+      <Text style={styles.panelNote}>Text shadow</Text>
+      <Pressable accessibilityRole="button" accessibilityState={{ selected: shadow.opacity > 0 }}
+        onPress={() => onChange({ style: { ...titleStyle, shadow: { ...shadow, opacity: shadow.opacity > 0 ? 0 : 0.7 } } })} style={press(styles.tool)}>
+        <Text style={styles.toolText}>Shadow: {shadow.opacity > 0 ? 'on' : 'off'}</Text>
+      </Pressable>
+      <View style={styles.swatchRow}>{TITLE_COLORS.map(color => <Pressable key={color} accessibilityRole="button" accessibilityLabel={`Shadow colour ${color}`}
+        onPress={() => onChange({ style: { ...titleStyle, shadow: { ...shadow, color } } })}
+        style={press([styles.swatch, { backgroundColor: color }, shadow.color === color && styles.swatchOn])} />)}</View>
+      <Stepper label="Shadow opacity" value={`${Math.round(shadow.opacity * 100)}%`}
+        onDown={() => onChange({ style: { ...titleStyle, shadow: { ...shadow, opacity: Math.max(0, Number((shadow.opacity - 0.1).toFixed(2))) } } })}
+        onUp={() => onChange({ style: { ...titleStyle, shadow: { ...shadow, opacity: Math.min(1, Number((shadow.opacity + 0.1).toFixed(2))) } } })} />
+      <Stepper label="Shadow X" value={`${shadow.offsetX}px`}
+        onDown={() => onChange({ style: { ...titleStyle, shadow: { ...shadow, offsetX: Math.max(-100, shadow.offsetX - 1) } } })}
+        onUp={() => onChange({ style: { ...titleStyle, shadow: { ...shadow, offsetX: Math.min(100, shadow.offsetX + 1) } } })} />
+      <Stepper label="Shadow Y" value={`${shadow.offsetY}px`}
+        onDown={() => onChange({ style: { ...titleStyle, shadow: { ...shadow, offsetY: Math.max(-100, shadow.offsetY - 1) } } })}
+        onUp={() => onChange({ style: { ...titleStyle, shadow: { ...shadow, offsetY: Math.min(100, shadow.offsetY + 1) } } })} />
       <Pressable accessibilityRole="button" disabled={automaticCaptionCount === 0} onPress={onApplyAutomatic}
         style={press([styles.tool, automaticCaptionCount === 0 && styles.toolOff])}>
         <Text style={styles.toolText}>Apply appearance to {automaticCaptionCount} automatic caption{automaticCaptionCount === 1 ? '' : 's'}</Text>

@@ -206,6 +206,8 @@ export type TimelineTitle = {
 };
 
 export type TimelineTitleStyle = {
+  readonly fontFamily?: import('./titleTypography').TitleFontFamily;
+  readonly shadow?: import('./titleTypography').TitleShadow;
   readonly fontWeight: 'regular' | 'bold';
   readonly outlineColor: string;
   readonly outlineWidthPx: number;

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Image, StyleSheet, Text, View } from 'react-native';
+import { Image, Platform, StyleSheet, Text, View } from 'react-native';
+import { titleFontNativeFamily, titleShadowColor } from '@openvideo/shared/titleTypography';
 import { useVideoPlayer, VideoView } from 'expo-video';
 
 import { theme } from '../lib/theme';
@@ -202,6 +203,15 @@ export function PreviewPlayer({
           : `${titleStyle.backgroundColor}${Math.round(titleStyle.backgroundOpacity * 255).toString(16).padStart(2, '0')}`;
         return (
           <View key={title.id} pointerEvents="none" style={styles.titleLayer}>
+            <View style={{ transform: [{ translateX: layout.offsetXPx }, { translateY: layout.offsetYPx }] }}>
+            <View style={{ position: 'absolute', inset: 0, backgroundColor }} />
+            {titleStyle.shadow && titleStyle.shadow.opacity > 0 && <Text style={[styles.title, {
+              position: 'absolute', left: 0, top: 0, padding: layout.paddingPx,
+              color: titleShadowColor(titleStyle.shadow), fontSize: layout.fontSizePx,
+              fontFamily: titleFontNativeFamily(titleStyle.fontFamily ?? 'sans', Platform.OS),
+              fontWeight: titleStyle.fontWeight === 'bold' ? '700' : '400',
+              transform: [{ translateX: titleStyle.shadow.offsetX * layout.fontSizePx / title.sizePx }, { translateY: titleStyle.shadow.offsetY * layout.fontSizePx / title.sizePx }]
+            }]}>{title.text}</Text>}
             <Text
               style={[
                 styles.title,
@@ -209,18 +219,18 @@ export function PreviewPlayer({
                   color: title.color,
                   fontSize: layout.fontSizePx,
                   fontWeight: titleStyle.fontWeight === 'bold' ? '700' : '400',
-                  backgroundColor,
+                  fontFamily: titleFontNativeFamily(titleStyle.fontFamily ?? 'sans', Platform.OS),
                   paddingHorizontal: layout.paddingPx,
                   paddingVertical: layout.paddingPx,
                   textShadowColor: layout.outlineWidthPx > 0 ? titleStyle.outlineColor : 'transparent',
                   textShadowOffset: { width: 0, height: 0 },
                   textShadowRadius: layout.outlineWidthPx,
-                  transform: [{ translateX: layout.offsetXPx }, { translateY: layout.offsetYPx }]
                 }
               ]}
             >
               {title.text}
             </Text>
+            </View>
           </View>
         );
       })}

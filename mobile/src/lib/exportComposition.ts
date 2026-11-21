@@ -192,6 +192,11 @@ export async function exportTimeline(input: {
           positionX: position.x,
           positionY: position.y,
           fontWeight: style.fontWeight,
+          ...(style.fontFamily === undefined ? {} : { fontFamily: style.fontFamily }),
+          ...(style.shadow === undefined ? {} : {
+            shadowColor: style.shadow.color, shadowOpacity: style.shadow.opacity,
+            shadowOffsetX: style.shadow.offsetX, shadowOffsetY: style.shadow.offsetY
+          }),
           outlineColor: style.outlineColor,
           outlineWidthPx: style.outlineWidthPx,
           backgroundColor: style.backgroundColor,

@@ -33,6 +33,7 @@ export const IPC_CHANNELS = {
   timelineMenuCommand: 'timeline-menu:command',
   timelineMenuState: 'timeline-menu:state',
   windowMenuAction: 'window-menu:action',
+  getTitleFontData: 'title-font:data',
   transcriptionRuntimeStatus: 'transcription:runtime-status',
   transcriptionStart: 'transcription:start',
   transcriptionGetJob: 'transcription:get-job',

@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactElement } from 'react';
 import { applyCaptionPreset, CAPTION_FONT_WEIGHTS, CAPTION_PLACEMENTS, CAPTION_STYLE_PRESETS, isAutomaticCaptionId, resolvedTitleStyle } from '../../../shared/captionStyle';
 import { DEFAULT_TITLE, type TimelineTitleStyle } from '../../../shared/timelineTypes';
+import { DEFAULT_TITLE_SHADOW, TITLE_FONT_FAMILIES, TITLE_FONT_LABELS, type TitleFontFamily } from '../../../shared/titleTypography';
 import { Button } from '../ui';
 import { PropertyGroup, PropertyRow, TimingInput } from './InspectorControls';
 import type { TimelineEditorController } from './useTimelineEditor';
@@ -10,6 +11,7 @@ export function TypographyInspector({ editor }: { readonly editor: TimelineEdito
   const titles = editor.project?.timeline.titles ?? [];
   const title = titles.find(entry => entry.id === selectedId) ?? editor.titleAtPlayhead;
   const style = title ? resolvedTitleStyle(title) : null;
+  const shadow = style?.shadow ?? DEFAULT_TITLE_SHADOW;
   const automaticCount = titles.filter(entry => isAutomaticCaptionId(entry.id)).length;
   useEffect(() => {
     const selected = titles.find(entry => entry.id === selectedId);
@@ -39,7 +41,11 @@ export function TypographyInspector({ editor }: { readonly editor: TimelineEdito
       </PropertyGroup>
 
       {title && style && <>
-        <PropertyGroup title="Typography" onReset={() => editor.editTitle(title.id, { sizePx: DEFAULT_TITLE.sizePx, color: DEFAULT_TITLE.color, style: { ...style, fontWeight: 'regular' } })}>
+        <PropertyGroup title="Typography" onReset={() => editor.editTitle(title.id, { sizePx: DEFAULT_TITLE.sizePx, color: DEFAULT_TITLE.color, style: { ...style, fontWeight: 'regular', fontFamily: 'sans' } })}>
+          <PropertyRow label="Font"><select className="property-text-input" aria-label="Title font family" value={style.fontFamily ?? 'sans'}
+            onChange={event => changeStyle({ fontFamily: event.currentTarget.value as TitleFontFamily })}>
+            {TITLE_FONT_FAMILIES.map(family => <option key={family} value={family}>{TITLE_FONT_LABELS[family]}</option>)}
+          </select></PropertyRow>
           <PropertyRow label="Size (px)"><input className="property-number-input" type="number" aria-label="Title size" value={title.sizePx} min={8} max={512}
             onChange={event => editor.editTitle(title.id, { sizePx: Number(event.currentTarget.value) })} /></PropertyRow>
           <PropertyRow label="Weight"><select className="property-text-input" aria-label="Title font weight" value={style.fontWeight}
@@ -71,6 +77,18 @@ export function TypographyInspector({ editor }: { readonly editor: TimelineEdito
             onChange={event => changeStyle({ outlineWidthPx: Number(event.currentTarget.value) })} /></PropertyRow>
         </PropertyGroup>
 
+        <PropertyGroup title="Shadow" onReset={() => changeStyle({ shadow: { ...DEFAULT_TITLE_SHADOW } })}>
+          <label className="inspector-toggle"><input type="checkbox" aria-label="Enable title shadow" checked={shadow.opacity > 0}
+            onChange={event => changeStyle({ shadow: { ...shadow, opacity: event.currentTarget.checked ? 0.7 : 0 } })} />Text shadow</label>
+          <PropertyRow label="Colour"><input className="property-color-input" type="color" aria-label="Title shadow colour" value={shadow.color}
+            onChange={event => changeStyle({ shadow: { ...shadow, color: event.currentTarget.value } })} /></PropertyRow>
+          <PropertyRow label="Opacity"><input className="property-slider" type="range" aria-label="Title shadow opacity" min={0} max={1} step={0.01} value={shadow.opacity}
+            onChange={event => changeStyle({ shadow: { ...shadow, opacity: Number(event.currentTarget.value) } })} /><span className="property-value-chip">{Math.round(shadow.opacity * 100)}%</span></PropertyRow>
+          <PropertyRow label="Offset X"><input className="property-number-input" type="number" aria-label="Title shadow offset X" min={-100} max={100} value={shadow.offsetX}
+            onChange={event => changeStyle({ shadow: { ...shadow, offsetX: Number(event.currentTarget.value) } })} /></PropertyRow>
+          <PropertyRow label="Offset Y"><input className="property-number-input" type="number" aria-label="Title shadow offset Y" min={-100} max={100} value={shadow.offsetY}
+            onChange={event => changeStyle({ shadow: { ...shadow, offsetY: Number(event.currentTarget.value) } })} /></PropertyRow>
+        </PropertyGroup>
         <PropertyGroup title="Background" onReset={() => changeStyle({ backgroundColor: '#000000', backgroundOpacity: 0, paddingPx: 0 })}>
           <label className="inspector-toggle"><input type="checkbox" aria-label="Enable title background" checked={style.backgroundOpacity > 0}
             onChange={event => changeStyle({ backgroundOpacity: event.currentTarget.checked ? 0.72 : 0 })} />Background plate</label>
