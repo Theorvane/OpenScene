@@ -73,7 +73,7 @@ npm run typecheck
 
 Media tests need executable FFmpeg and FFprobe. The [Linux verification environment](docs/media-analysis-environment.md) runs the full suite and both surfaces' type checks using a committed Git snapshot and separate dependencies. With Docker Desktop running, use `npm run verify:media-analysis`; add `-- -AnalyzeEditor` for optional current-build analysis.
 
-[Latest recorded workflow verification](docs/canvas-export-verification.md): actual Windows canvas editing and agent-tool export, Linux FFprobe verification, and 1,191 Linux tests passing with no failures or skips at commit `88c6ecf`. This is that revision's result; run checks for subsequent changes.
+[Latest recorded workflow verification](docs/canvas-export-verification.md): actual Windows canvas editing and agent-tool export, Linux FFprobe verification, and 1,191 Linux tests passing with no failures or skips at commit `1d68304`. This is that revision's result; run checks for subsequent changes.
 
 ## Mobile
 
