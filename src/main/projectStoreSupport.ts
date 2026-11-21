@@ -113,7 +113,8 @@ export async function readProjectSnapshotAtDirectory(
     if (identity === null) {
       return null;
     }
-    const file = await open(projectFile, constants.O_RDONLY | constants.O_NOFOLLOW);
+    // Reject special files on this handle without waiting for a FIFO writer.
+    const file = await open(projectFile, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     try {
       const fileStats = await file.stat();
       if (!fileStats.isFile() || !(await directoryMatches(directory, identity))) {
