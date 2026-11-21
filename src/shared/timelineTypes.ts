@@ -233,6 +233,7 @@ export type TimelineDocument = {
    * must still open. Absent and empty mean the same thing.
    */
   readonly titles?: readonly TimelineTitle[];
+  readonly canvas?: import('./videoCanvasGraph').VideoCanvasGraph;
 };
 
 export type LocalProjectSnapshot = {
