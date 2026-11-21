@@ -1,20 +1,9 @@
-# OpenScene editing
+# Current project context
 
-OpenScene organizes local media into projects and lets people make cuts through an editor workbench.
+OpenScene focuses on local editing with Timeline and Canvas modes.
 
-## Language
+The current implementation uses the pinned OpenCut presentation and the OpenScene TypeScript editing core. A connected card references a real timeline clip. The desktop assistant can inspect timestamped frames and local speech transcripts before proposing edits.
 
-**Project**:
-A named collection of media assets, a cut, and related production material that can be reopened for further work.
+Media generation, production planning, browser-session generation, generation spending controls and voice synthesis have been removed. Project codecs retain legacy fields needed to open existing projects.
 
-**Media asset**:
-A source video, audio recording, or still image available to use in a project.
-_Avoid_: Timeline clip, file path
-
-**Cut**:
-The timed arrangement of clips, titles, and transitions that determines a project's finished video.
-_Avoid_: Editor screen
-
-**Editor workbench**:
-The visual surface where a person previews and changes a cut.
-_Avoid_: Project, cut
+Read AGENTS.md before changing the repository. README.md contains current commands and DESIGN.md describes the editing interface.

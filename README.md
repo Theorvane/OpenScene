@@ -1,294 +1,68 @@
-<p align="center">
-  <img src="docs/assets/openscene-hero.png" alt="OpenScene: the wordmark beside a dark editor window showing a timeline and an agent chat that has trimmed a clip, added another, and is asking permission to export" width="100%" />
-</p>
+# OpenScene
 
-<h1 align="center">OpenScene</h1>
+OpenScene is a local video editor with a timeline, a connected video canvas and a natural-language editing assistant.
 
-<p align="center">
-  A local-first desktop video editor with an AI agent that can drive it — your media stays on your machine, and you choose which model providers, if any, it talks to.
-</p>
+## Editing
 
-<p align="center">
-  <a href="#quick-start">Quick start</a> ·
-  <a href="#the-workspace">The workspace</a> ·
-  <a href="#the-edit-agent">Edit Agent</a> ·
-  <a href="#on-a-phone">Mobile</a> ·
-  <a href="#providers-and-models">Providers</a> ·
-  <a href="#where-your-data-lives">Your data</a> ·
-  <a href="CONTRIBUTING.md">Contributing</a>
-</p>
+- Import video, audio and images into a project.
+- Use **Timeline** for preview, trim, split, tracks, titles, effects and MP4 export.
+- Use **Canvas** to arrange clip cards and connect their playback order.
+- Preview a card to return to its selected clip in Timeline.
+- Save and reopen the same sequence in either mode.
 
-<p align="center">
-  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-7c3aed?style=flat-square" /></a>
-  <a href="https://github.com/Theorvane/openscene/actions"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/Theorvane/openscene/ci.yml?branch=dev&style=flat-square&label=CI" /></a>
-  <a href="https://github.com/Theorvane/openscene/issues"><img alt="Open issues" src="https://img.shields.io/github/issues/Theorvane/openscene?style=flat-square" /></a>
-</p>
+A canvas connection moves its target after the source and closes gaps on that video track. Other tracks and titles retain their positions. Source ranges, playback speed and clip keyframe offsets are preserved. Card coordinates are a device-local layout preference.
 
-<p align="center">
-  <a href="https://apps.apple.com/us/app/openscene-ai-video-editor/id6796586657"><img alt="Download on the App Store" src="https://img.shields.io/badge/App_Store-OpenScene-0d96f6?style=flat-square&logo=apple&logoColor=white" /></a>
-  <a href="https://play.google.com/store/apps/details?id=com.sloki9637.openscene"><img alt="Get it on Google Play" src="https://img.shields.io/badge/Google_Play-OpenScene-01875f?style=flat-square&logo=googleplay&logoColor=white" /></a>
-</p>
+## Editing assistant
 
-> [!IMPORTANT]
-> **Early.** There are signed installers on the [releases page](https://github.com/Theorvane/openscene/releases) for macOS, Windows and Linux, and the app updates itself once installed. The mobile app is on the [App Store](https://apps.apple.com/us/app/openscene-ai-video-editor/id6796586657) and [Google Play](https://play.google.com/store/apps/details?id=com.sloki9637.openscene). Running from source is still the fastest way to follow `dev`. The screenshots below are captures of the desktop app; the hero is an illustration.
->
-> The desktop app was called **OpenVideo** through 0.2.0. Because the rename changes the application id, an existing OpenVideo install will not update itself to OpenScene — download 0.3.0 once and the old one can be removed.
+The desktop assistant can inspect source frames, transcribe a selected audio range, edit clips and start export. Vision-capable models receive actual timestamped JPEG images. Detailed frame review samples one image per second for up to 20 seconds at a time. Speech inspection uses local FFmpeg and whisper.cpp. Review the requested operation before approving a project edit or transcript inspection.
 
-## What is OpenScene?
+Connect a chat provider in Settings or configure a local Ollama model. Requests to a connected model may send the frames, transcript and project context selected for that operation.
 
-OpenScene is an open-source video editor for your own machine — an Electron desktop app, and a React Native app that shares its editing core rather than approximating it. You open a folder as a project, put clips on a timeline, and export an MP4 with your local FFmpeg.
+## Run from source
 
-What makes it different is the **Edit Agent**: a chat panel that sits beside the timeline and can actually operate the editor — read the timeline, add and trim clips, generate voice or video, and start an export. It asks for approval before anything that changes your project.
+Use Node.js 22 or newer and initialize the pinned OpenCut submodule.
 
-Nothing is uploaded on its own. Model providers are opt-in, connected one at a time with your own API key or sign-in, and the app works with none of them connected.
-
-## Architecture
-
-```mermaid
-flowchart LR
-  Creator[Creator]
-
-  subgraph Renderer["Renderer — React UI"]
-    Editor["Timeline · Program Monitor"]
-    Agent["Edit Agent · approval UI"]
-    Studios["Voice · Image · Video studios"]
-  end
-
-  Bridge["Preload — typed window.videoTool bridge"]
-
-  subgraph Main["Electron main process"]
-    Policy["Validation · approval · provider policy"]
-    Projects["Local projects · assets · chats"]
-    Jobs["FFmpeg export · AI job manager"]
-    Secrets["safeStorage · OAuth tokens"]
-    Tools["TypeMCP tool surface"]
-  end
-
-  subgraph Shared["Shared editing core"]
-    Timeline["Timeline rules · composition · validation"]
-    Planning["Shot planning · cost estimation"]
-    Contracts["IPC · provider contracts"]
-  end
-
-  Local[("User-controlled local files")]
-  Providers["Connected providers\nonly after explicit approval"]
-
-  Creator --> Renderer --> Bridge --> Main
-  Renderer <--> Shared
-  Main <--> Shared
-  Main <--> Local
-  Jobs --> Providers
-  Tools --> Policy
-```
-
-The **renderer** collects intent and renders editor state; it never receives raw IPC, FFmpeg execution paths or arguments, or stored provider credentials and OAuth tokens. The **preload** layer exposes only the typed `window.videoTool` bridge. The **main process** owns local projects, secrets, job lifecycle, local FFmpeg execution, and the TypeMCP tool surface. Editing rules, composition, validation, and generation planning live in the portable **shared core**, which desktop and mobile use together.
-
-The separate [OpenCut rewrite](https://github.com/Theorvane/OpenCut) is pinned at `external/opencut` as a Git submodule for integration work. Run `git submodule update --init external/opencut` if you need its source. OpenScene now imports its editor tool rail, media library view, and edit-point controls from that pinned source; see [the integration boundary](docs/opencut-integration.md).
-
-Project folders, imports, generated results, chats, and exports remain local. A connected provider is contacted only for an operation you explicitly start: in a generation studio, that is the visible **Generate** action; for an agent-initiated mutation or job, the Edit Agent asks for approval before execution. The Program Monitor is a best-effort review surface; local FFmpeg MP4 export is the authoritative saved output.
-
-## The workspace
-
-The Projects page asks what you want to make. **Video Editing** opens a timeline project; **AI Creation** opens a story and scene production project. Existing projects keep their saved type when reopened. Chats stay with their project.
-
-![The current Projects page with Video Editing and AI Creation choices and two sample projects](docs/assets/screenshot-projects.png)
-
-In Video Editing, the media bin, Program Monitor, inspector, timeline and Edit Agent share one workspace.
-
-![The current Video Editing workspace with an empty timeline, media bin, Program Monitor, inspector and Edit Agent](docs/assets/screenshot-editor.png)
-
-### Editing
-
-- Import local media into a project folder and place it on video and audio tracks
-- Trim, split, move, duplicate, and delete clips, with undo/redo
-- Adjust opacity, scale, position, rotation, and volume, with keyframes, transitions, and per-track audio mix
-- Review with a playhead and a best-effort Program Monitor
-- Export H.264/AAC MP4 through your local FFmpeg
-- Keyboard shortcuts throughout, remappable in Settings
-- Deliver reviewed automatic captions by burning them into the MP4, exporting a UTF-8 SRT/WebVTT/ASS sidecar, doing both, or doing neither. Manual titles always remain independent.
-- Style titles and approved captions with shared Clean, Boxed, Cinema or Social presets, bounded outline/background controls, and aspect-aware title-safe anchors used by preview and final renderers.
-
-### AI Creation: story to scenes
-
-Start with a production brief. Choose **Plan the whole film** to review a screenplay and scene plan before making shots, or **Build scene by scene** to make one scene and decide what comes next. The planning UI offers 5, 10 and 15 minute targets; shots are planned in five-second units. Connect the selected writing provider in Settings before requesting a plan. Planning and media generation are separate actions with separate cost checks.
-
-![The AI Creation start screen with the two planning modes, production brief and film length](docs/assets/screenshot-video.png)
-
-Open a planned shot to inspect its prompt, references, candidate videos and approval state. Generate or regenerate a take explicitly, review it, then assemble approved material on the project sequence. **Make a single clip instead** opens the shot workbench without requiring a full film plan. Provider-supported clip lengths may differ from the planned shot length.
-
-### Voice generation
-
-Open **Advanced tools → Voice & captions** in an AI Creation project. **Qwen3-TTS (local)** is the default desktop voice model. It runs a user-configured local wrapper with an authorized reference sample; OpenScene does not install the model. [Configure local Qwen TTS](docs/local-qwen-tts.md) before generating, then write a script, prepare and approve the narration plan, generate a WAV take, listen to it and import it into the project. A missing configuration produces a setup error rather than switching to a cloud model.
-
-**VieNeu-TTS v3 Turbo** is another selectable local model for Vietnamese voices. Select it to start or connect to its loopback server and discover its available voices. On Windows, `npm run setup:local-ai` prepares the optional managed VieNeu and whisper.cpp runtimes; it does **not** install Qwen. OpenAI and ElevenLabs remain cloud choices that require your connected API keys. Automatic transcription uses whisper.cpp separately from speech synthesis.
-
-![The Voice and captions tool with Qwen3-TTS selected, a configured-sample choice and narration script](docs/assets/screenshot-voice.png)
-
-Mobile can edit, approve and apply the same narration and caption plan. Speech synthesis and desktop-local Qwen/VieNeu runtimes are unavailable on mobile; their choices show the platform limit.
-
-### Image generation
-
-Under **Advanced tools → Scenes → Reference frames**, create stills from a prompt and aspect ratio. A saved or approved reference can then be used by a video model that accepts image input. Generation is an explicit action.
-
-![The current Reference frames tool with an image prompt, model, style and aspect ratio controls](docs/assets/screenshot-image.png)
-
-## The Edit Agent
-
-The chat panel is not a copilot that writes suggestions for you to apply. It calls the same operations the UI does, through a typed tool surface in the main process:
-
-| The agent can | Tool |
-| --- | --- |
-| Read a project timeline and asset metadata | `getProjectTimeline` |
-| Watch footage — sampled frames arrive as images it can actually see | `watchProjectVideo` |
-| Place, trim, and restyle clips | `addClipToTimeline`, `trimTimelineClip`, `updateClipEffects` |
-| Generate speech or video and follow the job | `createSpeechJob`, `createVideoJob`, `getJobStatus` |
-| Import a finished generation into the project | `importGeneratedResult` |
-| Start a local export | `exportProjectVideo` |
-
-Anything that writes to your project or starts a job pauses for approval first. Read-only calls run immediately.
-
-Conversations are kept per project as sessions: start a new one, switch back to an earlier one, or delete it. History is stored in a path-free `chats.json` inside the project folder.
-
-## On a phone
-
-`mobile/` is a React Native app that runs **the same editing rules as the desktop**. Every timeline
-operation — placing, trimming, splitting, moving, what plays at a given moment, what an export
-composites — is a pure function in `src/shared/`, imported by both. Neither reimplements a rule, which
-is what stops a project behaving one way on a laptop and another on a phone.
-
-It is published on both stores:
-[**App Store**](https://apps.apple.com/us/app/openscene-ai-video-editor/id6796586657) ·
-[**Google Play**](https://play.google.com/store/apps/details?id=com.sloki9637.openscene).
-
-Projects live inside the app rather than in a folder you file away, because a phone user has no
-filesystem they think in. Export hands you the finished MP4 through the share sheet.
-
-- A timeline with a preview, playback, pinch-to-zoom, draggable clips and trim handles, and a media bin
-- Video and image generation against the shared provider catalog; narration planning and captions share the desktop project format, while speech synthesis remains desktop-only
-- A tool-calling assistant that shows every call for approval before it runs
-- Spending permission asked **per kind** — allowing every image is a different decision from allowing
-  every video, and they do not cost the same
-- Multi-shot planning and reviewed candidates using shared shot and continuity rules
-
-Export renders natively on both: AVFoundation on iOS, Media3 Transformer on Android. Where a
-surface genuinely cannot do something it says so rather than failing quietly — holding a still image
-in the composition is not implemented on iOS yet, so the app refuses those exports there instead of
-producing a video with the picture missing.
-
-**OpenScene is free on desktop and mobile**, with no subscription, paid tier, or ads. AI generation
-uses the provider account you connect and can incur that provider's charges; spending approval stays
-explicit. The mobile app reports anonymous usage counts to the publisher's own server, with a switch
-in Settings. The desktop app has no analytics. See [your data](#where-your-data-lives).
-
-```bash
-cd mobile
-npm install
-npx expo run:ios     # or: npx expo run:android
-```
-
-## Providers and models
-
-The provider and model registry is generated from a snapshot of the [models.dev](https://models.dev) catalog — roughly 150 providers and several thousand models — and is regenerated with `scripts/generateLlmCatalog.mjs`.
-
-- **Local**: [Ollama](https://ollama.com) runs models on your machine with no key and no account.
-- **Cloud chat**: connect a provider in *Settings → Providers* with an API key. Only connected providers' models appear in the pickers.
-- **OpenAI**: two login methods on one provider — an API key, or a ChatGPT sign-in (PKCE OAuth) for the model set that backend serves. Tokens stay in main-process safe storage; the renderer only learns whether you are connected.
-- **Generation**: runnable video models across Google Gemini Omni/Veo, OpenAI Sora, Runway, Luma and a user-managed ComfyUI Wan Animate worker — Runway also fronts Seedance, Veo 3.1, HappyHorse and a separate Gemini Omni route on one key. Google image generation uses the current Nano Banana family through Gemini Interactions, or an experimental desktop-only background browser worker that drives the normal Gemini UI with the user's encrypted signed-in session. Providers without a real adapter stay listed but honestly unavailable rather than pretending to work, and every model says which it is.
-
-A provider API key is entered in Settings and sent once through the typed bridge to Electron `safeStorage`; stored provider credentials are never returned to the renderer.
-
-## Quick start
-
-### Prerequisites
-
-- Node.js 22+ and npm 10+
-- FFmpeg, for MP4 export
-- macOS: Screen Recording permission for the terminal running OpenScene, if you use window capture
-
-### Install and run
-
-The Windows setup executable installs FFmpeg through WinGet when it cannot
-find an existing copy. Automatic installation requires WinGet and an internet
-connection. Source builds and other desktop packages use a separately installed
-FFmpeg.
-
-```bash
-git clone https://github.com/Theorvane/openscene.git
-cd openscene
-npm install
+```sh
+git submodule update --init
+npm ci
 npm run dev
 ```
 
-OpenScene uses **your** FFmpeg. Either make `ffmpeg` discoverable through an absolute directory on `PATH`, or point at it explicitly:
+FFmpeg is required for export and source analysis. The Windows setup executable installs it through WinGet when no existing copy is found. Other packages and source builds use FFmpeg from PATH or an absolute VIDEO_TOOL_FFMPEG_PATH.
 
-```bash
-VIDEO_TOOL_FFMPEG_PATH=/absolute/path/to/ffmpeg npm run dev
-```
+For local speech transcription, run npm run setup:transcription. The setup script downloads pinned whisper.cpp binaries and a model into ignored local storage and verifies their checksums. Explicit runtime settings are listed in .env.example.
 
-Relative FFmpeg paths are rejected. Without a usable FFmpeg, OpenScene reports the problem instead of starting an export.
+## Verify
 
-### Try the agent without any cloud account
-
-```bash
-ollama pull qwen2.5-coder
-ollama serve
-```
-
-Then pick the local model in the chat panel's model picker. Note that watching footage needs a vision-capable model.
-
-## Where your data lives
-
-Projects are folders you choose. Assets, chat history, and generated results are written inside them; app-managed projects and recordings live under Electron user data.
-
-```bash
-VIDEO_TOOL_RECORDINGS_DIR=/absolute/path/to/recordings npm run dev
-```
-
-The renderer talks to the main process through a narrow typed `window.videoTool` bridge. Raw `ipcRenderer`, FFmpeg executable paths and arguments, stored credentials, and OAuth tokens stay outside it. Some safe display paths and an API key entered in Settings cross through explicit typed operations; a picked reference image, for example, crosses as bytes, never as a path.
-
-- **No advertising SDK.** Neither app requests ads or includes an ad mediation dependency.
-- **No account, no crash reporting.** The desktop app sends nothing about you anywhere.
-  The mobile app reports anonymous usage counts — which screens are opened, whether an
-  export ran and finished — to the publisher's own server, never to a third party, and
-  never carrying prompts, projects, media, file names or keys. It is a switch in Settings.
-- **No background network calls.** The app talks to a provider only when you ask it to, using a provider you connected.
-- **Capture is scoped.** Window capture grants access to the single source you select.
-- **Removable.** Projects can be removed from the list — a folder you chose is only unregistered, never deleted recursively — and conversations can be deleted.
-
-## Current boundaries
-
-| Works today | Not yet |
-| --- | --- |
-| Selected-window capture to local WebM | Full-screen capture; mic or system-audio mix in the recorder |
-| Local projects, media, timeline editing, undo/redo | Holding a still image in an iOS export — the app refuses those there rather than dropping the picture |
-| Local H.264/AAC MP4 export | Other export formats; frame-perfect multitrack mastering guarantees |
-| Signed installers and auto-update on all three desktop platforms, and the mobile app on the App Store and Google Play | Cloud sync, hosted rendering, accounts |
-| Agent-driven editing, generation, and export | Unattended operation — changes ask for approval |
-| Veo image-to-video, Start-End interpolation, and 1-3 character/product references; desktop ComfyUI Wan Move/Mix Motion Control with user-supplied API workflows | Sora reference images (needs a multipart upload path this build does not send); bundled ComfyUI/models |
-
-Program Monitor is a best-effort review surface. FFmpeg export is the authoritative output.
-
-## Verify from source
-
-```bash
+```sh
 npm run typecheck
 npm test
 npm run build
+cd mobile
+npm ci
+npm run typecheck
 ```
 
-`npm run build` compiles main, preload, and renderer into `out/`. It does not package an installer.
+The build command creates application output. Use npm run package for desktop packages.
 
-Some behavior can only be checked by hand: OS permissions, real provider calls, and final render quality.
+## Project compatibility
 
-## Contribute
+Projects created by earlier versions retain their imported media and saved timeline. Legacy AI metadata is decoded to preserve project readability. New media generation, production boards and generation provider automation have been removed.
 
-1. Read [AGENTS.md](AGENTS.md) and search existing issues and pull requests.
-2. Create or find a GitHub issue, update `dev`, and branch as `<type>/<issue-number>-<description>`.
-3. Add or update tests for behavior changes.
-4. Run the checks above and open a pull request against `dev`.
+The mobile app provides Edit, Canvas, Library and the editing assistant. Mobile Canvas applies the same clip connection rule with a compact sequence view. Frame and speech inspection through chat are desktop capabilities.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md), [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md), [SUPPORT.md](SUPPORT.md), and [SECURITY.md](SECURITY.md).
+## Architecture
 
-## License
+- src/main owns filesystem access, credentials, FFmpeg, transcription and editing tools.
+- src/preload exposes the typed window.videoTool bridge.
+- src/renderer owns the desktop interface.
+- src/shared contains editing rules and project codecs shared with mobile.
+- external/opencut supplies pinned editor presentation components.
 
-[MIT](LICENSE)
+See [editor design](DESIGN.md), [OpenCut integration](docs/opencut-integration.md), [assistant boundaries](docs/hybrid-ai-editor-direction.md) and [FFmpeg workflow](docs/ffmpeg-skill-integration.md).
+
+OpenScene and the pinned OpenCut source use MIT licenses. See [third-party notices](THIRD_PARTY_NOTICES.md).
+
+## Usage reporting
+
+The mobile app reports anonymous usage counts. Settings provides a switch to turn reporting off. Event properties are limited to numbers, booleans and null, and do not contain prompts, media paths or credentials.

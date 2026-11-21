@@ -4,9 +4,9 @@
 
 OpenScene is an Electron, React, TypeScript, and Vite desktop app. The app is split into three strict surfaces:
 
-- `src/main/`: Electron main process. Owns desktop capture selection, OS permissions, local file access, project storage, FFmpeg export jobs, local TTS jobs, app menu wiring, and shell open or reveal actions.
+- `src/main/`: Electron main process. Owns desktop capture selection, OS permissions, local file access, project storage, FFmpeg export jobs, local transcription jobs, app menu wiring, and shell open or reveal actions.
 - `src/preload/`: typed bridge. Exposes the narrow `window.videoTool` API and never exposes raw `ipcRenderer`.
-- `src/renderer/`: React UI. Owns capture controls, project timeline editing, Program Monitor preview, narration UI, and editor state.
+- `src/renderer/`: React UI. Owns capture controls, project timeline editing, Program Monitor preview, canvas UI, and editor state.
 - `src/shared/`: IPC names, validators, timeline models, export types, and provider seam types shared across main, preload, renderer, and tests.
 
 ## Commands
@@ -31,12 +31,11 @@ npm run build
 ## Local-First And Security Constraints
 
 - Keep `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`, `webSecurity: true`, and blocked window navigation.
-- File paths, FFmpeg executable paths, FFmpeg argv, voice sample paths, and generated output paths stay in the main process. The renderer gets typed job status and open or reveal actions.
-- OpenScene stores recordings, projects, imported assets, voice profiles, TTS output, and exports locally under Electron `userData` unless an explicit local override exists.
+- File paths, FFmpeg executable paths, FFmpeg argv, transcription input paths, and export paths stay in the main process. The renderer gets typed job status and open or reveal actions.
+- OpenScene stores recordings, projects, imported assets, transcripts and exports locally under Electron `userData` unless an explicit local override exists.
 - No cloud upload, analytics, account system, crash reporting, or auto-update is
   implemented on the desktop. `mobile/` has three deliberate exceptions, none of
-  which exists on the desktop: it calls providers directly — generation runs
-  against the user's own accounts, per operation and behind the spend prompt —
+  which exists on the desktop: its editing assistant calls the selected provider using the user's own account —
   and it reports anonymous usage counts to the publisher's own OpenPanel instance.
 - Each is an exception to that line rather than a widening of it. Usage reporting
   in particular is bounded by `mobile/src/lib/analytics.ts`: a closed list of
@@ -45,7 +44,7 @@ npm run build
   that list can express. Adding an event means adding it there and deciding
   whether it belongs, and the switch is in Settings, on by default and stated in
   the app rather than only in a policy.
-- Future hybrid AI support must follow [`docs/hybrid-ai-editor-direction.md`](docs/hybrid-ai-editor-direction.md): local models are user-configured, connected services are selected and authorized per operation, and provider adapters remain behind typed seams until a separately reviewed implementation adds them.
+- Future hybrid AI support must follow [`docs/hybrid-ai-editor-direction.md`](docs/hybrid-ai-editor-direction.md): local models are user-configured and connected chat providers are selected and authorized per operation.
 
 ## Compatibility Identifiers
 
@@ -78,8 +77,6 @@ migrate what is stored under it, it orphans it:
 
 - Prefer typed shared contracts over ad hoc IPC payloads.
 - Treat Program Monitor as best-effort preview. FFmpeg MP4 export is the supported final output for saved local timelines.
-- Keep local Qwen TTS as a user-configured local wrapper. The app must not download models or promise model compatibility.
-- Preserve consent boundaries for voice samples. Samples must be user-owned or authorized, stored locally, and deletable from the app store.
 - When editing docs, use `OpenScene` for the product name and keep compatibility identifiers exactly as written above.
 
 ## Two Surfaces, One Core
@@ -115,7 +112,7 @@ A feature is not finished on one of them.
 ## Agent Skills & TypeMCP Integration
 
 - **Agent Skills Location**: `.agents/skills/api-to-typemcp/SKILL.md` (Integrates `api-to-typemcp` skill for converting OpenAPI/Swagger specifications or API docs into TypeMCP MCP projects).
-- **TypeMCP Server & Tools**: OpenScene internal process capabilities (AI video generation, TTS speech synthesis, job status tracking) are declared as standard TypeMCP tools (`@theorvane/type-mcp`) in `src/main/openVideoMcpServer.ts` and exposed over IPC (`window.videoTool.mcpGetTools` / `mcpExecuteTool`).
+- **TypeMCP Server & Tools**: OpenScene editing capabilities (frame inspection, transcription, timeline editing and export) are declared as standard TypeMCP tools (`@theorvane/type-mcp`) in `src/main/openVideoMcpServer.ts` and exposed over IPC (`window.videoTool.mcpGetTools` / `mcpExecuteTool`).
 
 ## Required Issue, Branch, And PR Workflow
 
