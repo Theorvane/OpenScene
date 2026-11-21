@@ -85,7 +85,7 @@ export function ApplicationMenuBar(props: Props): ReactElement {
   }, []);
 
   useEffect(() => {
-    if (document.documentElement.dataset.platform === 'darwin') return;
+    if (document.documentElement.dataset.platform !== 'win32') return;
     const access = (event: globalThis.KeyboardEvent): void => {
       // F10 is the Windows menu access key; Alt+letter also opens a menu directly.
       const index = event.key === 'F10' && !event.shiftKey ? 0

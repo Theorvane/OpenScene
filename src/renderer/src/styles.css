@@ -502,7 +502,8 @@ button {
 }
 
 .application-menu { position: relative; display: flex; align-items: center; gap: 10px; -webkit-app-region: no-drag; z-index: 100; }
-:root[data-platform="darwin"] .application-menu { display: none; }
+:root:not([data-platform="win32"]) .application-menu { display: none; }
+:root:not([data-platform="win32"]) .product-chrome { grid-template-columns: minmax(0, 1fr) minmax(0, auto); }
 .application-menu__brand { font-size: 20px; font-weight: 650; letter-spacing: -2px; padding-right: 4px; color: var(--foreground); }
 .application-menu__brand > span { color: var(--primary); }
 .application-menu [role="menubar"] { display: flex; align-items: center; gap: 1px; }

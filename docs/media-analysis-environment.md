@@ -7,7 +7,7 @@
 | 검사 | 결과 |
 | --- | --- |
 | 기존 실패 파일 `clipSpeed.test.ts`, `metadataPrivacyFfmpeg.test.ts` | 21개 테스트 통과 |
-| 전체 Vitest | 186개 파일, 1,143개 테스트 통과, 실패 0, 건너뜀 0 |
+| 전체 Vitest | 188개 파일, 1,159개 테스트 통과, 실패 0, 건너뜀 0 |
 | 데스크톱 Node / Web 타입 검사 | 통과 |
 | 모바일 타입 검사 | 통과 |
 | 내보낸 MP4의 실제 FFprobe 검사 | H.264 High, yuv420p, 640×360, 30fps, 189프레임, 6.3초 |
