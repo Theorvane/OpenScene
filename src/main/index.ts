@@ -8,6 +8,7 @@ import { SourceCatalog, type RawCaptureSource } from '../shared/sourceCatalog';
 import type { MediaKind } from '../shared/timelineTypes';
 import { installApplicationMenu } from './applicationMenu';
 import { readTitleFontData } from './titleFontData';
+import { executeRegisteredEditorTool } from './mcpToolDispatch';
 import { AssetLibraryStore } from './assetLibraryStore';
 import { registerAudioDetachIpcHandler } from './audioDetachIpcHandlers';
 import { AudioDetachService } from './audioDetachService';
@@ -355,19 +356,7 @@ async function installIpcHandlers(): Promise<void> {
   });
 
   ipcMain.handle(IPC_CHANNELS.mcpExecuteTool, async (_event, toolName: string, params: unknown) => {
-    try {
-      if (toolName === 'addClipToTimeline') {
-        const result = await mcpServerInstance.addClipToTimeline(params as any);
-        return ok(result);
-      }
-      if (toolName === 'exportProjectVideo') {
-        const result = await mcpServerInstance.exportProjectVideo(params as any);
-        return ok(result);
-      }
-      return fail('INVALID_INPUT', `MCP tool ${toolName} is not recognized.`);
-    } catch (err) {
-      return fail('UNKNOWN_ERROR', err instanceof Error ? err.message : `Failed to execute MCP tool ${toolName}`);
-    }
+    return executeRegisteredEditorTool(mcpServerInstance, toolName, params);
   });
 
   const agentChatTools = await createAgentChatTools(mcpServerInstance);

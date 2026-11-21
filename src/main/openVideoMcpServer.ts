@@ -12,6 +12,10 @@ import { addTitle, removeTitle, updateTitle } from '../shared/timelineTitleLogic
 import { cutNearest, removeTransitionAtCut, setTransitionAtCut } from '../shared/timelineTransitionLogic';
 import { CLIP_EFFECT_RANGES, DEFAULT_CLIP_EFFECTS, type ClipEffects, type TimelineTrack } from '../shared/timelineTypes';
 import { connectVideoClips } from '../shared/videoCanvas';
+import { applyEditorOperations, editingCapabilities } from '../shared/editorOperations';
+import { CANVAS_BLOCK_CATALOG } from '../shared/canvasBlockCatalog';
+import { EMPTY_CANVAS_GRAPH } from '../shared/videoCanvasGraph';
+import { evaluateCanvasBlock } from '../shared/videoCanvasBlocks';
 import { resolveVideoInspectionRange, sampleVideoInspectionSeconds } from '../shared/videoInspectionRange';
 import type { ExportIpcService } from './exportIpcService';
 import { discoverFfmpeg } from './ffmpegDiscovery';
@@ -117,6 +121,8 @@ export class OpenVideoMcpServer {
             tracks: project.timeline.tracks.map((track) => ({
               id: track.id,
               kind: track.kind,
+              name: track.name,
+              ...(track.kind === 'audio' ? { mix: track.mix } : {}),
               clips: track.clips.map((clip) => ({
                 id: clip.id,
                 assetId: clip.assetId,
@@ -130,13 +136,15 @@ export class OpenVideoMcpServer {
                   it already is.
                 */
                 timelineEndMs: clipTimelineEndMs(clip),
-                effects: clip.effects ?? DEFAULT_CLIP_EFFECTS
+                effects: clip.effects ?? DEFAULT_CLIP_EFFECTS,
+                keyframes: clip.keyframes
               }))
             })),
             // Both were invisible: an agent asked about a caption could not tell
             // one existed, let alone edit it.
             titles: project.timeline.titles ?? [],
-            transitions: project.timeline.transitions
+            transitions: project.timeline.transitions,
+            canvas: project.timeline.canvas ?? EMPTY_CANVAS_GRAPH
           }
         }
       };
@@ -788,6 +796,41 @@ export class OpenVideoMcpServer {
       // metadata for, which for this one would mean the decorators did not run.
       tools: (getOpenVideoMcpDefinition()?.tools ?? []).map((tool) => tool.name)
     };
+  }
+
+  @McpTool({ description: 'Discover every supported editing operation, canvas block, parameter and quick-start workflow. Read this before constructing an editProject batch. Read-only; never returns paths.', input: z.object({}) })
+  async getEditingCapabilities() {
+    return { success: true, ...editingCapabilities(), blocks: CANVAS_BLOCK_CATALOG };
+  }
+
+  @McpTool({ description: 'Inspect saved canvas connections, parameters, stable source ranges and per-block readiness/duration. Read-only. Use clip IDs from getProjectTimeline as sources.', input: z.object({ projectId: z.string().min(1) }) })
+  async getCanvasWorkflow(params: { projectId: string }) {
+    if (!this.projectStore) return { success: false, error: 'ProjectStore service is not available.' };
+    try {
+      const project = await this.projectStore.open(params.projectId);
+      if (!project) return { success: false, error: 'Project not found.' };
+      const graph = project.timeline.canvas ?? EMPTY_CANVAS_GRAPH;
+      return { success: true, projectId: project.id, graph, outputs: graph.blocks.map(block => {
+        const result = evaluateCanvasBlock(project.timeline, graph, block.id);
+        return result.success ? { blockId: block.id, ready: true, type: result.output.type, durationMs: result.output.durationMs }
+          : { blockId: block.id, ready: false, error: result.error };
+      }) };
+    } catch (error: unknown) { return { success: false, error: error instanceof Error ? error.message : 'Cannot read workflow.' }; }
+  }
+
+  @McpTool({ description: 'Apply 1–64 editing operations atomically, then save and refresh the editor. Supports all canvas blocks/templates/connections, clip placement/move/duplicate/trim/split/effects, track mix/order and titles including font/shadow/caption styles. Call getEditingCapabilities for field names and examples. Times are milliseconds. Unknown fields, invalid ports, cycles and invalid timeline edits are refused without partial writes. Requires user approval.',
+    input: z.object({ projectId: z.string().min(1), operations: z.array(z.record(z.string(), z.unknown())).min(1).max(64) }) })
+  async editProject(params: { projectId: string; operations: readonly unknown[] }) {
+    if (!this.projectStore) return { success: false, error: 'ProjectStore service is not available.' };
+    try {
+      const project = await this.projectStore.open(params.projectId);
+      if (!project) return { success: false, error: 'Project not found.' };
+      const result = applyEditorOperations(project.timeline, params.operations, project.assets);
+      if (!result.success) return result;
+      await this.projectStore.saveTimeline(project.id, result.timeline);
+      this.notifyProjectTimelineChanged?.(project.id);
+      return { success: true, projectId: project.id, appliedOperations: params.operations.length, outputIds: result.outputIds };
+    } catch (error: unknown) { return { success: false, error: error instanceof Error ? error.message : 'The edit could not be saved.' }; }
   }
 }
 

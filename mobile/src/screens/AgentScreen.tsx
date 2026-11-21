@@ -53,9 +53,8 @@ import { MIN_TAP, press } from '../lib/touch';
  */
 const CAPABILITIES =
   `Your tools are the whole of what you can do here: ${AGENT_TOOLS.map((tool) => tool.name).join(', ')}. ` +
-  'You cannot edit the timeline — trimming, splitting, moving, deleting clips and changing clip effects are done by ' +
-  'the user on the Edit tab, and you have no tool for any of them. You cannot export; that is the Export button in ' +
-  'the title bar. Connect clips on the Canvas tab. Video frame and speech inspection through chat are available in the desktop Edit Agent. ' +
+  'Read describe_timeline, get_editing_capabilities and get_canvas_workflow first. Use edit_project after approval to edit clips, tracks, keyframes, effects, typography and canvas blocks or quick starts in atomic batches. Times are milliseconds. ' +
+  'Apply the final canvas block to materialize a workflow, then inspect the result. export_project renders and lets the user save the current cut. Video frame and speech inspection through chat are available in the desktop Edit Agent. ' +
   'When a request needs something you have no tool for, say which part you cannot do and name the tab or control ' +
   'that does it, then do the part you can.';
 

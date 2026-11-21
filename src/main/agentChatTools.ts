@@ -25,7 +25,9 @@ import { OpenVideoMcpServer } from './openVideoMcpServer';
  */
 export const AGENT_CHAT_READ_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set([
   'getProjectTimeline',
-  'watchProjectVideo'
+  'watchProjectVideo',
+  'getEditingCapabilities',
+  'getCanvasWorkflow'
 ]);
 
 /**

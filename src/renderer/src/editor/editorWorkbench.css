@@ -34,7 +34,7 @@
 .canvas-library__badge--audio { color: var(--success); }
 .canvas-library__badge--compose { color: var(--warning); }
 .canvas-library__hint { margin-top: auto; padding-top: 20px; color: var(--muted-foreground); line-height: 1.9; font-size: 11px; }
-.canvas-stage .video-canvas__toolbar { flex-wrap: nowrap; height: 44px; box-sizing: border-box; padding: 8px 14px; }
+.canvas-stage .video-canvas__toolbar { flex-wrap: wrap; min-height: 44px; box-sizing: border-box; padding: 8px 14px; }
 .video-canvas__toolbar > strong small { margin-left: 10px; color: var(--muted-foreground); font-size: 10px; font-weight: 400; }
 .canvas-stage .video-canvas__status { min-height: 38px; box-sizing: border-box; background: var(--card); font-size: 11px; }
 .canvas-stage .video-canvas__scroll { background-size: 24px 24px; }

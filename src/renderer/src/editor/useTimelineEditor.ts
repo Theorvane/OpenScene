@@ -42,6 +42,7 @@ import { applyTranscriptionCues, type TranscriptionDraft } from '../../../shared
 import { connectVideoClips } from '../../../shared/videoCanvas';
 import { applyCanvasBlock } from '../../../shared/videoCanvasBlocks';
 import { EMPTY_CANVAS_GRAPH, parseVideoCanvasGraph, type VideoCanvasGraph } from '../../../shared/videoCanvasGraph';
+import { applyEditorOperations } from '../../../shared/editorOperations';
 import { errorMessage, type StatusMessage } from '../appTypes';
 import { createTimelineHistory, pushTimelineHistory, redoTimelineHistory, undoTimelineHistory, type TimelineHistory } from './editorTimelineHistory';
 import { findClipSelection, findFirstCompatibleTrack, insertionStartForTrack, mediaAssetReady, nextTrackName, placeReadyAssetOnTimeline } from './editorTimelineView';
@@ -726,6 +727,12 @@ export function useTimelineEditor() {
   }, [project, refreshProjects]);
 
   return {
+    applyEditingOperations: (operations: readonly unknown[]): boolean => {
+      if (project === null) return false;
+      const result = applyEditorOperations(project.timeline, operations, project.assets);
+      if (!result.success) { setStatusMessage({ tone: 'warning', text: result.error }); return false; }
+      return replaceTimeline(() => result.timeline, 'Workspace edits applied. Use Undo to restore.') !== null;
+    },
     updateCanvasGraph: (graph: VideoCanvasGraph) => replaceTimeline((timeline) => {
       const parsed = parseVideoCanvasGraph(graph);
       return parsed === null ? null : { ...timeline, canvas: parsed };
