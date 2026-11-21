@@ -56,4 +56,3 @@ export function PropertyRow({ label, children }: PropertyRowProps): ReactElement
     </div>
   );
 }
-
