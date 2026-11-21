@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { runFfprobe } from './ffprobeRunner';
 import type { ExportMeasurement } from '../shared/exportReview';
 
 /**
@@ -11,8 +11,6 @@ import type { ExportMeasurement } from '../shared/exportReview';
  * than failing it, because being unable to inspect a file says nothing about
  * the file.
  */
-
-const PROBE_TIMEOUT_MS = 15_000;
 
 /** `ffmpeg` and `ffprobe` live in the same directory and share an extension. */
 export function ffprobePathFor(ffmpegPath: string): string {
@@ -111,41 +109,8 @@ export type MeasureExportInput = {
 
 /** Null means "not measured" — never "measured and fine". */
 export async function measureExportedFile(input: MeasureExportInput): Promise<ExportMeasurement | null> {
-  const probePath = ffprobePathFor(input.ffmpegPath);
-  return new Promise<ExportMeasurement | null>((resolve) => {
-    let settled = false;
-    const finish = (measurement: ExportMeasurement | null) => {
-      if (settled) return;
-      settled = true;
-      resolve(measurement);
-    };
-
-    let child: ReturnType<typeof spawn>;
-    try {
-      child = spawn(probePath, [...ffprobeArgs(input.filePath)], { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
-    } catch {
-      // Windows application control may refuse spawn synchronously. As with an
-      // unavailable probe, keep the completed MP4 and report it as unchecked.
-      finish(null);
-      return;
-    }
-    let stdout = '';
-    child.stdout?.on('data', (chunk: Buffer) => {
-      stdout += chunk.toString('utf8');
-    });
-    const timeout = setTimeout(() => {
-      child.kill();
-      finish(null);
-    }, PROBE_TIMEOUT_MS);
-    // A missing ffprobe arrives here, and is the ordinary case on a machine
-    // with only the one binary on its PATH.
-    child.on('error', () => {
-      clearTimeout(timeout);
-      finish(null);
-    });
-    child.on('close', (code) => {
-      clearTimeout(timeout);
-      finish(code === 0 ? parseFfprobeOutput(stdout) : null);
-    });
-  });
+  const result = await runFfprobe({ executablePath: ffprobePathFor(input.ffmpegPath), filePath: input.filePath, args: ffprobeArgs(input.filePath) });
+  if (result === null) return null;
+  const measurement = parseFfprobeOutput(result.stdout);
+  return measurement === null ? null : { ...measurement, verificationRuntime: result.runtime };
 }

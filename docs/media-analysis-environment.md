@@ -53,4 +53,17 @@ REA의 새 실행은 결과 디렉터리를 매번 만들어 이전 Evidence를 
 
 Linux 검증 초기에 모바일 의존성이 빠진 점과 `git archive`의 Windows 줄바꿈 변환을 발견해 환경 준비 단계에서 바로잡았다. upstream FFmpeg 스킬은 manifest의 원본 바이트를 유지하도록 Git 속성을 명시했다. 검증용으로 소스나 체크섬을 바꾸지 않았다.
 
-Windows 데스크톱 프로세스의 FFprobe·REA 네이티브 모듈 제한은 그대로다. 이 결과는 구성한 Linux 환경에서 도구와 테스트가 정상 실행된다는 뜻이다. Windows 앱의 자동 검사가 Linux 컨테이너를 호출하도록 바뀐 것은 아니다. 모바일 실기기 실행도 이번 범위에서 검증하지 않았다.
+Windows 보안 정책은 유지한다. Windows 앱은 기본적으로 네이티브 FFprobe를 먼저 사용하고, 실행할 수 없을 때 준비된 로컬 Linux 컨테이너로 자동 전환한다. 이 Windows 세션에서는 네이티브 검증도 실제 통과했으며, 아래 Linux 선택 설정으로 컨테이너 연결도 별도 검증했다. 모바일 실기기 실행은 이번 환경에서 검증하지 않았다.
+
+## Windows 앱의 자동 검사 연결
+
+Docker Desktop의 Linux 엔진을 실행하고 위 스크립트로 이미지를 준비한다. 앱은 엔진을 시작하거나 이미지를 다운로드·빌드하지 않는다. 기본 경로는 네이티브 FFprobe이며, Windows에서 시작 오류가 나면 `openscene-media-analysis:local`을 호출한다. 직접 Linux 환경을 선택하려면 앱을 시작하기 전에 다음 환경 변수를 지정한다.
+
+```powershell
+$env:VIDEO_TOOL_FFPROBE_RUNTIME = 'linux-container'
+npm run dev
+```
+
+메인 프로세스에서 출력 파일 하나만 읽기 전용으로 연결한다. 컨테이너는 네트워크·권한·쓰기 가능한 루트 파일시스템 없이 실행하며, 30초 제한과 1MB 출력 제한을 둔다. 실패하면 측정하지 못한 결과로 표시하며 검증 성공으로 처리하지 않는다. 완료 상태는 측정값을 기존 타임라인과 대조한 후 `Verified with Linux FFprobe.`를 표시한다. 컨테이너 메타데이터 검사도 같은 실행 경로를 사용한다.
+
+실제 Windows 앱에서 네 종류 블록의 연결·적용·Undo/Redo·저장·다시 열기를 확인했다. 새로 출력한 MP4는 6.3초, 640×360, 스테레오였으며 Linux 검증 결과는 `checked: true`, `ok: true`, `verificationRuntime: linux-container`였다. Chromium 디코딩으로 음성 구간 RMS 0.15989, 무음 구간 0, 원본 대사 구간 0.08712도 확인했다. 쉼표가 들어간 Windows 프로젝트 경로에서도 단일 파일 마운트가 작동했다.
