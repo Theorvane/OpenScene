@@ -168,7 +168,7 @@ function trackToggleStyle(isOn: boolean, tone: 'danger' | 'warning' | 'primary')
  * the two makes the mismatch unrepresentable: until the answer matches the asked
  * question, the answer is null.
  */
-function useAssetPlaybackUrl(projectId: string, assetId: string): string | null {
+export function useAssetPlaybackUrl(projectId: string, assetId: string): string | null {
   const [resolved, setResolved] = useState<{ readonly assetId: string; readonly url: string } | null>(null);
 
   useEffect(() => {

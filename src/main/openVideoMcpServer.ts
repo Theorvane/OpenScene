@@ -16,6 +16,7 @@ import type { ResultAssetImportService } from './resultAssetImportService';
 import type { ProjectStore } from './projectStore';
 import type { TranscriptionService } from './transcriptionService';
 import { resolveVideoInspectionRange, sampleVideoInspectionSeconds } from '../shared/videoInspectionRange';
+import { connectVideoClips } from '../shared/videoCanvas';
 import { discoverFfmpeg } from './ffmpegDiscovery';
 import {
   extractVideoFrames,
@@ -738,6 +739,25 @@ export class OpenVideoMcpServer {
       return { success: false, error: 'Local speech inspection is unavailable.' };
     }
     return this.transcriptionService.inspectVideoSpeech(params);
+  }
+
+  @McpTool({
+    description: 'Connect two clips on the same video track in canvas playback order. Moves the target directly after the source, closes gaps on that track and saves the sequence. Requires user approval.',
+    input: z.object({ projectId: z.string().min(1), fromClipId: z.string().min(1), toClipId: z.string().min(1) })
+  })
+  async connectTimelineClips(params: { projectId: string; fromClipId: string; toClipId: string }) {
+    if (this.projectStore === undefined) return { success: false, error: 'Project service is unavailable.' };
+    try {
+      const project = await this.projectStore.open(params.projectId);
+      if (project === null) return { success: false, error: 'Project was not found.' };
+      const timeline = connectVideoClips(project.timeline, params.fromClipId, params.toClipId);
+      if (timeline === null) return { success: false, error: 'Choose two different clips on the same video track.' };
+      await this.projectStore.saveTimeline(params.projectId, timeline);
+      this.notifyProjectTimelineChanged?.(params.projectId);
+      return { success: true, projectId: params.projectId, fromClipId: params.fromClipId, toClipId: params.toClipId };
+    } catch {
+      return { success: false, error: 'The clip connection could not be saved.' };
+    }
   }
 
   @McpTool({

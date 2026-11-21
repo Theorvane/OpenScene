@@ -34,7 +34,7 @@ export function ProjectsScreen({
 }) {
   const [projects, setProjects] = useState<readonly ProjectSummary[]>([]);
   const [draftName, setDraftName] = useState('');
-  const [entrance, setEntrance] = useState<WorkspaceMode>('create');
+  const [entrance, setEntrance] = useState<WorkspaceMode>('edit');
   const visibleProjects = projects;
   /** The project being renamed, and the name being typed for it. */
   const [renaming, setRenaming] = useState<{ readonly project: ProjectSummary; readonly name: string } | null>(null);
@@ -102,15 +102,6 @@ export function ProjectsScreen({
         from your library.
       </Text>
 
-      <Text style={styles.cardTitle}>Choose a project type</Text>
-      {WORKSPACE_MODES.map(mode => <Pressable key={mode} accessibilityRole="button"
-        accessibilityState={{ selected: entrance === mode }}
-        onPress={() => setEntrance(mode)} style={press([styles.entrance, entrance === mode && styles.cardActive])}>
-        <Text style={styles.cardTitle}>{WORKSPACE_EXPERIENCES[mode].title}{entrance === mode ? ' · Selected' : ''}</Text>
-        <Text style={styles.sub}>{WORKSPACE_EXPERIENCES[mode].description}</Text>
-        <Text style={styles.cardMeta}>{WORKSPACE_EXPERIENCES[mode].tools}</Text>
-      </Pressable>)}
-      <Text style={styles.sub}>New projects keep this type. Send generated media to a separate editing project when ready. All projects remain visible; opening one uses its saved workspace type.</Text>
       <View style={styles.newRow}>
         <TextInput
           style={styles.input}
@@ -132,7 +123,7 @@ export function ProjectsScreen({
       ) : (
         visibleProjects.map((project) => (
           <View key={project.id} style={[styles.card, project.id === activeProjectId && styles.cardActive]}>
-            <Pressable style={press(styles.cardMain)} accessibilityRole="button" onPress={() => onOpen(project.id, modeForProjectType(project.projectType, entrance))}>
+            <Pressable style={press(styles.cardMain)} accessibilityRole="button" onPress={() => onOpen(project.id, 'edit')}>
               {(() => { const still = readProject(project.id)?.assets.find(asset => asset.kind === 'image'); return <View style={styles.cover}>
                 {still ? <Image source={{ uri: assetUri(project.id, still) }} resizeMode="cover" style={styles.coverImage} /> : <Text style={styles.coverEmpty}>NO IMAGE COVER</Text>}
                 <Text style={styles.coverType}>{(project.projectType ?? 'legacy').toUpperCase()}</Text>

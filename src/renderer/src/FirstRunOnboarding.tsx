@@ -29,7 +29,7 @@ const ONBOARDING_STEPS = [
   {
     kicker: 'Voice',
     title: 'Voice setup',
-    body: 'Voice Generation uses consent-based samples and your configured local narration workflow.',
+    body: 'Use frame inspection and timestamped transcripts to find the parts of your footage you want to keep.',
     bullets: ['Use only samples you own or have permission to use.', 'Samples and generated audio stay in local app storage.', 'Local Qwen is user-configured; OpenScene does not download models.']
   },
   {
@@ -47,8 +47,8 @@ const ONBOARDING_STEPS = [
   {
     kicker: 'Start',
     title: 'Start local editing',
-    body: 'You can revisit setup details in Settings. Start on Home by choosing Editing, Voice Generation, or Video Generation.',
-    bullets: ['Editing opens the local timeline workspace.', 'Voice Generation manages narration assets.', 'Video Generation manages configured result workflows.']
+    body: 'Open a project, import footage and connect clips on the canvas. Refine the result on the timeline.',
+    bullets: ['Select a card to preview its source range.', 'Connect Output to Input and apply the new order.', 'Save your sequence, then export the finished cut.']
   }
 ] as const satisfies readonly OnboardingStep[];
 

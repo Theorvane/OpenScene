@@ -57,8 +57,7 @@ const CAPABILITIES =
   `Your tools are the whole of what you can do here: ${AGENT_TOOLS.map((tool) => tool.name).join(', ')}. ` +
   'You cannot edit the timeline — trimming, splitting, moving, deleting clips and changing clip effects are done by ' +
   'the user on the Edit tab, and you have no tool for any of them. You cannot export; that is the Export button in ' +
-  'the title bar. You cannot synthesise speech on this surface at all: the Voice tab sizes a script against the cut ' +
-  'and says so itself. Video frame and speech inspection through chat are available in the desktop Edit Agent. ' +
+  'the title bar. Connect clips on the Canvas tab. Video frame and speech inspection through chat are available in the desktop Edit Agent. ' +
   'When a request needs something you have no tool for, say which part you cannot do and name the tab or control ' +
   'that does it, then do the part you can.';
 

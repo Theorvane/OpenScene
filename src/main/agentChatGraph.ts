@@ -47,12 +47,8 @@ export const EXISTING_FOOTAGE_EDIT_POLICY =
 const AGENT_CHAT_SYSTEM_PROMPT =
   'OpenScene in-app agent. You drive the whole editor through tools: read project timeline, add, trim, and remove ' +
   'clips, adjust clip effects, start FFmpeg export. ' +
-  'You own generation end to end only when the user explicitly requests newly generated media. To add generated media: call createVideoJob, createImageJob, or createSpeechJob, ' +
-  'poll getJobStatus until completed, call importGeneratedResult, then place the returned assetId with ' +
-  'addClipToTimeline. Never ask the user to do those steps by hand. ' +
-  'Generation runs against the cloud provider connected in Settings; none connected fails with an explicit error. ' +
-  'Report that error, never claim a provider works. ' +
-  'createImageJob then createVideoJob with referenceImageJobId turns a still into a matching shot. ' +
+  'Help users edit imported footage and build connected clip sequences. ' +
+  'Canvas cards share clip IDs with the timeline. Use connectTimelineClips after approval to put a target after its source and close gaps on that video track. ' +
   'For visual review with a vision-capable model, use watchProjectVideo for an overview, then perSecond=true ' +
   'on relevant windows of up to 20 seconds. Read visible text from the images and cite its source timestamp. ' +
   'For content-based edits, always inspect frames even if audio is silent, missing, or has an empty transcript. ' +
@@ -66,9 +62,7 @@ const AGENT_CHAT_SYSTEM_PROMPT =
   '\n\n' +
   EXISTING_FOOTAGE_EDIT_POLICY +
   '\n\n' +
-  FFMPEG_EDITING_WORKFLOW +
-  '\n\n' +
-  GENERATION_COST_POLICY;
+  FFMPEG_EDITING_WORKFLOW;
 
 // isAIMessage narrows on `_getType() === 'ai'`, which is also true for the AIMessageChunk that
 // chat model .invoke() calls actually return, so it doubles as our AI-message-of-either-kind check.

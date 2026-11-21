@@ -113,7 +113,7 @@ export const GENERATE_VIDEO_TOOL: AgentTool = {
   }
 };
 
-export const AGENT_TOOLS: readonly AgentTool[] = [
+const LEGACY_AGENT_TOOLS: readonly AgentTool[] = [
   {
     name: 'plan_video_shots',
     description:
@@ -254,6 +254,8 @@ export const AGENT_TOOLS: readonly AgentTool[] = [
     }
   }
 ];
+
+export const AGENT_TOOLS: readonly AgentTool[] = LEGACY_AGENT_TOOLS.filter((tool) => tool.name === 'describe_timeline');
 
 export function findTool(name: string): AgentTool | undefined {
   return AGENT_TOOLS.find((tool) => tool.name === name);

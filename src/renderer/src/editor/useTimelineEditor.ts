@@ -48,6 +48,7 @@ import type { AiProjectDocument } from '../../../shared/aiProjectDomain';
 import { detachVideoAudioOnTimeline } from '../../../shared/detachVideoAudio';
 import { assembleApprovedProductionCut, buildApprovedProductionAssemblyPlan } from '../../../shared/productionWorkflow';
 import { pipelineBaseRequest } from '../../../shared/writerPipeline';
+import { connectVideoClips } from '../../../shared/videoCanvas';
 
 type TimelineUpdate = (timeline: TimelineDocument) => TimelineDocument | null;
 
@@ -760,6 +761,10 @@ export function useTimelineEditor() {
   }, [project, refreshProjects]);
 
   return {
+    connectVideoClips: (fromId: string, toId: string) => replaceTimeline(
+      (timeline) => connectVideoClips(timeline, fromId, toId),
+      'Connected clips. The video track now plays continuously in the new order.'
+    ),
     addTimelineTrack, removeTimelineTrack, renameTimelineTrack, insertTimelineTrack, createProject, deleteCurrentProject, deleteSelectedClip, duplicateSelectedClip, hasUnsavedTimeline, importAssets,
     importRecordingResult, importAiResult, isBusy, metadataProbeFailuresByAssetId, metadataProbeRetryRevisionsByAssetId, moveSelectedClip, newProjectName,
     cutAtPlayhead, transitionAtPlayhead, setTransitionAtPlayhead, removeTransitionAtPlayhead,

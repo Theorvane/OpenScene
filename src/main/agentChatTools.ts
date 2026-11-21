@@ -44,7 +44,12 @@ export function agentChatMutatingToolNames(tools: readonly { readonly name: stri
 
 export async function createAgentChatTools(instance: OpenVideoMcpServer): Promise<readonly DynamicStructuredTool[]> {
   const resolver: InstanceResolver<OpenVideoMcpServer> = { resolve: () => instance };
-  return createLangChainTools(OpenVideoMcpServer, { resolver });
+  const tools = await createLangChainTools(OpenVideoMcpServer, { resolver });
+  const generationTools = new Set([
+    'planVideoScenario', 'checkNarrationLength', 'estimateGenerationCost', 'getGenerationSpend',
+    'createVideoJob', 'createImageJob', 'createSpeechJob', 'importGeneratedResult', 'getJobStatus'
+  ]);
+  return tools.filter((tool) => !generationTools.has(tool.name));
 }
 
 /**

@@ -1,6 +1,5 @@
-import { useState, type ReactElement } from 'react';
-import { WORKSPACE_MODES, WORKSPACE_EXPERIENCES, type WorkspaceMode } from '../../shared/workspaceModes';
-import { modeForProjectType } from '../../shared/projectTypes';
+import { type ReactElement } from 'react';
+import { type WorkspaceMode } from '../../shared/workspaceModes';
 
 import type { AgentChatHistoryEntry } from '../../shared/agentChat';
 import type { LocalProjectSnapshot, LocalProjectSummary } from '../../shared/timelineTypes';
@@ -46,29 +45,11 @@ export function ProjectsPage({
   isBusy = false
 }: ProjectsPageProps): ReactElement {
   const chatGroups = groupAgentChatHistory(chats, new Date());
-  const [entrance, setEntrance] = useState<WorkspaceMode>('create');
+
   const visibleProjects = projects;
 
   return (
     <div className="projects-home">
-      <section className="workspace-entrances" aria-label="Choose your workspace">
-        <div className="workspace-entrances__intro">
-          <h2>What would you like to make?</h2>
-          <p>Two project types. Choose what you are making, then create or open a project below.</p>
-        </div>
-        <div className="workspace-entrances__cards">
-          {WORKSPACE_MODES.map(mode => <button key={mode} type="button"
-            className={`workspace-entrance workspace-entrance--${mode}`}
-            aria-pressed={entrance === mode} disabled={isBusy} onClick={() => setEntrance(mode)}>
-            <span className="workspace-entrance__eyebrow">{mode === 'edit' ? 'EDIT' : 'CREATE'}</span>
-            <strong>{WORKSPACE_EXPERIENCES[mode].title}</strong>
-            <span>{WORKSPACE_EXPERIENCES[mode].description}</span>
-            <small>{WORKSPACE_EXPERIENCES[mode].tools}</small>
-            <span className="workspace-entrance__selection">{entrance === mode ? 'New project type selected' : 'Choose for new projects →'}</span>
-          </button>)}
-        </div>
-        <p role="status">New projects are saved as {WORKSPACE_EXPERIENCES[entrance].title}. All existing projects stay visible below. Opening one uses its saved workspace type.</p>
-      </section>
       <aside className="projects-home__sidebar" aria-label="Project folders">
         <div className="projects-home__heading-row">
           <h1 id="projects-page-title" className="projects-home__heading">Projects</h1>
@@ -77,7 +58,7 @@ export function ProjectsPage({
             className="projects-home__add-button"
             aria-label="Choose or create a project folder"
             title="Choose or create a project folder"
-            onClick={() => void onOpenProjectFolder?.(entrance)}
+            onClick={() => void onOpenProjectFolder?.('edit')}
             disabled={isBusy}
           >
             <FolderPlusIcon />
@@ -95,14 +76,14 @@ export function ProjectsPage({
                   <button
                     type="button"
                     className={`projects-home__project${isSelected ? ' projects-home__project--active' : ''}`}
-                    onClick={() => void onOpenProject?.(item.id, modeForProjectType(item.projectType, entrance))}
+                    onClick={() => void onOpenProject?.(item.id, 'edit')}
                     disabled={isBusy}
                     aria-current={isSelected ? 'true' : undefined}
                   >
                     <ProjectCover projectId={item.id} updatedAt={item.updatedAt} />
                     <span className="projects-home__project-body">
                       <span className="projects-home__project-name">{item.name}</span>
-                      <span className="projects-home__type-badge">{item.projectType === undefined ? 'Legacy · mixed' : item.projectType === 'editing' ? 'Editing' : 'AI Creation'}</span>
+                      <span className="projects-home__type-badge">{'Editing'}</span>
                       <span className="projects-home__project-meta">
                         {item.storage === 'external' && item.folderName ? item.folderName : formatTimestamp(item.updatedAt)}
                       </span>

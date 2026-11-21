@@ -1,39 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactElement } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 
 import type { AgentChatHistoryEntry } from '../../shared/agentChat';
-import { CreationStageNav } from './CreationStageNav';
-import { modeForProjectType, projectTypeForMode } from '../../shared/projectTypes';
-import { CREATION_TOOLS, WORKSPACE_MODES, WORKSPACE_MODE_LABELS, WORKSPACE_EXPERIENCES, isCreationTool, workspaceModeForTab, workspaceTabForMode, type CreationTool } from '../../shared/workspaceModes';
 import type { EditAgentProjectContext } from '../../shared/editAgentContext';
 import { AppShell } from './AppShell';
 import type { AgentChatRestoreRequest } from './AgentChatContext';
 import { FirstRunOnboarding } from './FirstRunOnboarding';
 import { ProjectResultImportProvider } from './ProjectResultImportContext';
-import { Tabs } from './ui';
 import { closeProjectTab, openProjectTab, pruneProjectTabs, type ProjectTab } from './projectTabs';
 import { ProjectSettingsDialog } from './ProjectSettingsDialog';
-import { NarrationPanel } from './NarrationPanel';
-import type { ImageAspectRatio, ReferenceImageSelection } from '../../shared/providerSeams';
-import {
-  attachGeneratedProductionImage,
-  buildCharacterReferenceImageBrief,
-  buildStoryboardImageBrief,
-  productionVisualStyle,
-  PRODUCTION_BATCH_LIMIT,
-  type ProductionImageHandoff,
-  type ProductionImageTarget
-} from '../../shared/productionWorkflow';
-import type { StatusMessage } from './appTypes';
-import { timelineDurationMs } from '../../shared/timelineLogic';
-import { ImageGenerationWorkspace, type ImageGenerationWorkspaceHandle } from './ImageGenerationWorkspace';
-import { VideoGenerationWorkspace } from './VideoGenerationWorkspace';
-import { WriterWorkspace } from './WriterWorkspace';
-import {
-  WORKSPACE_TAB_LABELS,
-  WORKSPACE_TAB_STORAGE_KEY,
-  parseWorkspaceTabId,
-  type WorkspaceTabId
-} from './workspaceTabs';
 import { ProjectsPage } from './ProjectsPage';
 import { SettingsWorkspace } from './SettingsWorkspace';
 import { APP_PAGE_BY_ID, getDefaultAppPageId, isProjectRequiredPageId, isWorkspacePageId } from './appPages';
@@ -46,29 +20,6 @@ import { readFirstRunOnboardingCompletion, resetFirstRunOnboardingCompletion, wr
 import { useTimelineEditor } from './editor/useTimelineEditor';
 
 const [EDIT_WORKSPACE] = APP_WORKSPACES;
-
-function readWorkspaceTab(): WorkspaceTabId {
-  try {
-    return parseWorkspaceTabId(window.localStorage.getItem(WORKSPACE_TAB_STORAGE_KEY));
-  } catch {
-    return 'edit';
-  }
-}
-
-const APP_WORKSPACE_PANEL_STYLE = {
-  height: '100%',
-  minHeight: 0,
-  overflow: 'hidden'
-} as const satisfies CSSProperties;
-
-function SettingsGlyph(): ReactElement {
-  return (
-    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
-      <circle cx="12" cy="12" r="3.2" />
-      <path d="M19.4 15a1.7 1.7 0 00.34 1.88l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.7 1.7 0 00-1.88-.34 1.7 1.7 0 00-1 1.56V21a2 2 0 11-4 0v-.09A1.7 1.7 0 008 19.4a1.7 1.7 0 00-1.88.34l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.7 1.7 0 00.34-1.88 1.7 1.7 0 00-1.56-1H2a2 2 0 110-4h.09A1.7 1.7 0 004.6 8a1.7 1.7 0 00-.34-1.88l-.06-.06a2 2 0 112.83-2.83l.06.06A1.7 1.7 0 009 3.63 1.7 1.7 0 0010 2.07V2a2 2 0 114 0v.09a1.7 1.7 0 001 1.56 1.7 1.7 0 001.88-.34l.06-.06a2 2 0 112.83 2.83l-.06.06A1.7 1.7 0 0019.4 8v0a1.7 1.7 0 001.56 1H21a2 2 0 110 4h-.09a1.7 1.7 0 00-1.56 1z" />
-    </svg>
-  );
-}
 
 export function App(): ReactElement {
   const editor = useTimelineEditor();
@@ -275,138 +226,6 @@ export function App(): ReactElement {
     await editor.openProject(next.activeId);
   }, [editor, navigateToPage, projectTabs]);
   const [projectSettingsOpen, setProjectSettingsOpen] = useState(false);
-  // Which workspace surface is showing; remembered across launches.
-  const [preferredWorkspaceTab, setWorkspaceTabId] = useState<WorkspaceTabId>(() =>
-    readWorkspaceTab()
-  );
-  const [lastCreationTool, setLastCreationTool] = useState<CreationTool>(() => {
-    const tab = readWorkspaceTab();
-    return isCreationTool(tab) ? tab : 'video';
-  });
-  const workspaceMode = modeForProjectType(editor.project?.projectType, workspaceModeForTab(preferredWorkspaceTab));
-  const workspaceTabId = workspaceMode === 'edit' ? 'edit' : isCreationTool(preferredWorkspaceTab) ? preferredWorkspaceTab : 'video';
-  const [handoffBusy, setHandoffBusy] = useState(false);
-  const [handoffError, setHandoffError] = useState('');
-  const sendToEditing = async (): Promise<void> => {
-    if (!editor.project || handoffBusy) return;
-    if (editor.project.projectType === undefined) { selectWorkspaceTab('edit'); return; }
-    if (!window.confirm('Copy all saved project media into a new editing project? The original generation project and its prompts stay unchanged. The new timeline starts empty.')) return;
-    setHandoffBusy(true); setHandoffError('');
-    try {
-      const result = await window.videoTool.createEditingCopy({ projectId: editor.project.id });
-      if (!result.ok) { setHandoffError(result.error.message); return; }
-      await editor.refreshProjects();
-      await editor.openProject(result.value.id);
-    } catch { setHandoffError('Could not create the editing copy. Check your project library before retrying.'); }
-    finally { setHandoffBusy(false); }
-  };
-
-  // Lives here because both studios touch it: the image studio produces a still
-  // and the video studio consumes it as an image-to-video seed.
-  const [videoReferenceImage, setVideoReferenceImage] = useState<ReferenceImageSelection | null>(null);
-  // A generated image must remember the exact Character or Shot that requested
-  // it. Composer state alone is not enough once several image jobs overlap.
-  const [productionImageHandoff, setProductionImageHandoff] = useState<ProductionImageHandoff | null>(null);
-  const imageGenerationRef = useRef<ImageGenerationWorkspaceHandle | null>(null);
-
-  useEffect(() => {
-    const projectId = editor.project?.id;
-    setProductionImageHandoff((current) => current !== null && current.projectId !== projectId ? null : current);
-  }, [editor.project?.id]);
-
-  const selectWorkspaceTab = (tabId: WorkspaceTabId): void => {
-    if (editor.project?.projectType !== undefined && workspaceModeForTab(tabId) !== modeForProjectType(editor.project.projectType)) return;
-    setWorkspaceTabId(tabId);
-    if (isCreationTool(tabId)) setLastCreationTool(tabId);
-    try {
-      window.localStorage.setItem(WORKSPACE_TAB_STORAGE_KEY, tabId);
-    } catch {
-      // The in-memory choice stays usable when local storage is unavailable.
-    }
-  };
-
-  const openProductionImageBrief = (
-    target: ProductionImageTarget,
-    aspectRatio?: ImageAspectRatio
-  ): string | null => {
-    const project = editor.project;
-    if (project === null) return 'Open a local project before creating production images.';
-    const result = target.kind === 'character_reference'
-      ? buildCharacterReferenceImageBrief(project.ai, target.characterId)
-      : buildStoryboardImageBrief(project.ai, target.shotId, aspectRatio ?? '16:9');
-    if (!result.ok) return result.reason;
-    setProductionImageHandoff({
-      ...result.brief,
-      requestId: crypto.randomUUID(),
-      projectId: project.id
-    });
-    selectWorkspaceTab('image');
-    return null;
-  };
-
-  const generateProductionImages = async (
-    targets: readonly ProductionImageTarget[],
-    aspectRatio?: ImageAspectRatio
-  ): Promise<StatusMessage> => {
-    const project = editor.project;
-    if (project === null) return { tone: 'warning', text: 'Open a local project before creating production images.' };
-    if (targets.length === 0) return { tone: 'neutral', text: 'No missing production images need generation.' };
-    if (targets.length > PRODUCTION_BATCH_LIMIT) return { tone: 'warning', text: `A production image batch is limited to ${PRODUCTION_BATCH_LIMIT} targets.` };
-    const handoffs: ProductionImageHandoff[] = [];
-    const skipped: string[] = [];
-    for (const target of targets) {
-      const result = target.kind === 'character_reference'
-        ? buildCharacterReferenceImageBrief(project.ai, target.characterId)
-        : buildStoryboardImageBrief(project.ai, target.shotId, aspectRatio ?? '16:9');
-      if (!result.ok) {
-        skipped.push(result.reason);
-        continue;
-      }
-      handoffs.push({ ...result.brief, requestId: crypto.randomUUID(), projectId: project.id });
-    }
-    if (handoffs.length === 0) return { tone: 'warning', text: skipped[0] ?? 'No eligible production images need generation.' };
-    const accepted = window.confirm(
-      `Generate ${handoffs.length} production image${handoffs.length === 1 ? '' : 's'} now?\n\n` +
-      'Provider credits may be charged. Browser-session jobs run one at a time. Every result remains unapproved and must be reviewed and attached manually.'
-    );
-    if (!accepted) return { tone: 'neutral', text: 'Production image generation was cancelled before any provider request.' };
-    const controller = imageGenerationRef.current;
-    if (controller === null) return { tone: 'danger', text: 'Image Generation is not ready. Reopen the project and try again.' };
-    const batch = await controller.generateProductionBriefs(handoffs);
-    return {
-      tone: batch.failed === 0 ? 'success' : batch.completed > 0 ? 'warning' : 'danger',
-      text: `${batch.message}${skipped.length > 0 ? ` ${skipped.length} ineligible target(s) were skipped.` : ''}`
-    };
-  };
-
-  const attachProductionImage = async (
-    jobId: string,
-    handoff: ProductionImageHandoff
-  ): Promise<StatusMessage> => {
-    const project = editor.project;
-    if (project === null || project.id !== handoff.projectId) {
-      return { tone: 'warning', text: 'Reopen the project that requested this image before attaching it.' };
-    }
-    const imported = await editor.importAiResult(jobId);
-    if (imported.importedAssetId === undefined) return imported;
-    const mutation = attachGeneratedProductionImage(project.ai, {
-      target: handoff.target,
-      assetId: imported.importedAssetId,
-      referenceId: `generated-production-reference-${crypto.randomUUID()}`
-    });
-    if (!mutation.ok) return { tone: 'warning', text: mutation.reason };
-    const saved = await editor.saveAiProjectDocument(mutation.document);
-    if (!saved) {
-      return {
-        tone: 'danger',
-        text: 'The image was imported safely, but its Character/Storyboard assignment could not be saved. It remains in the project library.'
-      };
-    }
-    setProductionImageHandoff((current) => current?.requestId === handoff.requestId ? null : current);
-    selectWorkspaceTab('video');
-    return { tone: 'success', text: `${handoff.targetLabel} was imported and attached to the production board.` };
-  };
-
   return (
     // The result-import provider wraps the shell, not just the page stack: the
     // Studio side panel lives in the shell and imports what it generates.
@@ -417,7 +236,7 @@ export function App(): ReactElement {
         onPageChange={setActivePage}
         activeProjectContext={activeProjectContext}
         prepareAgentProject={() => editor.hasUnsavedTimeline ? editor.saveTimeline() : Promise.resolve(true)}
-        studioLayout={workspaceMode === 'create' && workspaceIsVisible}
+        studioLayout={false}
         projectTabs={projectTabs}
         activeProjectId={editor.project?.id ?? null}
         onSelectProjectTab={(projectId) => void selectProjectTab(projectId)}
@@ -441,13 +260,13 @@ export function App(): ReactElement {
               project={editor.project}
               projects={editor.projects}
               chats={chatHistory}
-              onOpenProject={async (projectId, mode) => {
+              onOpenProject={async (projectId) => {
                 const opened = await editor.openProject(projectId);
-                if (opened) { setWorkspaceTabId(WORKSPACE_EXPERIENCES[mode].entryTab); navigateToPage('edit'); }
+                if (opened) { navigateToPage('edit'); }
               }}
-              onOpenProjectFolder={async (mode) => {
-                const opened = await editor.openProjectFolder(projectTypeForMode(mode));
-                if (opened) { setWorkspaceTabId(WORKSPACE_EXPERIENCES[mode].entryTab); navigateToPage('edit'); }
+              onOpenProjectFolder={async () => {
+                const opened = await editor.openProjectFolder('editing');
+                if (opened) { navigateToPage('edit'); }
               }}
               onOpenChat={openChatFromHistory}
               onRemoveProject={removeProject}
@@ -456,158 +275,10 @@ export function App(): ReactElement {
               isBusy={editor.isBusy}
             />
           </section>
-          <div className={`app-stack local-edit-bay${workspaceMode === 'create' ? ' local-edit-bay--create' : ''}`} hidden={!workspaceIsVisible}>
-            <header className={`workspace-identity workspace-identity--${workspaceMode}`}>
-              <span className="workspace-entrance__eyebrow">OPENSCENE / {workspaceMode === 'edit' ? 'EDIT' : 'CREATE'}</span>
-              <h1 id="project-workspace-title">{WORKSPACE_EXPERIENCES[workspaceMode].title}</h1>
-              <p>{WORKSPACE_EXPERIENCES[workspaceMode].description}</p>
-            </header>
-            {/* Only legacy mixed projects retain an in-project type switcher. */}
-            <div className="workspace-tab-line">
-              {editor.project?.projectType === undefined ? <>
-              <Tabs
-                activeTabId={workspaceMode}
-                idBase="workspace-mode"
-                tabs={WORKSPACE_MODES.map((id) => ({ id, label: WORKSPACE_MODE_LABELS[id] }))}
-                onActiveTabChange={(mode) => selectWorkspaceTab(workspaceTabForMode(mode, lastCreationTool))}
-                className="workspace-tabs"
-                aria-label="Project workspace"
-              />
-              <span className="workspace-mode-hint">Legacy mixed project · both workspaces preserved</span>
-              </> : <span className="workspace-project-type">{workspaceMode === 'edit' ? 'EDITING PROJECT · Timeline / Media / Export' : 'GENERATION PROJECT · Story / Frames / Shots / Voice'}</span>}
-              <button
-                type="button"
-                className="workspace-settings-button"
-                aria-label="Project settings"
-                title="Project settings"
-                disabled={editor.project === null}
-                onClick={() => setProjectSettingsOpen(true)}
-              >
-                <SettingsGlyph />
-              </button>
-            </div>
-            {workspaceMode === 'create' && (
-              <div className="workspace-creation-tools">
-                <details className="production-advanced-tools"><summary>Advanced tools · script, frames, voice</summary><CreationStageNav tool={isCreationTool(workspaceTabId) ? workspaceTabId : 'video'} onSelect={selectWorkspaceTab} document={editor.project?.ai} assets={editor.project?.assets ?? []} /></details>
-                {workspaceTabId !== 'video' && <button className="button" onClick={() => selectWorkspaceTab('video')}>Back to production</button>}
-                <details className="workspace-media-library">
-                  <summary>Project media ({editor.project?.assets.length ?? 0})</summary>
-                  <div className="workspace-media-library__list">
-                    {(editor.project?.assets.length ?? 0) === 0 && <p>Import a result to this project to use it in your edit.</p>}
-                    {editor.project?.assets.map((asset) => (
-                      <div className="workspace-media-library__row" key={asset.id}>
-                        <span>{asset.displayName}</span>
-                        {editor.project?.projectType === undefined && <button type="button" className="button" disabled={editor.isBusy}
-                          onClick={() => {
-                            if (editor.placeAssetOnTimeline(asset.id)) selectWorkspaceTab('edit');
-                          }}>Add & open editor</button>}
-                      </div>
-                    ))}
-                  </div>
-                </details>
-                <button type="button" className="button" disabled={handoffBusy || editor.isBusy || (editor.project?.assets.length ?? 0) === 0} onClick={() => void sendToEditing()}>{handoffBusy ? 'Copying media…' : editor.project?.projectType === undefined ? 'Open in editor' : 'Create editing project →'}</button>
-                {handoffError && <p role="alert">{handoffError}</p>}
-              </div>
-            )}
-            <div className="app-workspace-panel-stack" id={`workspace-mode-${workspaceMode}-panel`} role={editor.project?.projectType === undefined ? 'tabpanel' : 'region'} aria-labelledby={editor.project?.projectType === undefined ? `workspace-mode-${workspaceMode}-tab` : 'project-workspace-title'}>
-              <section
-                aria-labelledby={EDIT_WORKSPACE.navId}
-                hidden={workspaceTabId !== 'edit' || activeWorkspaceId !== EDIT_WORKSPACE.id || !workspaceIsVisible}
-                id={EDIT_WORKSPACE.panelId}
-                ref={setPagePanelRef(EDIT_WORKSPACE.id)}
-                role="region"
-                style={APP_WORKSPACE_PANEL_STYLE}
-                tabIndex={-1}
-              >
-                <h2 className="visually-hidden" id={EDIT_WORKSPACE.navId}>{EDIT_WORKSPACE.label}</h2>
-                <TimelineEditor editor={editor} />
-              </section>
-              <section
-                aria-label="Production studio"
-                id="workspace-video-panel"
-                className="workspace-studio-panel"
-                hidden={workspaceMode !== 'create' || !workspaceIsVisible}
-                role="region"
-                style={APP_WORKSPACE_PANEL_STYLE}
-                tabIndex={-1}
-              >
-                <VideoGenerationWorkspace
-                  active={workspaceMode === 'create' && workspaceIsVisible}
-                  toolActive={workspaceTabId === 'video'}
-                  onActivateVideo={() => selectWorkspaceTab('video')}
-                  onSelectProductionTool={selectWorkspaceTab}
-                  tools={<>
-                    <section
-                      aria-label={WORKSPACE_TAB_LABELS.writer}
-                      id="workspace-writer-panel"
-                      className="workspace-studio-panel"
-                      hidden={workspaceTabId !== 'writer' || !workspaceIsVisible}
-                      role="region"
-                      tabIndex={-1}
-                    >
-                      {editor.project !== null && (
-                        <WriterWorkspace key={editor.project.id} document={editor.project.ai} onSave={editor.saveAiProjectDocument} />
-                      )}
-                    </section>
-                    <section
-                      aria-label={WORKSPACE_TAB_LABELS.voice}
-                      id="workspace-voice-panel"
-                      className="workspace-studio-panel"
-                      hidden={workspaceTabId !== 'voice' || !workspaceIsVisible}
-                      role="region"
-                      tabIndex={-1}
-                    >
-                      {editor.project !== null && (
-                        <NarrationPanel
-                          key={editor.project.id}
-                          projectId={editor.project.id}
-                          assets={editor.project.assets}
-                          timeline={editor.project.timeline}
-                          document={editor.project.ai}
-                          targetSeconds={timelineDurationMs(editor.project.timeline) / 1_000}
-                          onSaveAi={editor.saveAiProjectDocument}
-                          onApplyCaptions={editor.applyNarrationSubtitles}
-                          onApplyTranscription={editor.applyTranscriptionSubtitles}
-                        />
-                      )}
-                    </section>
-                    <section
-                      aria-label={WORKSPACE_TAB_LABELS.image}
-                      id="workspace-image-panel"
-                      className="workspace-studio-panel"
-                      hidden={workspaceTabId !== 'image' || !workspaceIsVisible}
-                      role="region"
-                      tabIndex={-1}
-                    >
-                      <ImageGenerationWorkspace
-                        ref={imageGenerationRef}
-                        key={editor.project?.id ?? 'no-project'}
-                        projectName={editor.projects.find((item) => item.id === editor.project?.id)?.folderName ?? editor.project?.name}
-                        productionHandoff={productionImageHandoff}
-                        synchronizedStyle={editor.project === null ? null : productionVisualStyle(editor.project.ai)}
-                        onAttachToProduction={attachProductionImage}
-                        onUseForVideo={(reference) => {
-                          setVideoReferenceImage(reference);
-                          selectWorkspaceTab('video');
-                        }}
-                      />
-                    </section>
-                  </>}
-                  writerDocument={editor.project?.ai ?? null}
-                  onSaveAi={editor.saveAiProjectDocument}
-                  projectId={editor.project?.id ?? null}
-                  projectName={editor.projects.find((item) => item.id === editor.project?.id)?.folderName ?? editor.project?.name}
-                  projectAssets={editor.project?.assets ?? []}
-                  referenceImage={videoReferenceImage}
-                  onReferenceImageChange={setVideoReferenceImage}
-                  onGenerateProductionImage={openProductionImageBrief}
-                  onGenerateProductionImages={generateProductionImages}
-                  onOpenImageResults={() => selectWorkspaceTab('image')}
-                  onOpenEditor={() => void sendToEditing()}
-                />
-              </section>
-            </div>
-          </div>
+          <section className="app-stack local-edit-bay" hidden={!workspaceIsVisible}
+            id={EDIT_WORKSPACE.panelId} ref={setPagePanelRef('edit')} role="region" aria-label="Editing workspace" tabIndex={-1}>
+            <TimelineEditor editor={editor} onProjectSettings={() => setProjectSettingsOpen(true)} />
+          </section>
           <section
             aria-labelledby="settings-title"
             className="app-page app-page--settings"

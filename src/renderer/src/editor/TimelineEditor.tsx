@@ -40,11 +40,14 @@ import { useAgentChat } from '../AgentChatContext';
 import { useTheme } from '../ThemeProvider';
 import { THEME_PRESETS, type ThemePresetId } from '../theme';
 import type { TabDefinition } from '../ui';
+import { VideoConnectionCanvas } from './VideoConnectionCanvas';
+import './videoCanvas.css';
 
 export type InspectorTabId = (typeof EDITOR_INSPECTOR_DOCK_TAB_IDS)[number];
 
 type TimelineEditorProps = {
   readonly editor: TimelineEditorController;
+  readonly onProjectSettings?: () => void;
 };
 
 const INSPECTOR_TAB_LABELS: Readonly<Record<InspectorTabId, string>> = {
@@ -95,7 +98,8 @@ function getDefaultInspectorTabId({ selectedAssetId, selectedClipId }: Inspector
   return 'selection';
 }
 
-export function TimelineEditor({ editor }: TimelineEditorProps): ReactElement {
+export function TimelineEditor({ editor, onProjectSettings }: TimelineEditorProps): ReactElement {
+  const [canvasVisible, setCanvasVisible] = useState(true);
   const { isBusy: isAgentBusy } = useAgentChat();
   const { mode: themeMode, preset, setPreset, toggleTheme } = useTheme();
   const [leftDockTabId, setLeftDockTabId] = useState<EditorLeftDockTabId>('project');
@@ -227,6 +231,8 @@ export function TimelineEditor({ editor }: TimelineEditorProps): ReactElement {
         onThemeModeToggle={toggleTheme}
         onThemePresetChange={(next) => setPreset(next as ThemePresetId)}
         actions={<>
+          <button type="button" aria-pressed={canvasVisible} onClick={() => setCanvasVisible(!canvasVisible)}>Canvas</button>
+          <button type="button" onClick={onProjectSettings}>Project settings</button>
           <button className="oc-editor-host__save" type="button" onClick={() => { void editor.saveTimeline(); }} disabled={editor.project === null || !editor.hasUnsavedTimeline}>Save{editor.hasUnsavedTimeline ? ' *' : ''}</button>
           {!floatingExportVisible && <ExportPanel editor={editor} />}
         </>}
@@ -256,7 +262,12 @@ export function TimelineEditor({ editor }: TimelineEditorProps): ReactElement {
           <h1 id="timeline-editor-title">OpenScene</h1>
           <span className="editor-program-region__subtitle">Timeline editor</span>
         </div>
-        {floatingProgramVisible ? <div className="empty-slate">Program Monitor is floating above the workspace.</div> : <ProgramMonitor editor={editor} />}
+        <div className={canvasVisible ? 'video-workbench' : 'video-workbench video-workbench--preview'}>
+          {canvasVisible && editor.project !== null && <VideoConnectionCanvas key={editor.project.id} editor={editor} locked={isAgentBusy} />}
+          <div className="video-workbench__monitor">
+            {floatingProgramVisible ? <div className="empty-slate">Program Monitor is floating above the workspace.</div> : <ProgramMonitor editor={editor} />}
+          </div>
+        </div>
       </main>}
 
       programSplitter={<EditorProgramSplitter programPercent={layoutPreference.programPercent} onProgramPercentChange={setProgramPercent} />}

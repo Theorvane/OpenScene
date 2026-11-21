@@ -24,7 +24,6 @@ const SETTINGS_SECTIONS = [
   { id: 'appearance', title: 'Appearance', description: 'Theme mode and command desk presets.' },
   { id: 'local-tools', title: 'Local Tools', description: 'Local runtime readiness for desktop capture, narration, and final export.' },
   { id: 'voice', title: 'Voice', description: 'Local and cloud voice models and their setup.' },
-  { id: 'video', title: 'Video', description: 'Video model preference and local result import boundaries.' },
   { id: 'providers', title: 'Providers', description: 'Connected providers, and popular providers to connect.' },
   { id: 'models', title: 'Models', description: 'Search the model catalog and choose which models appear in pickers.' },
   { id: 'edit-agent', title: 'Edit Agent', description: 'Model preference for the persistent right-side agent.' },
@@ -236,15 +235,8 @@ export function SettingsWorkspace({ onReplayFirstRunOnboarding }: SettingsWorksp
       case 'voice':
         return (
           <>
-            <StatusCard tone="neutral">Voice generation models are managed inside the Voice Generation workspace. Qwen TTS is the default local option and needs <code>VIDEO_TOOL_TTS_CONFIG_PATH</code> (see <code>docs/local-qwen-tts.md</code>). Choose VieNeu-TTS explicitly if you prefer it; its runtime starts when selected.</StatusCard>
+            <StatusCard tone="neutral">Local voice runtimes can be configured for narration. Qwen TTS is the default local option and needs <code>VIDEO_TOOL_TTS_CONFIG_PATH</code> (see <code>docs/local-qwen-tts.md</code>). Choose VieNeu-TTS explicitly if you prefer it; its runtime starts when selected.</StatusCard>
             <StatusCard tone="neutral">Scripts leave the app only when you generate with a cloud model. Qwen runs your configured local wrapper; VieNeu requests stay on loopback. Generated audio is written to local app storage.</StatusCard>
-          </>
-        );
-      case 'video':
-        return (
-          <>
-            <StatusCard tone="neutral">Video generation models are managed inside the Video Generation workspace; connect Google Gemini (Veo) or OpenAI (Sora) under Providers to unlock cloud synthesis.</StatusCard>
-            <StatusCard tone="warning">Provider seams are selectable preferences only; unsupported cloud adapters are not silently called.</StatusCard>
           </>
         );
       case 'providers': {
