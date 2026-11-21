@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { applyEditorOperations } from '../src/shared/editorOperations';
 import { evaluateCanvasBlock } from '../src/shared/videoCanvasBlocks';
+import { parseTimelineDocument } from '../src/shared/timelineDocumentValidators';
 import { canvasOutputType, parseVideoCanvasGraph, type CanvasBlockKind } from '../src/shared/videoCanvasGraph';
 import { createInitialTimeline } from '../src/shared/timelineLogic';
 import { DEFAULT_AUDIO_TRACK_MIX, DEFAULT_CLIP_EFFECTS, type PersistedTimelineClip, type TimelineDocument } from '../src/shared/timelineTypes';
@@ -21,6 +22,26 @@ const add = (id: string, kind: CanvasBlockKind, settings?: Record<string, unknow
 const connect = (fromId: string, toId: string, input = 0) => ({ action: 'canvas.connect', fromId, toId, input });
 
 describe('processing canvas blocks', () => {
+  it('reapplies a trim after appending media inside the original source range', () => {
+    const original: TimelineDocument = { ...createInitialTimeline(), tracks: [
+      { id: 'v', name: 'Video', kind: 'video', clips: [clip('original', 0, 6000)] }
+    ] };
+    const trimmed = run(original, [add('cut', 'trim', { startMs: 0, endMs: 1000 }), connect('original', 'cut'), { action: 'canvas.apply', id: 'cut' }]);
+    const appended = { ...trimmed, tracks: trimmed.tracks.map(track => ({ ...track, clips: [...track.clips, clip('added', 1000, 2000)] })) };
+    expect(parseTimelineDocument(appended)).not.toBeNull();
+    const next = run(appended, [{ action: 'canvas.apply', id: 'cut' }]);
+    expect(next.tracks.flatMap(track => track.clips).sort((a, b) => a.id.localeCompare(b.id)))
+      .toEqual(appended.tracks.flatMap(track => track.clips).sort((a, b) => a.id.localeCompare(b.id)));
+    const saved = parseTimelineDocument(JSON.parse(JSON.stringify(next)));
+    expect(saved).toEqual(next);
+    const snapshot = next.canvas!.sourceTimeline!;
+    expect(parseTimelineDocument(snapshot)).toEqual(snapshot);
+    expect(snapshot.tracks.flatMap(track => track.clips)).toEqual(expect.arrayContaining([clip('original', 0, 6000), clip('added', 1000, 2000)]));
+    expect(run(saved!, [{ action: 'canvas.apply', id: 'cut' }])).toEqual(next);
+    const addedOutput = run(next, [add('added-look', 'look', { preset: 'monochrome' }), connect('added', 'added-look'), { action: 'canvas.apply', id: 'added-look' }]);
+    expect(addedOutput.tracks.flatMap(track => track.clips).find(clip => clip.id === 'added')).toMatchObject({ sourceEndMs: 2000, effects: { saturation: 0 } });
+    expect(original.tracks[0]!.clips).toEqual([clip('original', 0, 6000)]);
+  });
   it('removes whole source clips excluded by a downstream trim, preserving unrelated media', () => {
     const next = run(source(), [add('join', 'video-sequence'), connect('v1', 'join'), connect('v2', 'join', 1), add('cut', 'trim', { startMs: 0, endMs: 1000 }), connect('join', 'cut'), { action: 'canvas.apply', id: 'cut' }]);
     expect(next.tracks.filter(track => track.kind === 'video').flatMap(track => track.clips).map(clip => [clip.id, clip.sourceEndMs])).toEqual([['v1', 1000]]);

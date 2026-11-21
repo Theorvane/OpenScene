@@ -46,7 +46,7 @@ Trim bounds are 0–7,200,000ms. The catalog supplies defaults and bounds to bot
 
 Apply materializes the selected output from time zero, including explicit delays. It consumes every source in that branch, even clips completely excluded by a trim. Unconnected timeline clips and titles retain their positions. Other content can therefore extend the total export beyond a branch's displayed duration.
 
-Processing preserves original source ranges and effects in graph metadata. Reapplying evaluates those inputs, so changing speed from 2 to 1 does not halve an already shortened result again. Source files remain unchanged. Newly added source IDs are available alongside preserved inputs.
+Processing preserves original source ranges and effects in graph metadata. Reapplying evaluates those inputs, so changing speed from 2 to 1 does not halve an already shortened result again. Source files remain unchanged. Newly added source IDs are available alongside preserved inputs. If new clips occupy space freed by a trim, their snapshot uses a separate source lane so both original ranges remain valid; this does not move those clips in the edited timeline.
 
 After deliberately editing input ranges or effects on Timeline, choose **Refresh inputs** to take those current values as the new baseline. This changes what later graph evaluations use and can be undone. Pure join/mix graphs retain their earlier compatibility behavior until an input snapshot is captured.
 

@@ -1,4 +1,4 @@
-import { readFile, stat } from 'node:fs/promises';
+import { open } from 'node:fs/promises';
 import { fontCandidates } from '../shared/titleFont';
 import { parseTitleFontRequest, type TitleFontData, type TitleFontRequest } from '../shared/titleTypography';
 import type { ApiResponse } from '../shared/models';
@@ -8,9 +8,27 @@ import { fail, ok } from './ipcResponses';
 export async function readTitleFontFile(request: TitleFontRequest): Promise<{ readonly path: string; readonly bytes: Uint8Array } | null> {
   for (const path of fontCandidates(process.platform, request.weight, request.family)) {
     try {
-      const info = await stat(path);
-      if (!info.isFile() || info.size > 16 * 1024 * 1024) continue;
-      return { path, bytes: await readFile(path) };
+      const file = await open(path, 'r');
+      try {
+        const info = await file.stat();
+        // System CJK collections include many faces (Apple SD Gothic Neo is ~53 MiB).
+        // Keep ordinary faces at 16 MiB and allowlisted collections at 64 MiB.
+        const limit = (path.endsWith('.ttc') ? 64 : 16) * 1024 * 1024;
+        if (!info.isFile() || !Number.isSafeInteger(info.size) || info.size <= 0 || info.size > limit) continue;
+        // Read the same handle we statted, with one sentinel byte to reject growth.
+        // Unlike readFile, this cannot allocate without bound if a file changes.
+        const bytes = Buffer.alloc(info.size + 1);
+        let offset = 0;
+        while (offset < bytes.length) {
+          const { bytesRead } = await file.read(bytes, offset, bytes.length - offset, null);
+          if (bytesRead === 0) break;
+          offset += bytesRead;
+        }
+        if (offset !== info.size) continue;
+        return { path, bytes: bytes.subarray(0, offset) };
+      } finally {
+        await file.close();
+      }
     } catch { /* Try the next allowlisted face. */ }
   }
   return null;

@@ -1,4 +1,5 @@
 import type { TimelineDocument } from './timelineTypes';
+import { clipDurationMs } from './timelineClipGeometry';
 import { getOpaqueId, hasAllowedKeys, isPlainRecord } from './timelineValidationPrimitives';
 import { canvasDefaultInputCount, canvasVariableInputs, validCanvasSettings } from './canvasBlockCatalog';
 import { parseTimelineDocument } from './timelineDocumentValidators';
@@ -71,8 +72,19 @@ export function canvasSourceTimeline(timeline: TimelineDocument, graph: VideoCan
     const clips = track.clips.filter(clip => !known.has(clip.id));
     if (!clips.length) continue;
     const existing = tracks.findIndex(candidate => candidate.id === track.id);
-    if (existing >= 0) tracks[existing] = { ...tracks[existing]!, clips: [...tracks[existing]!.clips, ...clips] };
-    else tracks.push({ ...track, clips });
+    const original = tracks[existing];
+    const overlaps = original?.clips.some(source => clips.some(clip =>
+      source.timelineStartMs < clip.timelineStartMs + clipDurationMs(clip) &&
+      clip.timelineStartMs < source.timelineStartMs + clipDurationMs(source)));
+    if (original && original.kind === track.kind && !overlaps) {
+      tracks[existing] = { ...original, clips: [...original.clips, ...clips] };
+    } else {
+      // A shortened output may leave room that the original source still occupies.
+      // Keep both ranges intact in separate snapshot lanes, not in the edited timeline.
+      let id = track.id;
+      for (let suffix = 1; tracks.some(candidate => candidate.id === id); suffix++) id = 'canvas-source-' + suffix;
+      tracks.push({ ...track, id, clips });
+    }
   }
   return { ...base, tracks };
 }
