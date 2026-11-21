@@ -1,5 +1,5 @@
 import { constants } from 'node:fs';
-import { mkdir, open, readFile, rename, rm, type FileHandle } from 'node:fs/promises';
+import { mkdir, open, rename, rm, type FileHandle } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
@@ -127,11 +127,21 @@ export class VideoJobRecoveryStore {
 
   async load(): Promise<readonly PersistedVideoGenerationJob[]> {
     try {
-      const file = await open(this.filePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+      const file = await open(this.filePath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
       try {
         const stats = await file.stat();
         if (!stats.isFile() || stats.size > MAXIMUM_JOURNAL_BYTES) return [];
-        return parseVideoJobJournal(await file.readFile('utf8'));
+        // Metadata can become stale while another process appends. Read no more
+        // than the limit plus one detection byte, through this same handle.
+        const buffer = Buffer.allocUnsafe(MAXIMUM_JOURNAL_BYTES + 1);
+        let total = 0;
+        while (total <= MAXIMUM_JOURNAL_BYTES) {
+          const { bytesRead } = await file.read(buffer, total, Math.min(64 * 1024, buffer.length - total), total);
+          if (bytesRead === 0) break;
+          total += bytesRead;
+          if (total > MAXIMUM_JOURNAL_BYTES) return [];
+        }
+        return parseVideoJobJournal(buffer.subarray(0, total).toString('utf8'));
       } finally {
         await file.close();
       }
