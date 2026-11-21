@@ -548,6 +548,16 @@ describe('OpenScene TypeMCP Server and Tool declarations', () => {
     expect(watched.summary).toContain('take.mp4');
     expect(JSON.stringify(result)).not.toContain(tempDir);
     expect(seenPaths[0]).toContain('original.mp4');
+
+    const detailed = await server.watchProjectVideo({
+      projectId: project.id, assetId: asset.id, startMs: 2_000, endMs: 4_250, perSecond: true
+    });
+    expect(detailed).toMatchObject({
+      success: true,
+      startMs: 2_000,
+      endMs: 4_250,
+      frames: [{ timeMs: 2_500 }, { timeMs: 3_500 }, { timeMs: 4_125 }]
+    });
   });
 
   it('watchProjectVideo rejects non-video assets, missing assets, and missing duration without touching FFmpeg', async () => {

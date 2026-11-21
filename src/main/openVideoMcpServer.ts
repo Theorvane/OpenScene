@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { realpath } from 'node:fs/promises';
 import { resolve as resolvePath, sep } from 'node:path';
 import { getMcpServerDefinition, McpResource, McpServer, McpTool } from '@theorvane/type-mcp';
 import { z } from 'zod';
@@ -13,6 +14,8 @@ import type { ExportIpcService } from './exportIpcService';
 import { METADATA_PRIVACY_MODES, type MetadataPrivacyMode } from '../shared/metadataPrivacy';
 import type { ResultAssetImportService } from './resultAssetImportService';
 import type { ProjectStore } from './projectStore';
+import type { TranscriptionService } from './transcriptionService';
+import { resolveVideoInspectionRange, sampleVideoInspectionSeconds } from '../shared/videoInspectionRange';
 import { discoverFfmpeg } from './ffmpegDiscovery';
 import {
   extractVideoFrames,
@@ -46,18 +49,24 @@ const FALLBACK_CLIP_DURATION_MS = 5_000;
 /** Injectable frame extractor so tests never need a real FFmpeg runtime. */
 export type WatchFrameExtractor = (input: {
   readonly filePath: string;
+  readonly projectDirectory?: string;
   readonly timestampsMs: readonly number[];
 }) => Promise<readonly ExtractedFrame[]>;
 
 async function defaultWatchFrameExtractor(input: {
   readonly filePath: string;
+  readonly projectDirectory?: string;
   readonly timestampsMs: readonly number[];
 }): Promise<readonly ExtractedFrame[]> {
   const ffmpeg = await discoverFfmpeg();
   if (ffmpeg.kind === 'unavailable') {
     throw new Error(`FFmpeg is unavailable: ${ffmpeg.reason}`);
   }
-  return extractVideoFrames({ ffmpegPath: ffmpeg.executablePath, filePath: input.filePath, timestampsMs: input.timestampsMs });
+  const filePath = await realpath(input.filePath);
+  if (input.projectDirectory !== undefined && !filePath.startsWith(`${await realpath(input.projectDirectory)}${sep}`)) {
+    throw new Error('The media file escapes the project directory.');
+  }
+  return extractVideoFrames({ ffmpegPath: ffmpeg.executablePath, filePath, timestampsMs: input.timestampsMs });
 }
 
 @McpServer({ name: 'openvideo-mcp-server', version: '0.1.0' })
@@ -65,6 +74,7 @@ export class OpenVideoMcpServer {
   private projectStore: ProjectStore | undefined;
   private exportIpcService: ExportIpcService | undefined;
   private watchFrameExtractor: WatchFrameExtractor = defaultWatchFrameExtractor;
+  private transcriptionService: TranscriptionService | undefined;
   private resultImports: ResultAssetImportService | undefined;
   private spendStore: GenerationSpendStore | undefined;
   private notifyProjectTimelineChanged: ((projectId: string) => void) | undefined;
@@ -96,6 +106,10 @@ export class OpenVideoMcpServer {
    */
   public setSpendStore(store: GenerationSpendStore): void {
     this.spendStore = store;
+  }
+
+  public setTranscriptionService(service: TranscriptionService): void {
+    this.transcriptionService = service;
   }
 
   /** Lets the agent finish a generation by importing its result, as the UI does. */
@@ -609,13 +623,15 @@ export class OpenVideoMcpServer {
     description:
       'Watch a project video asset: samples a small set of frames across the video (or a focused startMs–endMs section) ' +
       'so the model can see what is on screen. Read-only. The frames are attached to the conversation as images with ' +
-      'timestamps — describe or reason about them after they arrive. Use a vision-capable model to actually see them.',
+      'timestamps. Set perSecond with startMs/endMs for one frame per second in a window of up to 20 seconds. ' +
+      'Read visible text from the images when relevant. Use a vision-capable model.',
     input: z.object({
       projectId: z.string().min(1),
       assetId: z.string().min(1),
       startMs: z.number().finite().min(0).optional(),
       endMs: z.number().finite().min(0).optional(),
-      maxFrames: z.number().int().min(1).max(WATCH_FRAME_HARD_CAP).optional()
+      maxFrames: z.number().int().min(1).max(WATCH_FRAME_HARD_CAP).optional(),
+      perSecond: z.boolean().optional()
     })
   })
   async watchProjectVideo(params: {
@@ -624,6 +640,7 @@ export class OpenVideoMcpServer {
     startMs?: number;
     endMs?: number;
     maxFrames?: number;
+    perSecond?: boolean;
   }) {
     if (!this.projectStore) {
       return { success: false as const, error: 'ProjectStore service is not available.' };
@@ -646,7 +663,12 @@ export class OpenVideoMcpServer {
         return { success: false as const, error: 'The asset has no duration metadata yet; open it in the editor to probe it first.' };
       }
 
-      const timestampsMs = planFrameTimestamps({
+      const startMs = params.startMs ?? 0;
+      const endMs = params.maxFrames === undefined
+        ? params.endMs
+        : Math.min(params.endMs ?? durationMs, startMs + params.maxFrames * 1000);
+      const range = params.perSecond ? resolveVideoInspectionRange(durationMs, startMs, endMs) : null;
+      const timestampsMs = params.perSecond ? (range === null ? [] : sampleVideoInspectionSeconds(range)) : planFrameTimestamps({
         durationMs,
         startMs: params.startMs,
         endMs: params.endMs,
@@ -665,7 +687,7 @@ export class OpenVideoMcpServer {
 
       let frames: readonly ExtractedFrame[];
       try {
-        frames = await this.watchFrameExtractor({ filePath, timestampsMs });
+        frames = await this.watchFrameExtractor({ filePath, timestampsMs, projectDirectory });
       } catch {
         // Extraction errors can carry filesystem paths in FFmpeg stderr; keep the tool result path-free.
         return { success: false as const, error: 'FFmpeg could not extract frames from this asset. Check FFmpeg readiness in Settings → Local Tools.' };
@@ -680,11 +702,13 @@ export class OpenVideoMcpServer {
         assetId: asset.id,
         displayName: asset.displayName,
         durationMs,
+        ...(range === null ? {} : range),
         frameCount: frames.length,
         summary:
           `Sampled ${frames.length} frames from "${asset.displayName}" at ` +
           `${frames.map((frame) => formatFrameTimestamp(frame.timeMs)).join(', ')}. ` +
-          'The frames are attached to the conversation as images in chronological order.',
+          'The frames are attached to the conversation as images in chronological order.' +
+          (range === null ? '' : ` Inspected ${range.startMs}–${range.endMs} ms of ${durationMs} ms.`),
         frames: frames.map((frame) => ({
           timeMs: frame.timeMs,
           timestamp: formatFrameTimestamp(frame.timeMs),
@@ -697,6 +721,23 @@ export class OpenVideoMcpServer {
         error: err instanceof Error ? err.message : `Failed to watch asset ${params.assetId}.`
       };
     }
+  }
+
+  @McpTool({
+    description: 'Extract spoken words with source timecodes from a project video window of up to 20 seconds. ' +
+      'Uses local FFmpeg and whisper.cpp. The transcript is sent to the selected chat model after user approval.',
+    input: z.object({
+      projectId: z.string().min(1),
+      assetId: z.string().min(1),
+      startMs: z.number().int().min(0),
+      endMs: z.number().int().min(0).optional()
+    })
+  })
+  async transcribeProjectVideoRange(params: { projectId: string; assetId: string; startMs: number; endMs?: number }) {
+    if (this.transcriptionService === undefined) {
+      return { success: false, error: 'Local speech inspection is unavailable.' };
+    }
+    return this.transcriptionService.inspectVideoSpeech(params);
   }
 
   @McpTool({

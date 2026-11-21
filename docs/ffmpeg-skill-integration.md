@@ -16,8 +16,12 @@ commit `3145261a1c19f399b9520fad7fdac741871e1426`.
 2. **The in-app editing assistants** receive a compact adapted workflow from
    `src/shared/ffmpegEditingWorkflow.ts` in desktop and mobile system prompts:
    inspect real metadata → plan → approved supported edit → check/verify → honest
-   report. Their existing tool lists, path boundaries and approval gates stay
-   unchanged. The desktop app does **not** execute the external Python tools or
+   report. On desktop, the Edit Agent can sample one frame per second for up to
+   20 seconds at a time. A vision model can read visible text from those
+   frames. The agent can also request a timecoded transcript of the same
+   window using local FFmpeg and a configured whisper.cpp runtime. The speech
+   tool requires chat approval before its transcript goes to the selected model.
+   The desktop app does **not** execute the external Python tools or
    start their MCP server, and the mobile assistant does not gain timeline or
    export tools just by reading this workflow. A job ID alone is not proof that
    an export completed; unavailable output inspection must be disclosed.

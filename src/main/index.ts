@@ -529,6 +529,7 @@ async function installIpcHandlers(): Promise<void> {
 
   const mcpServerInstance = new OpenVideoMcpServer();
   mcpServerInstance.setServices(projectStore, exportIpcService);
+  mcpServerInstance.setTranscriptionService(transcriptionService);
   mcpServerInstance.setResultImportService(resultAssetImportService);
   mcpServerInstance.setSpendStore(generationSpendStore);
   // Agent tools write the project straight to disk; tell open editors to reload

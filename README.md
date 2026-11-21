@@ -207,6 +207,11 @@ A provider API key is entered in Settings and sent once through the typed bridge
 
 ### Install and run
 
+The Windows setup executable installs FFmpeg through WinGet when it cannot
+find an existing copy. Automatic installation requires WinGet and an internet
+connection. Source builds and other desktop packages use a separately installed
+FFmpeg.
+
 ```bash
 git clone https://github.com/Theorvane/openscene.git
 cd openscene

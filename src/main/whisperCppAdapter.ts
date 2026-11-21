@@ -213,6 +213,7 @@ export async function transcribeOpenedAsset(input: {
   readonly language: string;
   readonly signal: AbortSignal;
   readonly temporaryRoot?: string;
+  readonly range?: { readonly startMs: number; readonly endMs: number };
   readonly spawnProcess?: SpawnWhisperProcess;
   readonly onStage: (stage: 'normalizing' | 'transcribing') => void;
   readonly onProgress: (percent: number) => void;
@@ -229,7 +230,13 @@ export async function transcribeOpenedAsset(input: {
     input.onStage('normalizing');
     await runProcess({
       executablePath: input.ffmpegPath,
-      args: ['-nostdin', '-hide_banner', '-loglevel', 'error', '-y', '-i', sourcePath, '-map', '0:a:0', '-vn', '-c:a', 'pcm_s16le', '-ar', '16000', '-ac', '1', normalizedPath],
+      args: [
+        '-nostdin', '-hide_banner', '-loglevel', 'error', '-y',
+        ...(input.range === undefined ? [] : ['-ss', (input.range.startMs / 1000).toFixed(3)]),
+        '-i', sourcePath,
+        ...(input.range === undefined ? [] : ['-t', ((input.range.endMs - input.range.startMs) / 1000).toFixed(3)]),
+        '-map', '0:a:0', '-vn', '-c:a', 'pcm_s16le', '-ar', '16000', '-ac', '1', normalizedPath
+      ],
       timeoutMs: NORMALIZE_TIMEOUT_MS,
       signal: input.signal,
       ...(input.spawnProcess === undefined ? {} : { spawnProcess: input.spawnProcess })
