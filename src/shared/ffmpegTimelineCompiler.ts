@@ -188,6 +188,9 @@ function videoAudioFilter(clip: PersistedTimelineClip, inputIndex: number, outpu
     // Sound follows the picture. A clip at 2× whose audio still runs at 1× is a
     // sync bug that reads as a broken export.
     ...tempoFilters(clipSpeed(clip)),
+    // Some decoders/tempo filters emit missing or non-monotonic timestamps.
+    // Rebuild from the output sample count before adding timeline silence.
+    'asetpts=N/SR/TB',
     `volume=${clipOnlyGain(clip)}`,
     'aformat=channel_layouts=stereo',
     `adelay=${clip.timelineStartMs}:all=1[${outputLabel}]`
@@ -328,6 +331,7 @@ function audioFilter(track: AudioTimelineTrack, clip: PersistedTimelineClip, inp
     `[${inputIndex}:a:0]atrim=start=${seconds(clip.sourceStartMs)}:end=${seconds(clip.sourceEndMs)}`,
     'asetpts=PTS-STARTPTS',
     ...tempoFilters(clipSpeed(clip)),
+    'asetpts=N/SR/TB',
     `volume=${trackGain(track, clip)}`,
     'aformat=channel_layouts=stereo',
     `pan=stereo|c0=${left}*c0|c1=${right}*c1`,
@@ -457,7 +461,7 @@ export function compileFfmpegTimeline(input: CompileFfmpegTimelineInput): Compil
     audioLabels.push(`[${label}]`);
   });
   if (audioLabels.length > 0) {
-    filters.push(`${audioLabels.join('')}amix=inputs=${audioLabels.length}:duration=longest:normalize=0[audio-out]`);
+    filters.push(`${audioLabels.join('')}amix=inputs=${audioLabels.length}:duration=longest:normalize=0,asetpts=N/SR/TB[audio-out]`);
   }
 
   args.push('-filter_complex', filters.join(';'), '-map', '[video-out]');
