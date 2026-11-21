@@ -1,10 +1,11 @@
-import { constants } from 'node:fs';
-import { open } from 'node:fs/promises';
 import { basename, extname } from 'node:path';
 
 import type { ApiResponse } from '../shared/models';
 import type { ReferenceImageSelection } from '../shared/providerSeams';
 import { fail, ok } from './ipcResponses';
+import { readBoundedReferenceImage, REFERENCE_IMAGE_MAX_BYTES, ReferenceImageTooLargeError } from './boundedReferenceImage';
+
+export { REFERENCE_IMAGE_MAX_BYTES } from './boundedReferenceImage';
 
 /**
  * Reference image for image-to-video generation. The picker lives in the main
@@ -13,9 +14,6 @@ import { fail, ok } from './ipcResponses';
  * file lives and the provider adapter can post it directly.
  */
 export const REFERENCE_IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'webp'] as const;
-
-/** Provider limits are far lower; this bounds disk reads as well as IPC bytes. */
-export const REFERENCE_IMAGE_MAX_BYTES = 8 * 1024 * 1024;
 
 const MIME_TYPES: Readonly<Record<string, string>> = {
   '.png': 'image/png',
@@ -28,35 +26,8 @@ export type ReferenceImageDialog = () => Promise<{ readonly canceled: boolean; r
 
 export type ReferenceImageReader = (filePath: string) => Promise<Buffer>;
 
-class ReferenceImageTooLargeError extends Error {}
-
 function tooLargeResponse(): ApiResponse<ReferenceImageSelection | null> {
   return fail('INVALID_INPUT', `The reference image is larger than ${REFERENCE_IMAGE_MAX_BYTES / (1024 * 1024)}MB.`);
-}
-
-async function readBoundedReferenceImage(filePath: string): Promise<Buffer> {
-  // Non-blocking open lets stat reject special files such as FIFOs without
-  // waiting for a writer in the main process.
-  const file = await open(filePath, constants.O_RDONLY | constants.O_NONBLOCK);
-  try {
-    const stats = await file.stat();
-    if (!stats.isFile()) throw new Error('Reference image must be a regular file.');
-    if (stats.size > REFERENCE_IMAGE_MAX_BYTES) throw new ReferenceImageTooLargeError();
-
-    // The file may grow after stat. Read at most the limit plus one detection
-    // byte, never using an unbounded readFile on this handle.
-    const buffer = Buffer.allocUnsafe(REFERENCE_IMAGE_MAX_BYTES + 1);
-    let total = 0;
-    while (total <= REFERENCE_IMAGE_MAX_BYTES) {
-      const { bytesRead } = await file.read(buffer, total, Math.min(64 * 1024, buffer.length - total), total);
-      if (bytesRead === 0) break;
-      total += bytesRead;
-      if (total > REFERENCE_IMAGE_MAX_BYTES) throw new ReferenceImageTooLargeError();
-    }
-    return buffer.subarray(0, total);
-  } finally {
-    await file.close();
-  }
 }
 
 export async function selectReferenceImage(
