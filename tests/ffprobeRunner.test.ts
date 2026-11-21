@@ -61,4 +61,3 @@ describe('local Linux FFprobe fallback', () => {
     expect(args.at(-1)).toBe('/media/input');
   });
 });
-

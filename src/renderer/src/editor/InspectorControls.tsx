@@ -29,7 +29,6 @@ export function PropertyGroup({ title, children, defaultExpanded = true, onReset
     </div>
   );
 }
-
 export function TimingInput({ label, valueMs, onCommit }: { readonly label: string; readonly valueMs: number; readonly onCommit: (ms: number) => void }): ReactElement {
   const [draft, setDraft] = useState((valueMs / 1000).toFixed(3));
   useEffect(() => setDraft((valueMs / 1000).toFixed(3)), [valueMs]);
