@@ -2,6 +2,7 @@ import { BrowserWindow, ipcMain, Menu } from 'electron';
 import type { MenuItemConstructorOptions } from 'electron';
 
 import { IPC_CHANNELS } from '../shared/ipc';
+import { parseWindowMenuAction } from '../shared/windowMenuActions';
 import {
   TIMELINE_MENU_COMMAND_IDS,
   parseTimelineMenuState,
@@ -97,6 +98,22 @@ export function createApplicationMenuTemplate(
   template.push(
     { role: 'fileMenu' },
     { role: 'editMenu' },
+    {
+      label: 'Clip',
+      submenu: [
+        commandItem('splitAtPlayhead', 'Split at playhead'),
+        commandItem('trimStartToPlayhead', 'Trim start to playhead'),
+        commandItem('trimEndToPlayhead', 'Trim end to playhead'),
+        { type: 'separator' },
+        commandItem('duplicateClip', 'Duplicate clip'),
+        commandItem('deleteClips', 'Delete selected clips'),
+        { type: 'separator' },
+        commandItem('detachAudio', 'Detach audio'),
+        { type: 'separator' },
+        commandItem('selectAllClips', 'Select all clips'),
+        commandItem('clearClipSelection', 'Clear clip selection')
+      ]
+    },
     { role: 'viewMenu' },
     {
       label: 'Timeline',
@@ -106,7 +123,6 @@ export function createApplicationMenuTemplate(
         { type: 'separator' },
         commandItem('undo', 'Undo'),
         commandItem('redo', 'Redo'),
-        commandItem('splitAtPlayhead', 'Split at playhead'),
         { type: 'separator' },
         {
           label: 'Add Track',
@@ -185,6 +201,27 @@ export function installApplicationMenu(onCheckForUpdates?: () => void): void {
     createApplicationMenuTemplate(dispatchTimelineMenuCommand, onCheckForUpdates)
   );
   Menu.setApplicationMenu(menu);
+  ipcMain.on(IPC_CHANNELS.windowMenuAction, (event, payload: unknown) => {
+    const window = BrowserWindow.getFocusedWindow();
+    if (window === null || window.webContents !== event.sender) return;
+    const action = parseWindowMenuAction(payload);
+    if (action === null) return;
+    const contents = window.webContents;
+    switch (action) {
+      case 'cut': contents.cut(); break;
+      case 'copy': contents.copy(); break;
+      case 'paste': contents.paste(); break;
+      case 'selectAll': contents.selectAll(); break;
+      case 'undoText': contents.undo(); break;
+      case 'redoText': contents.redo(); break;
+      case 'zoomIn': contents.setZoomLevel(Math.min(3, contents.getZoomLevel() + 0.5)); break;
+      case 'zoomOut': contents.setZoomLevel(Math.max(-3, contents.getZoomLevel() - 0.5)); break;
+      case 'resetZoom': contents.setZoomLevel(0); break;
+      case 'fullscreen': window.setFullScreen(!window.isFullScreen()); break;
+      case 'minimize': window.minimize(); break;
+      case 'close': window.close(); break;
+    }
+  });
   ipcMain.on(IPC_CHANNELS.timelineMenuState, (event, payload: unknown) => {
     const focusedWindow = BrowserWindow.getFocusedWindow();
     if (focusedWindow === null || focusedWindow.webContents !== event.sender) return;

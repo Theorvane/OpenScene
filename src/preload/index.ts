@@ -32,6 +32,7 @@ import type {
 import type { ChatGptOAuthStatus, OpenAiAuthMode } from '../shared/openAiAuth';
 import type { TimelineMenuCommandId, TimelineMenuState } from '../shared/timelineMenuCommands';
 import { parseTimelineMenuCommandId } from '../shared/timelineMenuCommands';
+import type { WindowMenuAction } from '../shared/windowMenuActions';
 import type {
   CreateProjectInput,
   CreateProjectResult,
@@ -61,6 +62,7 @@ type AssetPlaybackUrl = {
 };
 
 export interface VideoToolApi {
+  performWindowMenuAction(action: WindowMenuAction): void;
   onTimelineMenuCommand(listener: (commandId: TimelineMenuCommandId) => void): () => void;
   onProjectTimelineChanged(listener: (projectId: string) => void): () => void;
   updateTimelineMenuState(state: TimelineMenuState): void;
@@ -142,6 +144,7 @@ function parseUpdaterSnapshot(payload: unknown): UpdaterSnapshot | null {
 }
 
 const videoTool: VideoToolApi = {
+  performWindowMenuAction: (action) => ipcRenderer.send(IPC_CHANNELS.windowMenuAction, action),
   onTimelineMenuCommand: (listener) => {
     const subscription = (_event: IpcRendererEvent, payload: unknown): void => {
       const commandId = parseTimelineMenuCommandId(payload);

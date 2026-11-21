@@ -481,7 +481,7 @@ button {
    window dragging. Interactive controls opt out via no-drag below. */
 .product-chrome {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, auto);
+  grid-template-columns: auto minmax(0, 1fr) minmax(0, auto);
   gap: var(--space-4);
   align-items: center;
   min-height: 44px;
@@ -498,7 +498,25 @@ button {
 /* Reserve room for the macOS traffic lights inside the titlebar. */
 :root[data-platform="darwin"] .product-chrome {
   padding-left: 84px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, auto);
 }
+
+.application-menu { position: relative; display: flex; align-items: center; gap: 10px; -webkit-app-region: no-drag; z-index: 100; }
+:root[data-platform="darwin"] .application-menu { display: none; }
+.application-menu__brand { font-size: 20px; font-weight: 650; letter-spacing: -2px; padding-right: 4px; color: var(--foreground); }
+.application-menu__brand > span { color: var(--primary); }
+.application-menu [role="menubar"] { display: flex; align-items: center; gap: 1px; }
+.application-menu button { appearance: none; border: 0; background: transparent; color: var(--text-weak); font: inherit; font-size: 12px; cursor: pointer; }
+.application-menu [role="menubar"] > button { padding: 6px 8px; border-radius: 5px; white-space: nowrap; }
+.application-menu button:hover, .application-menu button:focus-visible, .application-menu button[aria-expanded="true"] { background: var(--surface-control-hover); color: var(--foreground); }
+.application-menu button:focus-visible { outline: 1px solid var(--primary); outline-offset: -1px; }
+.application-menu__popup { position: absolute; top: calc(100% + 8px); min-width: 250px; max-height: calc(100vh - 90px); overflow-y: auto; padding: 5px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-raised); box-shadow: 0 12px 36px #0003; }
+.application-menu__popup > button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 8px; border-radius: 4px; text-align: left; white-space: nowrap; color: var(--foreground); }
+.application-menu__popup > button:disabled { color: var(--text-weaker); opacity: 0.45; cursor: default; background: transparent; }
+.application-menu__check { display: inline-block; width: 13px; flex-shrink: 0; font-size: 11px; color: var(--primary); }
+.application-menu__popup kbd { margin-left: auto; padding-left: 18px; font-family: inherit; font-size: 11px; color: var(--text-weaker); }
+.application-menu__popup [role="separator"] { height: 1px; margin: 5px 8px; background: var(--border); }
+@media (max-width: 1120px) { .application-menu [role="menubar"] > button { padding-inline: 5px; } .application-menu { gap: 4px; } }
 
 /* Interactive clusters opt out of window dragging; the empty stretch of the
    bar (including the flexible gap) stays draggable. */
@@ -4032,6 +4050,22 @@ button {
   gap: var(--space-1);
 }
 
+.inspector-categories { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); padding: 3px; gap: 2px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-inset); }
+.inspector-categories > button { border: 0; border-radius: 4px; padding: 7px 2px; color: var(--text-weak); background: transparent; font: inherit; font-size: 12px; cursor: pointer; }
+.inspector-categories > button[aria-pressed="true"] { color: var(--foreground); background: var(--surface-raised); box-shadow: 0 1px 3px #0001; font-weight: 600; }
+.inspector-categories > button:disabled { opacity: 0.35; cursor: default; }
+.inspector-categories > button:focus-visible { outline: 1px solid var(--primary); }
+.inspector-selection-summary { display: flex; justify-content: space-between; gap: 8px; padding: 4px 1px 8px; color: var(--text-weak); font-size: 11px; text-transform: capitalize; }
+.inspector-selection-summary strong { color: var(--foreground); font-weight: 500; font-variant-numeric: tabular-nums; }
+.inspector-fields { margin: 0; padding: 0; border: 0; min-width: 0; }
+.inspector-help { margin: 0 0 4px; font-size: 11px; line-height: 1.5; color: var(--text-weaker); }
+.inspector-action--wide { grid-column: 1 / -1; }
+.property-group__heading { display: flex; align-items: center; gap: 8px; }
+.property-group__heading .property-group__header { flex: 1; min-width: 0; }
+.property-group__reset { appearance: none; border: 0; padding: 3px 5px; border-radius: 4px; background: transparent; color: var(--text-weaker); cursor: pointer; font: inherit; font-size: 10px; }
+.property-group__reset:hover { color: var(--primary); background: var(--surface-control-hover); }
+.inspector-fields .property-number-input[aria-label^="Clip timeline"] { width: 100%; font-variant-numeric: tabular-nums; }
+
 .inspector-action-grid .inspector-action {
   min-height: 26px;
   padding: var(--space-1) var(--space-2);
@@ -4323,8 +4357,8 @@ button {
   }
 
   .product-chrome {
-    grid-template-columns: 1fr;
-    justify-items: start;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 8px;
   }
 
   .product-chrome__context {

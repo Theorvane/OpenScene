@@ -60,6 +60,7 @@ const actionHandlers: Readonly<Record<EditorShortcutActionId, (input: TimelineSh
 export function useTimelineShortcuts(input: TimelineShortcutInput): void {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.defaultPrevented || (event.target instanceof Element && event.target.closest('[role="menu"], [role="menubar"]'))) return;
       if (input.isLocked) return;
       if (isTextEditingShortcutTarget(event.target as { tagName?: string; isContentEditable?: boolean } | null)) return;
       const matchedBinding = getEditorShortcutBindings(input.shortcutPreferences).find((binding) => isEditorShortcutBindingMatch(event, binding));

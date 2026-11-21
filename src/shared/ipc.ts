@@ -32,6 +32,7 @@ export const IPC_CHANNELS = {
   revealExportResult: 'export:reveal-result',
   timelineMenuCommand: 'timeline-menu:command',
   timelineMenuState: 'timeline-menu:state',
+  windowMenuAction: 'window-menu:action',
   transcriptionRuntimeStatus: 'transcription:runtime-status',
   transcriptionStart: 'transcription:start',
   transcriptionGetJob: 'transcription:get-job',

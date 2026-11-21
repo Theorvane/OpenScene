@@ -185,6 +185,9 @@ function createWindow(): void {
     mainWindow.show();
   });
 
+  // Keep native accelerators registered while the renderer draws Windows menus.
+  if (process.platform === 'win32') mainWindow.setMenuBarVisibility(false);
+
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   mainWindow.webContents.on('will-navigate', (event) => {
     event.preventDefault();

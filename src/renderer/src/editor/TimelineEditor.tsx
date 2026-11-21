@@ -61,7 +61,7 @@ function getInspectorTabs(editor: TimelineEditorController): readonly TabDefinit
 
   return EDITOR_INSPECTOR_DOCK_TAB_IDS.map((tabId) => {
     const dockTab = dockTabs?.find((tab) => tab.id === tabId);
-    const label = dockTab?.label ?? INSPECTOR_TAB_LABELS[tabId];
+    const label = tabId === 'selection' ? 'Clip' : dockTab?.label ?? INSPECTOR_TAB_LABELS[tabId];
     // Without a project there is nothing to inspect at all.
     const disabled = editor.project === null ? true : dockTab?.disabled === true;
 
@@ -244,6 +244,8 @@ export function TimelineEditor({ editor, onProjectSettings }: TimelineEditorProp
 
   useEditorNativeMenuCommands({
     editor,
+    canvasMode,
+    shortcutPreferences,
     isAgentBusy,
     layoutPreference,
     onApplyFloatingPreset: applyFloatingPreset,
