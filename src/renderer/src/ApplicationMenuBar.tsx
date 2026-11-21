@@ -19,7 +19,7 @@ export function ApplicationMenuBar(props: Props): ReactElement {
   const [open, setOpen] = useState<number | null>(null);
   const root = useRef<HTMLDivElement>(null);
   const previousFocus = useRef<HTMLElement | null>(null);
-  const textTarget = (): boolean => previousFocus.current?.matches('input, textarea, [contenteditable="true"], [role="textbox"]') ?? false;
+  const textTarget = (): boolean => previousFocus.current?.matches('input:not([type="range"]):not([type="color"]):not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"]), textarea, [contenteditable="true"], [role="textbox"]') ?? false;
   const native = (action: WindowMenuAction): void => {
     previousFocus.current?.focus();
     window.videoTool.performWindowMenuAction(action);

@@ -4051,7 +4051,7 @@ button {
   gap: var(--space-1);
 }
 
-.inspector-categories { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); padding: 3px; gap: 2px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-inset); }
+.inspector-categories { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); padding: 3px; gap: 2px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-inset); }
 .inspector-categories > button { border: 0; border-radius: 4px; padding: 7px 2px; color: var(--text-weak); background: transparent; font: inherit; font-size: 12px; cursor: pointer; }
 .inspector-categories > button[aria-pressed="true"] { color: var(--foreground); background: var(--surface-raised); box-shadow: 0 1px 3px #0001; font-weight: 600; }
 .inspector-categories > button:disabled { opacity: 0.35; cursor: default; }
@@ -4066,6 +4066,20 @@ button {
 .property-group__reset { appearance: none; border: 0; padding: 3px 5px; border-radius: 4px; background: transparent; color: var(--text-weaker); cursor: pointer; font: inherit; font-size: 10px; }
 .property-group__reset:hover { color: var(--primary); background: var(--surface-control-hover); }
 .inspector-fields .property-number-input[aria-label^="Clip timeline"] { width: 100%; font-variant-numeric: tabular-nums; }
+.effect-preset-grid, .text-style-presets { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.effect-preset, .text-style-presets > button { display: grid; gap: 6px; min-width: 0; padding: 5px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-inset); color: var(--foreground); cursor: pointer; font: inherit; font-size: 11px; text-align: left; }
+.effect-preset:hover, .text-style-presets > button:hover { border-color: var(--primary); }
+.effect-preset[aria-pressed="true"] { border-color: var(--primary); background: var(--surface-control-selected); }
+.effect-preset:focus-visible, .text-style-presets > button:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.effect-preset__scene { position: relative; display: block; height: 48px; overflow: hidden; border-radius: 3px; background: linear-gradient(160deg, #58b6d9 10%, #e8c986 85%); }
+.effect-preset__scene > i { position: absolute; top: 8px; right: 20%; width: 13px; height: 13px; border-radius: 50%; background: #fff1ba; }
+.effect-preset__scene > b { position: absolute; left: -5%; bottom: -2px; width: 110%; height: 65%; clip-path: polygon(0 100%, 27% 0, 44% 60%, 67% 10%, 100% 100%); background: linear-gradient(120deg, #426543, #ac544b); }
+.text-style-presets > button { text-align: center; padding: 8px 4px; background: #253044; }
+.text-style-presets > button > span { justify-self: center; padding: 2px 7px; border-radius: 3px; font-size: 24px; }
+.text-style-presets > button > small { color: #e0e6f0; font-size: 10px; }
+.typography-inspector__text { width: 100%; min-height: 38px; padding: 8px; font-size: 14px; }
+.inspector-toggle { display: flex; align-items: center; gap: 7px; color: var(--foreground); font-size: 12px; }
+.inspector-toggle input { accent-color: var(--primary); }
 
 .inspector-action-grid .inspector-action {
   min-height: 26px;

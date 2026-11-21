@@ -284,10 +284,12 @@ export function useTimelineEditor() {
     a rule that refuses silently is the thing this editor keeps being caught by.
   */
   const addTitleAtPlayhead = useCallback(() => {
-    replaceTimeline(
-      (timeline) => addTitle(timeline, { id: createOpaqueId('title'), atMs: playback.playheadMs }),
+    const id = createOpaqueId('title');
+    const result = replaceTimeline(
+      (timeline) => addTitle(timeline, { id, atMs: playback.playheadMs }),
       'Added a title.'
     );
+    return result === null ? null : id;
   }, [playback.playheadMs, replaceTimeline]);
 
   const editTitle = useCallback(

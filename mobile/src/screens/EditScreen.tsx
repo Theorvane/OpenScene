@@ -8,6 +8,7 @@ import { clipDurationMs, clipTimelineEndMs, playheadForClipSelection } from '@op
 import { snapTimelinePosition } from '@openvideo/shared/timelineSnapping';
 import { titlesAt } from '@openvideo/shared/titlePreviewLayout';
 import { DEFAULT_SUBTITLE_DELIVERY } from '@openvideo/shared/subtitleDelivery';
+import { selectedVisualEffect, VISUAL_EFFECT_PRESETS, visualEffectValues } from '@openvideo/shared/visualEffectPresets';
 import { metadataPrivacyPlan } from '@openvideo/shared/metadataPrivacy';
 import { applyCaptionPreset, CAPTION_PLACEMENTS, CAPTION_STYLE_PRESETS, isAutomaticCaptionId, resolvedTitleStyle, type CaptionPresetId } from '@openvideo/shared/captionStyle';
 import { countTimelineAssetUsage, DEFAULT_MEDIA_LIBRARY_FILTERS, type MediaLibraryFilters } from '@openvideo/shared/mediaLibraryView';
@@ -1005,16 +1006,21 @@ export function EditScreen({
               })
             }
           />
-          {/*
-            Colour, and the one thing this app cannot do on every phone.
-
-            Android grades; iOS composes with layer instructions, which carry a
-            transform and an opacity and no colour at all, so grading there
-            needs a compositor that does not exist yet. The controls are shown
-            disabled with the reason rather than hidden — a control that is
-            absent on one platform and present on another is a bug report
-            waiting to happen, and one that silently does nothing is worse.
-          */}
+          {selectedAsset?.kind !== 'audio' && <>
+            <Text style={styles.panelNote}>Effects</Text>
+            <View style={styles.captionChoiceRow}>
+              {VISUAL_EFFECT_PRESETS.map(preset => <Pressable key={preset.id} accessibilityRole="button" accessibilityLabel={`Apply ${preset.label} effect`}
+                accessibilityState={{ selected: selectedVisualEffect(selected.clip.effects)?.id === preset.id }}
+                onPress={() => editor.setSelectedEffects(visualEffectValues(preset.id))}
+                style={press([styles.captionChoice, selectedVisualEffect(selected.clip.effects)?.id === preset.id && styles.captionChoiceOn])}>
+                <Text style={styles.captionChoiceText}>{preset.label}</Text>
+              </Pressable>)}
+            </View>
+            <Stepper label="Effect strength" value={`${Math.round((selectedVisualEffect(selected.clip.effects)?.amount ?? 1) * 100)}%`}
+              disabled={!selectedVisualEffect(selected.clip.effects) || selectedVisualEffect(selected.clip.effects)?.id === 'original'}
+              onDown={() => { const effect = selectedVisualEffect(selected.clip.effects); if (effect) editor.setSelectedEffects(visualEffectValues(effect.id, Math.max(0, Number((effect.amount - 0.1).toFixed(2))))); }}
+              onUp={() => { const effect = selectedVisualEffect(selected.clip.effects); if (effect) editor.setSelectedEffects(visualEffectValues(effect.id, Math.min(1, Number((effect.amount + 0.1).toFixed(2))))); }} />
+          </>}
           <Stepper
             label="Brightness"
             value={(selected.clip.effects.brightness ?? 0).toFixed(2)}
@@ -1164,7 +1170,7 @@ function TitlePanel({
       keyboardShouldPersistTaps="handled"
     >
       <View style={styles.titleHeader}>
-        <Text style={styles.inspectorTitle}>Title</Text>
+        <Text style={styles.inspectorTitle}>Typography</Text>
         <Pressable accessibilityRole="button" accessibilityLabel="Close the title panel" onPress={onClose} hitSlop={SMALL_SLOP}>
           <Text style={styles.smallText}>×</Text>
         </Pressable>
