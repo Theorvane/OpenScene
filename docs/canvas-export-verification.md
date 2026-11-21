@@ -1,48 +1,44 @@
-# 블록 편집 → MP4 내보내기 검증
+# 캔버스 편집과 내보내기 검증
 
-후속 검증 완료: [Linux 검증 환경](media-analysis-environment.md)에서 FFprobe·REA가 실제 실행됐다. 전체 테스트 1,143개 통과, 실패·건너뜀 0개이며, 아래의 Windows 당시 실패 기록은 이 후속 결과로 보완됐다.
+최근 기능 검증 기준은 `88c6ecf229407bef96cd28ade5574f1884e7d49a`, 2026-11-21 (Asia/Seoul)이다. 이 문서는 해당 리비전에서 관찰한 결과와 재검증 절차를 구분한다.
 
-2026-11-21, Windows Electron 앱에서 수행. 로컬 QA 파일을 격리된 테스트 프로젝트로 복사해 실제 UI를 조작했다. 내보내기 API나 렌더러 상태를 성공 응답으로 대체하지 않았다.
+## 실제 앱 검증
 
-## 입력과 작업
+격리된 Windows Electron 프로필에 로컬 QA 영상·음성을 복사했다. UI의 빠른 시작으로 영상+음악 연결을 생성하고, 음량 설정과 최종 적용·저장을 실행했다. 같은 앱의 등록된 에이전트 도구 브리지로 색상→자르기→배속→지연을 연결·적용한 뒤 MP4를 내보냈다. 성공 응답으로 렌더링이나 검증을 대체하지 않았다.
 
-- 영상: `orbit-launch.mp4`, 9초, 640×360. 화면 글자와 후반 대사가 있는 로컬 QA 영상.
-- 음성: `speech.wav`, PCM WAV, 22,050Hz, 55,105개 샘플, 약 2.499초.
-- 영상 클립 두 개: 원본 0–2초, 원본 2–6.3초. Join videos의 입력 순서로 연결.
-- 음성 클립 두 개: 동일 WAV의 서로 다른 클립 ID, 각각 원본 0–2초. Join audio와 Mix audio를 각각 연결·적용 검증.
-- 최종 연결: `Join videos → Video + audio ← Mix audio`.
-- 최종 블록 적용 → Timeline에서 순서·시작 시간 확인 → Save → Export → Export MP4.
-
-## 관찰한 결과
-
-MP4가 실제로 생성됐다. 앱의 내보내기 완료 상태를 확인한 뒤 파일을 Chromium의 영상 및 Web Audio 디코더로 별도 검사했다.
-
-| 항목 | 관찰값 |
+| 항목 | 관찰 |
 | --- | --- |
-| 영상 길이 | 6.3초 |
-| 해상도 | 640×360 |
-| 디코딩된 오디오 | 2채널 |
-| 추가 음성 구간 0.1–1.9초 RMS | 약 0.159889 |
-| 중간 무음 구간 2.1–4.3초 RMS | 0 |
-| 원본 대사 구간 4.6–6.1초 RMS | 약 0.087121 |
-| 2.8초 영상 프레임 | `ORBIT LAUNCH` 글자를 육안 확인 |
+| 입력 | `orbit-launch.mp4` 9초, 640×360; `speech.wav` 약 2.499초, PCM 22,050Hz. |
+| 초기 구성 | 영상 두 클립 → Join videos → Mute video sound; 음성 두 클립 → Mix audio → Set volume 0.3; 두 결과 → Video + audio. |
+| 추가 처리 | Colour look monochrome → Trim range 0–4,000ms → Change speed 2 → Start later 500ms. |
+| 그래프 | 9개 블록, 최종 결과는 영상+음성 타입, 계산 길이 2,500ms. |
+| 재적용 | 동일 최종 블록을 다시 적용한 타임라인이 첫 결과와 동일. |
+| 정렬 | 전체 자동 배치, 선택 블록 정렬, 저장과 Undo를 실제 UI에서 확인. |
+| 내보내기 | H.264 MP4, 640×360, 30fps, 75프레임, 2.5초. |
+| 오디오 | AAC 스테레오, 22,050Hz; 시작 0초, 스트림 약 1.478초. 음성 브랜치가 영상보다 먼저 끝나는 구성이다. |
+| 자동 검증 | `checked: true`, `ok: true`, `verificationRuntime: linux-container`. |
+| 프레임 확인 | FFmpeg 스킬의 3×2 시트에서 선행 빈 화면과 이후 `ORBIT LAUNCH` 글자 확인. |
 
-이 검사는 실제 스트림 디코딩과 해당 구간의 신호 존재를 확인한다. RMS는 음질 평가나 대사 전사의 정확도 판정이 아니다. 최종 출력에서 화면 글자를 확인했으며, 이번 테스트에서 OCR·전사 모델을 다시 실행한 것은 아니다.
+도구 검색에서 12종 블록과 34개 편집 작업을 확인했다. 이 실행은 스크립트로 도구를 호출한 통합 검사이며, 외부 LLM과의 자연어 대화·OCR·전사 정확도를 새로 검증한 결과는 아니다. 모바일 실기기도 이번 환경에서 실행하지 않았다.
 
-## 발견하고 수정한 오류
+## 자동 검사
 
-렌더링 후 FFprobe를 시작할 때 Windows Application Control이 동기적으로 `spawn UNKNOWN`을 발생시켰다. 기존 코드는 비동기 `error` 이벤트만 처리했기 때문에 완성된 MP4도 내보내기 실패로 처리하고 삭제했다.
+[Linux 환경](media-analysis-environment.md)에서 194개 테스트 파일, **1,191개 통과 / 실패 0 / 건너뜀 0**을 확인했다. 데스크톱 Node·Web 및 모바일 타입 검사와 Electron 프로덕션 빌드도 통과했다.
 
-`measureExportedFile`이 동기적인 실행 거부도 `null`(검사 불가)로 반환하도록 수정했다. 기존의 ‘검사 불가는 렌더링 실패가 아니다’라는 규칙을 복구한 것이다. 출력은 보존되고 앱의 자동 검사 결과는 미검증으로 남는다. FFprobe 검사를 통과한 것으로 표시하지 않는다. 동기 실행 거부 회귀 테스트를 추가했다.
+새 회귀 검사는 처리 블록·연결 타입·순환 거부·원본 보존·재적용·전체 클립 제외 트림·화면 속 화면·원자적 편집·등록 도구 디스패치·노드 배치·선택 정렬·간격 맞춤을 포함한다.
 
-FFmpeg 스킬의 `probe.py`와 `doctor`도 같은 Windows 정책 오류(4551)로 FFprobe를 실행하지 못했다. 실행 정책을 바꾸거나 차단된 실행 파일을 우회하지 않았다. 위 표는 별도의 Chromium 디코딩 관찰값이며 FFprobe 결과가 아니다.
+검증 중 저샘플레이트 음성을 배속·지연·믹싱하면 오디오 타임스탬프가 비정상적으로 기록되는 문제를 발견했다. 최종 믹스 시간을 출력 샘플 수로 다시 계산하도록 수정했다. 실제 FFmpeg 회귀 검사는 시작 시간과 스트림 길이, 지연 구간의 무음, 이후 음성 신호를 확인한다.
 
-## 화면과 저장 검증
+## 재검증 체크리스트
 
-네 종류 블록 생성, 타입에 맞는 입력 연결, 블록 연쇄, 음성 이어붙이기 적용, 최종 합성 적용, 적용 Undo/Redo, 블록 삭제 Undo, 저장·재열기 후 4개 블록과 8개 연결 유지가 통과했다. 새 Sources 검색·클립 추가·Undo와 Blocks 검색도 확인했다.
+1. 원본을 보존하는 별도 프로젝트에 실제 영상과 음성을 가져온다.
+2. 빠른 시작의 소스 선택·입력 순서·드롭다운 연결·설정 변경을 확인한다.
+3. 전체 자동 배치, 선택 정렬·간격, 저장·재열기와 Undo/Redo를 확인한다.
+4. 영상+음성 결과에 처리 블록을 연결하고 준비 상태·길이를 확인한다.
+5. Apply workflow 후 Timeline에서 소스 범위·속도·지연·음량을 확인한다. 다시 적용해 중첩되지 않는지 검사한다.
+6. 모든 상위 입력이 소비되는지, 잘라낸 전체 클립이 예전 위치에 남지 않는지 확인한다. 무관한 클립·제목은 별도로 확인한다.
+7. 저장 후 내보내고 완료 상태와 FFprobe review를 확인한다. 실제 프레임과 음성도 검사한다.
+8. 에이전트 도구의 잘못된 배치가 부분 저장되지 않는지 확인한다. 모델 대화를 검사했다면 사용 모델과 별도의 관찰 결과를 기록한다.
+9. 모바일은 개발 클라이언트에서 별도로 적용·미리보기·네이티브 출력·저장을 검사한다.
 
-자동 정렬 후 소스·처리·합성 순서의 위치를 저장했고, Fit으로 전체 흐름을 표시했다. Appearance 메뉴 열기·Escape 닫기, Assistant 열기·접기, Program Monitor 안에 재생 버튼이 남는 것도 실제 앱에서 검증했다.
-
-로컬 결과는 `.local-runtimes/block-workflow-result.mp4`, `block-output-frame.png`, `block-output-verification.json`, `block-timeline.png`, `block-canvas.png`, `block-export-complete.png`에 보존했다. 로컬 QA 스크립트는 `.local-runtimes/canvas-block-ui.cjs`이며 Windows 전용 실행 환경과 테스트 파일을 사용한다.
-
-최종 빌드의 1360px·1600px 화면, 네이티브 Workspace 메뉴, Appearance 전환과 실제 영상 프레임 미리보기도 확인했다. 데스크톱·모바일 타입 검사와 Electron 빌드는 통과했다. 전체 Vitest는 1,134개 통과, 7개 건너뜀, 기존 FFprobe 정책 차단에 의한 2개 실패(`clipSpeed`, `metadataPrivacyFfmpeg`)다. 모바일 실기기는 검증하지 못했다.
+로컬 산출물은 `.local-runtimes/canvas-easy-agent-report.json`, `canvas-easy-agent-result.mp4`, `canvas-easy-workflow.png`, `canvas-advanced-blocks.png` 및 `linux-verification/`에 있으며 Git에는 포함하지 않는다. 이전 [검증 스냅샷](evidence/media-analysis-2026-11-21.json)은 과거 커밋의 기록이며 현재 통계로 사용하지 않는다.

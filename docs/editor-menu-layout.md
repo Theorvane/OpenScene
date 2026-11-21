@@ -1,76 +1,61 @@
 # 편집기 메뉴와 작업 공간
 
-2026-11-21. 목표는 기능 탐색과 작업 공간 조작을 분리하고, Timeline과 Canvas가 같은 프로젝트를 편집한다는 관계를 명확히 하는 것이다.
+OpenScene은 Timeline, 노드 Canvas, Assistant가 같은 프로젝트를 편집한다. 프로젝트를 열면 편집 화면으로 들어가며, 작업 바에서 Timeline과 Canvas를 전환한다.
 
-## 조사 근거
-
-- [ComfyUI 작업 공간 안내](https://docs.comfy.org/interface/overview): 왼쪽 라이브러리, 중앙 그래프, 선택 대상의 보조 패널, 별도의 캔버스 조작 기능을 참고했다.
-- [REA 조사 기록](rea-editor-evidence.md): Windows의 네이티브 실행 제한을 유지하고 격리된 Linux 환경에서 REA 분석을 완료했다. 빌드 아티팩트의 메뉴 생성·IPC 노출 경로와 실제 Electron 메뉴 트리를 대조했다. 렌더러 번들 전체의 의미 분석 한계는 해당 기록에 구분했다.
-
-## 구현된 메뉴 트리
+## 메뉴 트리
 
 ```text
 애플리케이션 바
-├─ Windows 커스텀 메뉴: File / Edit / Clip / View / Timeline / Workspace / Help
+├─ Windows: File / Edit / Clip / View / Timeline / Workspace / Help
 ├─ 열린 프로젝트 탭 / 프로젝트 목록 / 설정 / 뒤로
 └─ Assistant: 대화 패널 열기·접기
 
 프로젝트 작업 바
 ├─ Timeline / Canvas
-├─ Project
-│  ├─ Project settings
-│  └─ Save project
-├─ View
-│  ├─ Media library: Timeline에서 표시·숨김
-│  ├─ Inspector: Timeline에서 표시·숨김
-│  └─ Reset layout
-├─ Appearance
-│  ├─ Color preset
-│  └─ Light / Dark
+├─ Project: 프로젝트 설정 / 저장
+├─ View: 미디어·Inspector 표시 / 레이아웃 초기화
+├─ Appearance: 색상 프리셋 / Light·Dark
 ├─ Save: 저장 안 된 변경 표시
-└─ Export: 프레임·자막·메타데이터 설정과 MP4 실행·진행·결과
+└─ Export: 프레임·자막·메타데이터 설정 / MP4 진행·결과
 
 Timeline
 ├─ 왼쪽: Project / Media / Audio / Text
 ├─ 중앙 위: Program Monitor / 재생·프레임 이동 / 보기 옵션
-├─ 오른쪽: 클립 Properties / Asset 정보
-│  ├─ Edit: 재생 위치 분할·앞뒤 트림 / 복제·삭제 / 시작·끝 시간 / 배속 / 전환
-│  ├─ Video: 색상 / 위치·크기·회전 / 불투명도 / 항목별 Reset
+├─ 오른쪽: Properties / Asset 정보
+│  ├─ Edit: 분할 / 앞뒤 트림 / 복제·삭제 / 시작·끝 / 배속 / 전환
+│  ├─ Video: 색상 / 위치·크기·회전 / 불투명도 / Reset
 │  ├─ Audio: 볼륨 / 원본 오디오 분리 / Reset
-│  └─ Text: 제목·자막 / 글꼴·외곽선·배경 / 위치·길이
+│  └─ Text: 제목·자막 / 폰트·굵기·그림자·외곽선·배경 / 위치·길이
 └─ 아래: 편집 도구 / 시간 눈금 / 비디오·오디오 트랙
 
 Canvas
 ├─ 왼쪽 라이브러리
-│  ├─ Blocks: 검색 / Video / Audio / Compose
+│  ├─ Quick starts: 하이라이트 / 영상+음악 / 화면 속 화면 / 음성+음악
+│  ├─ Blocks: 검색 / Video·Audio·Compose·Edit / 12종 블록
 │  └─ Sources: 검색 / Import media / 소스 클립 추가
-├─ 중앙: 소스 카드 / 기능 블록 / 타입별 연결선
-├─ 작업 공간 조작: Undo / Redo / Auto arrange / Fit / Zoom
-└─ 아래: 연결 상태 / 적용 안내 / 연결 취소
-
-macOS 네이티브 메뉴 (Windows는 단축키 등록만 유지하고 메뉴 바를 숨김)
-├─ File / Edit / View: OS 기본 명령
-├─ Timeline: 재생 / 되돌리기 / 자르기 / 트랙 추가 / 저장
-└─ Workspace
-   ├─ Panels
-   ├─ Inspector Placement
-   ├─ Floating Panels
-   ├─ Presets
-   └─ Reset Layout
+├─ 작업 바: 최종 출력 / Apply workflow / Review timeline / Undo·Redo
+│  └─ Auto arrange / Fit / Zoom / Refresh inputs
+├─ 정렬 바: 선택 수 / 흐름·격자·정렬·간격 / Arrange nodes / 선택 해제
+├─ 중앙: 소스 카드 / 블록·설정 / 타입별 연결선 / 입력 드롭다운
+└─ 아래: 연결·적용 상태와 오류 안내
 ```
 
-메뉴는 키보드로 열 수 있고 Escape 또는 바깥 클릭으로 닫힌다. Canvas에서는 Timeline 전용 패널 토글이 비활성화된다. 새 사용자의 Assistant는 기본으로 접히며, 기존 사용자의 표시 여부·너비 설정은 유지한다.
+Windows 커스텀 메뉴는 앱의 색상·타이포그래피를 사용한다. F10 또는 Alt+F/E/C/V/T/W/H로 열고 방향키로 탐색한다. Escape는 메뉴 버튼으로 포커스를 돌린다. 명령은 기존 편집 컨트롤러의 활성·체크 상태를 공유한다. 텍스트 입력 중에는 OS의 텍스트 편집 명령을 사용한다.
 
-Windows의 상단 메뉴는 앱의 색상·타이포그래피·표면 토큰을 사용한다. F10 또는 Alt+F/E/C/V/T/W/H로 열고 좌우 방향키로 메뉴를, 위아래 방향키로 항목을 이동한다. Escape는 메뉴 버튼으로 포커스를 돌린다. 편집 명령은 기존 타임라인 컨트롤러의 활성화·체크 상태와 실행 함수를 공유하며, 텍스트 필드에서는 OS의 Undo/Redo·잘라내기·붙여넣기를 사용한다. 메뉴 동작 IPC는 검증된 명령 목록과 요청한 현재 창으로 제한한다. macOS는 시스템 메뉴를 유지하며 모바일에는 OS 창 메뉴가 없어 적용하지 않는다.
+macOS는 시스템 메뉴를 유지한다. Windows의 네이티브 메뉴 바는 숨기고 단축키 등록을 유지한다. Canvas에서는 Timeline 전용 패널 토글이 비활성화된다. OS 창 메뉴는 모바일에 적용하지 않는다.
 
-## 배치와 상호작용
+## 작업 흐름
 
-Canvas에서는 기존 미디어 도크를 중복으로 띄우지 않는다. 라이브러리는 216px, 나머지 영역은 그래프가 차지한다. 블록에는 종류·설명·입출력 포트·계산된 길이·적용 버튼이 보인다. 자동 정렬은 소스 → 처리 → 합성의 의존 순서로 배치하고, Fit은 현재 보이는 영역에 맞춰 축소한다. 직접 드래그와 스크롤도 유지한다.
+Canvas는 빠른 시작과 입력 드롭다운으로 연결을 만들 수 있다. 입력과 출력의 타입이 맞지 않거나 순환을 만드는 연결은 거부한다. 블록에 설정값과 계산된 길이·준비 상태를 표시한다.
 
-Timeline은 위쪽 미리보기와 아래쪽 트랙의 기존 조절 경계를 유지한다. 미리보기 재생 컨트롤은 별도의 고정 행에 두어 화면 크기를 바꿔도 프레임 아래로 잘리지 않게 한다. 프로젝트 작업 영역은 창의 남는 높이를 채운다.
+**Apply workflow**는 선택한 최종 결과를 타임라인에 반영한다. **Review timeline**에서 검토한 뒤 저장·내보내기한다. 설정 변경이나 노드 정렬만으로 영상이 자동 렌더링되지는 않는다. 처리한 입력은 보존하며 **Refresh inputs**로 현재 타임라인을 새 입력으로 삼을 수 있다.
 
-모바일 Canvas는 Workflow / Sources / Blocks 구획을 제공한다. Blocks에서 검색 가능한 동일한 카탈로그와 설명을 사용하고, Workflow에서 연결·적용한다. 자유 위치 배치와 Fit은 데스크톱 전용이다. 모바일 실기기 검증은 이번 Windows 환경에서 수행하지 못했으며 타입 검사를 수행한다.
+**Auto arrange**는 전체 흐름을 입력→출력 순서로 배치한다. **Arrange nodes**는 선택한 소스·블록에 흐름, 격자, 왼쪽·위쪽 정렬, 가로·세로 간격 맞춤을 적용한다. 선택이 없으면 전체에 적용한다. 좌표는 프로젝트에 저장되며 Undo/Redo로 복구한다. 자세한 규칙은 [캔버스 가이드](canvas-workflows.md)를 따른다.
 
-## 경계
+Timeline은 미리보기·트랙·Inspector의 조절 경계를 유지한다. 미리보기 재생 컨트롤은 프레임 아래 고정 행에 두고, 작업 영역은 창의 남는 높이를 사용한다. Assistant 표시와 폭 등 기존 설정을 유지한다.
 
-이 변경은 작업 공간과 탐색 구조를 재구성한다. 블록 실행은 기존 공유 편집 규칙과 타임라인을 사용한다. 그래프가 원본 파일을 덮어쓰거나 자동으로 렌더링하지 않으며, 최종 블록 적용 후 Timeline에서 검토하고 저장한 결과를 Export로 내보낸다.
+## 모바일과 검증
+
+모바일 Canvas는 Templates / Workflow / Sources / Blocks 구획과 공유 블록·정렬 명령을 제공한다. 자유 카드 드래그와 Fit은 데스크톱 전용이며, 모바일 정렬은 데스크톱에서도 사용할 저장 좌표를 변경한다. 모바일 채팅의 프레임·음성 분석도 데스크톱 기능으로 구분한다.
+
+실제 앱 검증 범위는 [편집·내보내기 검증](canvas-export-verification.md)에 기록한다. 메뉴·IPC 분석 절차는 [빌드 분석](rea-editor-evidence.md)을 따른다.

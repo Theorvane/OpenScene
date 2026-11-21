@@ -2,6 +2,8 @@
 
 What the repository already sets, and what only you can.
 
+The current listing describes a local video editor with Edit, node Canvas, Library and an editing assistant. Review text against the [mobile feature guide](README.md): 12 shared block types, quick starts and approved editing operations. Free-position cards and chat-based frame/speech inspection are desktop capabilities. Generation boards and voice synthesis are not mobile workflows.
+
 Identity is fixed in `app.json` and regenerates from it — `android/` and `ios/`
 are build output, not source, so never edit them by hand. Anything that must
 survive `expo prebuild` belongs in a config plugin, as the release signing does.
@@ -22,7 +24,7 @@ you uploaded, **even for a rejected submission**. Raise `buildNumber` and
 
 The app asks for three, and the manifest is pruned to exactly those:
 
-- `INTERNET` — generation calls the providers you connected
+- `INTERNET` — editing-assistant calls to the selected provider and disclosed app services
 - `READ_MEDIA_VIDEO`, `READ_MEDIA_VISUAL_USER_SELECTED` — importing a clip
 
 `RECORD_AUDIO`, `VIBRATE`, `SYSTEM_ALERT_WINDOW`, the image and audio media
@@ -161,8 +163,7 @@ declaration in your name, not ours.
 their own key, only when they ask, and the key is held in Keychain/Keystore.
 Both stores want that stated in the privacy questionnaire and in the privacy
 policy, which is published at `https://www.sloki9637.com/privacy` and linked from
-Settings. Prompts and generated media go to the provider the user chose; nothing
-else about the user's editing leaves the device, and there is no account.
+Settings. Authorized prompts and project context go to the provider the user chose. Do not claim every assistant operation is offline. Local rendering does not upload the exported video automatically; Photos/share delivery remains a user action.
 
 **The app reports anonymous usage counts.** They go to the publisher's own
 OpenPanel instance at `panel.sanhouse.kr`, not to a third party, and there is no
@@ -188,7 +189,7 @@ do not update that external page. Confirm the current policy still covers provid
 requests and optional anonymous usage reporting.
 
 There is no app subscription or paid tier. AI providers may charge the user’s own
-account for generation, and the in-app spend permissions still apply. Check that
+account for editing-assistant requests, and the in-app tool approval gates still apply. Check that
 store pricing and subscription products reflect the free app separately from
 this source change. Existing builds can continue to display ads until replaced
 through the stores, so review the shipped build and listing together.
@@ -204,7 +205,4 @@ layer. The publisher also confirmed an export with two overlapping video tracks
 on a real Android device before 0.9.0. Repeat this case after changing the
 layered export path.
 
-**Age rating** — user-supplied prompts reach a generative model, so both stores
-treat it as user-generated content. Expect questions about moderation; the
-honest answer is that moderation is the provider's, since the app holds no
-server of its own.
+**AI disclosures and age rating** — user-supplied prompts reach the selected chat model. Complete each store's questionnaire for the submitted binary and provider behavior. Describe the assistant's actual editing capabilities and provider moderation; do not describe removed media-generation features as current functionality.
