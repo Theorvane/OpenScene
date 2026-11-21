@@ -144,9 +144,9 @@ export async function resolveWhisperCppRuntime(options: {
   const modelConfig = explicitModel || join(managedRoot, 'models', 'ggml-small.bin');
   const executablePaths = (await Promise.all(executableConfigs.map((path) => configuredRegularFile(path, true)))).filter((path): path is string => path !== null);
   const executablePath = executablePaths[0];
-  if (executablePath === undefined) return { status: { ready: false, checksumVerified: false, reason: managed ? 'The managed whisper.cpp runtime is not installed. Run "npm run setup:local-ai", then restart OpenScene.' : 'The configured whisper.cpp executable is not a regular accessible file.' } };
+  if (executablePath === undefined) return { status: { ready: false, checksumVerified: false, reason: managed ? 'The managed whisper.cpp runtime is not installed. Run "npm run setup:transcription", then restart OpenScene.' : 'The configured whisper.cpp executable is not a regular accessible file.' } };
   const modelPath = await configuredRegularFile(modelConfig, false);
-  if (modelPath === null) return { status: { ready: false, checksumVerified: false, executableName: basename(executablePath), reason: managed ? 'The managed Whisper model is not installed. Run "npm run setup:local-ai", then restart OpenScene.' : 'The configured whisper.cpp model is not a regular readable file.' } };
+  if (modelPath === null) return { status: { ready: false, checksumVerified: false, executableName: basename(executablePath), reason: managed ? 'The managed Whisper model is not installed. Run "npm run setup:transcription", then restart OpenScene.' : 'The configured whisper.cpp model is not a regular readable file.' } };
 
   const checksumConfig = environment.OPENSCENE_WHISPER_MODEL_SHA256?.trim().toLowerCase() ?? '';
   const expectedChecksum = checksumConfig || (managed ? MANAGED_WHISPER_MODEL_SHA256 : undefined);

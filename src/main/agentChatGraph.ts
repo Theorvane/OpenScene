@@ -18,31 +18,10 @@ import { parseEditAgentProjectContext, type EditAgentContextAsset, type EditAgen
 import type { OpenAiAuthMode, ReasoningEffort } from '../shared/openAiAuth';
 import { getLlmModel } from '../shared/llmModels';
 
-/**
- * The costing procedure the agent follows before spending the user's money.
- * Kept as a named export so the skill document and the tests describe the same
- * text rather than two drifting copies of it.
- */
-export const GENERATION_COST_POLICY =
-  'For newly AI-generated media only; this policy does not apply to editing imported project footage. ' +
-  'Generation spends real money on user provider account. Never start video generation from bare request. Order:\n' +
-  '1. Length. Ask target length if user not said. Never assume.\n' +
-  '2. Shots. Call planVideoScenario for legal shot lengths and start times. Never compute shot lengths yourself. ' +
-  'Write one description per shot; repeat every continuity field in each shot prompt.\n' +
-  '3. Price. Call estimateGenerationCost with every shot. Never state price from own knowledge \u2014 prices you ' +
-  'recall are not real prices. Report exactly what tool returned, with as-of date, as estimate not quote.\n' +
-  '4. Approve. Present total. Wait for user approval in a message. Plan approval and per-call tool approval are ' +
-  'separate; both required. Any shot unpriced: name it, ask user to confirm they accept unknown charge.\n' +
-  '5. Generate shot by shot.\n' +
-  'Steps 3 and 4 output: write full clear prose, not compressed. User approves a charge and must not misread it.\n' +
-  'User explicitly says skip estimate: do it, say plainly you generate without cost check. ' +
-  'Same steps for image and speech at their scale.';
-
 export const EXISTING_FOOTAGE_EDIT_POLICY =
-  'Existing-footage montages are local timeline edits. When a project already has imported video assets and the user asks for a montage, frag movie, highlight reel, or cut, prefer those assets unless the user explicitly asks for newly generated footage. ' +
+  'Existing-footage montages are local timeline edits. When a project already has imported video assets and the user asks for a montage, frag movie, highlight reel, or cut, work with those assets. ' +
   'Inspect relevant source clips with watchProjectVideo when their content is unclear, and use project/timeline tools to place and trim existing asset IDs. ' +
-  'Do not call planVideoScenario, estimateGenerationCost, createVideoJob, createImageJob, or createSpeechJob for a cut assembled from existing project footage. ' +
-  'If the requested duration conflicts with the requested source clips, ask before changing the timeline. Never pass an Edit Agent model ID to a media-generation tool.';
+  'If the requested duration conflicts with the requested source clips, ask before changing the timeline.';
 
 const AGENT_CHAT_SYSTEM_PROMPT =
   'OpenScene in-app agent. You drive the whole editor through tools: read project timeline, add, trim, and remove ' +

@@ -5,7 +5,6 @@ import { AIMessage } from '@langchain/core/messages';
 import {
   buildAgentChatGraph,
   EXISTING_FOOTAGE_EDIT_POLICY,
-  GENERATION_COST_POLICY,
   type AgentChatModelFactory
 } from '../src/main/agentChatGraph';
 import { AgentChatSessionManager } from '../src/main/agentChatSession';
@@ -66,12 +65,6 @@ function buildFailingSession(firstReply: AIMessage, failure: Error): AgentChatSe
 }
 
 describe('agent chat graph', () => {
-  it('routes existing-footage montage requests to local timeline tools', () => {
-    expect(EXISTING_FOOTAGE_EDIT_POLICY).toContain('prefer those assets');
-    expect(EXISTING_FOOTAGE_EDIT_POLICY).toContain('use project/timeline tools to place and trim existing asset IDs');
-    expect(EXISTING_FOOTAGE_EDIT_POLICY).toContain('Do not call planVideoScenario');
-    expect(GENERATION_COST_POLICY).toContain('newly AI-generated media only');
-  });
 
   it('keeps the conversation visible when a turn fails instead of blanking it', async () => {
     const session = buildFailingSession(new AIMessage('Sure thing.'), new Error('400 status code (no body)'));

@@ -2,22 +2,21 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } 
 
 import type { AgentChatHistoryEntry } from '../../shared/agentChat';
 import type { EditAgentProjectContext } from '../../shared/editAgentContext';
-import { AppShell } from './AppShell';
 import type { AgentChatRestoreRequest } from './AgentChatContext';
+import { AppShell } from './AppShell';
 import { FirstRunOnboarding } from './FirstRunOnboarding';
-import { ProjectResultImportProvider } from './ProjectResultImportContext';
-import { closeProjectTab, openProjectTab, pruneProjectTabs, type ProjectTab } from './projectTabs';
 import { ProjectSettingsDialog } from './ProjectSettingsDialog';
 import { ProjectsPage } from './ProjectsPage';
 import { SettingsWorkspace } from './SettingsWorkspace';
-import { APP_PAGE_BY_ID, getDefaultAppPageId, isProjectRequiredPageId, isWorkspacePageId } from './appPages';
-import type { AppPageId } from './appPages';
 import { popPageHistory, pushPageHistory } from './appNavigationHistory';
-import { APP_WORKSPACES, getDefaultAppWorkspaceId } from './appWorkspaces';
+import type { AppPageId } from './appPages';
+import { APP_PAGE_BY_ID, getDefaultAppPageId, isProjectRequiredPageId, isWorkspacePageId } from './appPages';
 import type { AppWorkspaceId } from './appWorkspaces';
+import { APP_WORKSPACES, getDefaultAppWorkspaceId } from './appWorkspaces';
 import { TimelineEditor } from './editor/TimelineEditor';
-import { readFirstRunOnboardingCompletion, resetFirstRunOnboardingCompletion, writeFirstRunOnboardingCompletion } from './firstRunOnboardingPreference';
 import { useTimelineEditor } from './editor/useTimelineEditor';
+import { readFirstRunOnboardingCompletion, resetFirstRunOnboardingCompletion, writeFirstRunOnboardingCompletion } from './firstRunOnboardingPreference';
+import { closeProjectTab, openProjectTab, pruneProjectTabs, type ProjectTab } from './projectTabs';
 
 const [EDIT_WORKSPACE] = APP_WORKSPACES;
 
@@ -227,9 +226,6 @@ export function App(): ReactElement {
   }, [editor, navigateToPage, projectTabs]);
   const [projectSettingsOpen, setProjectSettingsOpen] = useState(false);
   return (
-    // The result-import provider wraps the shell, not just the page stack: the
-    // Studio side panel lives in the shell and imports what it generates.
-    <ProjectResultImportProvider editor={editor}>
       <AppShell
         activePage={activePage}
         hasActiveProject={hasActiveProject}
@@ -306,6 +302,5 @@ export function App(): ReactElement {
       )}
       {showFirstRunOnboarding && <FirstRunOnboarding onComplete={completeFirstRunOnboarding} />}
       </AppShell>
-    </ProjectResultImportProvider>
   );
 }

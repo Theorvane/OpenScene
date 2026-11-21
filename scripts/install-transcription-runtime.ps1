@@ -86,21 +86,5 @@ Get-VerifiedFile `
 & $whisperCli.FullName --version
 if ($LASTEXITCODE -ne 0) { throw 'whisper-cli health check failed.' }
 
-$configuredVieNeu = [Environment]::GetEnvironmentVariable('OPENSCENE_VIENEU_PROJECT_DIR')
-$vieNeuRoot = if (-not [string]::IsNullOrWhiteSpace($configuredVieNeu)) {
-  [System.IO.Path]::GetFullPath($configuredVieNeu)
-} else {
-  [System.IO.Path]::GetFullPath((Join-Path $repoRoot '..\VieNeu-TTS'))
-}
-$uv = Get-Command uv -ErrorAction SilentlyContinue
-if ((Test-Path -LiteralPath (Join-Path $vieNeuRoot 'pyproject.toml') -PathType Leaf) -and $null -ne $uv) {
-  Write-Host 'Synchronizing the VieNeu-TTS CPU/ONNX environment...'
-  & $uv.Source sync --directory $vieNeuRoot
-  if ($LASTEXITCODE -ne 0) { throw "VieNeu-TTS uv sync failed with exit code $LASTEXITCODE." }
-} elseif (-not (Test-Path -LiteralPath (Join-Path $vieNeuRoot '.venv\Scripts\python.exe') -PathType Leaf)) {
-  Write-Warning 'VieNeu-TTS was not found. Clone it beside OpenScene or set OPENSCENE_VIENEU_PROJECT_DIR, install uv, then run this command again.'
-}
-
-Write-Host "Local AI runtime setup complete. Whisper: $($whisperCli.FullName)"
+Write-Host "Whisper runtime setup complete. Executable: $($whisperCli.FullName)"
 Write-Host "Whisper model: $modelPath"
-Write-Host "VieNeu checkout: $vieNeuRoot"

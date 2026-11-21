@@ -1,13 +1,13 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
+import { AiDomainModelProvider } from './AiDomainModelContext';
 
 import { App } from './App';
-import { bootstrapRendererTheme, ThemeProvider } from './ThemeProvider';
-import { LlmProvider } from './LlmProviderContext';
-import { AiDomainModelProvider } from './AiDomainModelContext';
-import { ModelVisibilityProvider } from './ModelVisibilityContext';
 import { ChatGptAuthProvider } from './ChatGptAuthContext';
+import { LlmProvider } from './LlmProviderContext';
+import { ModelVisibilityProvider } from './ModelVisibilityContext';
 import './styles.css';
+import { bootstrapRendererTheme, ThemeProvider } from './ThemeProvider';
 
 const rootElement = document.getElementById('root');
 
@@ -26,7 +26,7 @@ createRoot(rootElement).render(
     <ThemeProvider>
       <LlmProvider>
         <ChatGptAuthProvider>
-          <AiDomainModelProvider>
+            <AiDomainModelProvider>
             <ModelVisibilityProvider>
               <App />
             </ModelVisibilityProvider>

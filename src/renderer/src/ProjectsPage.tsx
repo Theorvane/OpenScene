@@ -1,5 +1,4 @@
 import { type ReactElement } from 'react';
-import { type WorkspaceMode } from '../../shared/workspaceModes';
 
 import type { AgentChatHistoryEntry } from '../../shared/agentChat';
 import type { LocalProjectSnapshot, LocalProjectSummary } from '../../shared/timelineTypes';
@@ -12,8 +11,8 @@ type ProjectsPageProps = {
   readonly project?: LocalProjectSnapshot | null;
   readonly projects?: readonly LocalProjectSummary[];
   readonly chats?: readonly AgentChatHistoryEntry[];
-  readonly onOpenProject?: (projectId: string, mode: WorkspaceMode) => Promise<void>;
-  readonly onOpenProjectFolder?: (mode: WorkspaceMode) => Promise<void>;
+  readonly onOpenProject?: (projectId: string) => Promise<void>;
+  readonly onOpenProjectFolder?: () => Promise<void>;
   readonly onOpenChat?: (entry: AgentChatHistoryEntry) => Promise<void>;
   readonly onRemoveProject?: (projectId: string) => Promise<void>;
   readonly onDeleteChat?: (entry: AgentChatHistoryEntry) => Promise<void>;
@@ -58,7 +57,7 @@ export function ProjectsPage({
             className="projects-home__add-button"
             aria-label="Choose or create a project folder"
             title="Choose or create a project folder"
-            onClick={() => void onOpenProjectFolder?.('edit')}
+            onClick={() => void onOpenProjectFolder?.()}
             disabled={isBusy}
           >
             <FolderPlusIcon />
@@ -76,7 +75,7 @@ export function ProjectsPage({
                   <button
                     type="button"
                     className={`projects-home__project${isSelected ? ' projects-home__project--active' : ''}`}
-                    onClick={() => void onOpenProject?.(item.id, 'edit')}
+                    onClick={() => void onOpenProject?.(item.id)}
                     disabled={isBusy}
                     aria-current={isSelected ? 'true' : undefined}
                   >

@@ -78,9 +78,9 @@ describe('app page shell source contract', () => {
   it('documents the workspace tab strip as the only workspace entry surface', async () => {
     const design = await readSource(DESIGN_SOURCE_URL);
 
-    expect(design).toContain('do not reintroduce a left workspace sidebar');
-    expect(design).toContain('There is no menu page: the workspace tab strip switches between Editing, Voice Generation, and Video Generation');
-    expect(design).toContain('voice and video generation are tabs within it');
+    expect(design).toContain('Timeline mode');
+    expect(design).toContain('Canvas mode');
+    expect(design).toContain('two views of the same saved timeline');
     expect(design).not.toContain('a left sidebar for workspace navigation');
     expect(design).not.toContain('Application workspace switching belongs to `AppWorkspaceNavigation`');
   });

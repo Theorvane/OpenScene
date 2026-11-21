@@ -1,11 +1,18 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 
-import { IPC_CHANNELS } from '../shared/ipc';
-import type { GenerationSpendView } from '../shared/generationSpend';
-import type { UpdaterState } from '../shared/updater';
+import type {
+  AgentChatApprovalInput,
+  AgentChatCompactInput,
+  AgentChatHistoryEntry,
+  AgentChatHistoryGetInput,
+  AgentChatResetInput,
+  AgentChatSendInput,
+  AgentChatStoredConversation,
+  AgentChatTurnState
+} from '../shared/agentChat';
+import type { SaveAiProjectDocumentInput } from '../shared/aiProjectDomain';
 import type { ExportJobActionInput, LocalExportJob, LocalFfmpegRuntimeStatus, StartExportJobInput } from '../shared/exportTypes';
-import type { ImageGenerationJob, ImageGenerationRequest, ReferenceImageSelection, TextToSpeechJob, TextToSpeechRequest, VideoGenerationJob, VideoGenerationRequest } from '../shared/providerSeams';
-import type { VoiceChoice } from '../shared/voiceCatalog';
+import { IPC_CHANNELS } from '../shared/ipc';
 import type {
   AbortRecordingInput,
   ApiResponse,
@@ -22,12 +29,15 @@ import type {
   SourceAvailabilityInput,
   StartRecordingInput
 } from '../shared/models';
+import type { ChatGptOAuthStatus, OpenAiAuthMode } from '../shared/openAiAuth';
+import type { TimelineMenuCommandId, TimelineMenuState } from '../shared/timelineMenuCommands';
+import { parseTimelineMenuCommandId } from '../shared/timelineMenuCommands';
 import type {
   CreateProjectInput,
   CreateProjectResult,
+  DeleteProjectInput,
   DetachVideoAudioInput,
   DetachVideoAudioResult,
-  DeleteProjectInput,
   GetAssetPlaybackUrlInput,
   ImportProjectAssetsInput,
   ImportRecordingResultAssetInput,
@@ -39,25 +49,8 @@ import type {
   SaveTimelineInput,
   UpdateAssetMetadataInput
 } from '../shared/timelineTypes';
-import { parseTimelineMenuCommandId } from '../shared/timelineMenuCommands';
-import type { TimelineMenuCommandId, TimelineMenuState } from '../shared/timelineMenuCommands';
-import type {
-  AgentChatApprovalInput,
-  AgentChatCompactInput,
-  AgentChatHistoryEntry,
-  AgentChatHistoryGetInput,
-  AgentChatResetInput,
-  AgentChatSendInput,
-  AgentChatStoredConversation,
-  AgentChatTurnState
-} from '../shared/agentChat';
-import type { ChatGptOAuthStatus, OpenAiAuthMode } from '../shared/openAiAuth';
-import type { BrowserSessionProviderId, BrowserSessionStatus } from '../shared/browserSession';
-import type { SaveAiProjectDocumentInput } from '../shared/aiProjectDomain';
-import type { WriterDraft, WriterGenerationInput } from '../shared/writerWorkflow';
-import type { ComfyUiMotionWorkerStatus } from '../shared/comfyUiMotion';
 import type { StartTranscriptionInput, TranscriptionJob, WhisperCppRuntimeStatus } from '../shared/transcription';
-import type { ExtractContinuationFrameResult, ProjectAssetReferenceInput } from '../shared/continuityFrame';
+import type { UpdaterState } from '../shared/updater';
 
 type ImportProjectAssetsResult = {
   readonly assets: readonly MediaAsset[];
@@ -86,12 +79,10 @@ export interface VideoToolApi {
   createProject(input: CreateProjectInput): Promise<ApiResponse<CreateProjectResult>>;
   openProject(input: OpenProjectInput): Promise<ApiResponse<LocalProjectSnapshot>>;
   openProjectFolder(input?: { readonly projectType: import('../shared/projectTypes').ProjectType }): Promise<ApiResponse<OpenProjectFolderResult>>;
-  createEditingCopy(input: { readonly projectId: string }): Promise<ApiResponse<LocalProjectSnapshot>>;
   deleteProject(input: DeleteProjectInput): Promise<ApiResponse<{ readonly deleted: boolean }>>;
   renameProject(input: { readonly projectId: string; readonly name: string }): Promise<ApiResponse<LocalProjectSnapshot>>;
   importProjectAssets(input: ImportProjectAssetsInput): Promise<ApiResponse<ImportProjectAssetsResult>>;
   importRecordingResultAsset(input: ImportRecordingResultAssetInput): Promise<ApiResponse<ImportProjectAssetsResult>>;
-  importAiResultAsset(input: { projectId: string; jobId: string }): Promise<ApiResponse<ImportProjectAssetsResult>>;
   updateAssetMetadata(input: UpdateAssetMetadataInput): Promise<ApiResponse<MediaAsset>>;
   detachVideoAudio(input: DetachVideoAudioInput): Promise<ApiResponse<DetachVideoAudioResult>>;
   getAssetPlaybackUrl(input: GetAssetPlaybackUrlInput): Promise<ApiResponse<AssetPlaybackUrl>>;
@@ -103,15 +94,6 @@ export interface VideoToolApi {
   cancelExportJob(input: ExportJobActionInput): Promise<ApiResponse<{ readonly cancelled: boolean }>>;
   openExportResult(input: ExportJobActionInput): Promise<ApiResponse<{ readonly opened: boolean }>>;
   revealExportResult(input: ExportJobActionInput): Promise<ApiResponse<{ readonly revealed: boolean }>>;
-  aiGenerateVideo(request: VideoGenerationRequest): Promise<ApiResponse<VideoGenerationJob>>;
-  aiGetComfyUiMotionStatus(): Promise<ApiResponse<ComfyUiMotionWorkerStatus>>;
-  aiSelectReferenceImage(): Promise<ApiResponse<ReferenceImageSelection | null>>;
-  aiExtractContinuationFrame(input: ProjectAssetReferenceInput): Promise<ApiResponse<ExtractContinuationFrameResult>>;
-  aiGetProjectImageReference(input: ProjectAssetReferenceInput): Promise<ApiResponse<ReferenceImageSelection>>;
-  aiGetVideoJob(jobId: string): Promise<ApiResponse<VideoGenerationJob>>;
-  aiGenerateSpeech(request: TextToSpeechRequest): Promise<ApiResponse<TextToSpeechJob>>;
-  aiListSpeechVoices(modelId: string): Promise<ApiResponse<readonly VoiceChoice[]>>;
-  aiGetSpeechJob(jobId: string): Promise<ApiResponse<TextToSpeechJob>>;
   getTranscriptionRuntimeStatus(): Promise<ApiResponse<WhisperCppRuntimeStatus>>;
   startTranscription(input: StartTranscriptionInput): Promise<ApiResponse<TranscriptionJob>>;
   getTranscriptionJob(jobId: string): Promise<ApiResponse<TranscriptionJob>>;
@@ -123,9 +105,6 @@ export interface VideoToolApi {
   cancelChatGptOAuth(): Promise<ApiResponse<ChatGptOAuthStatus>>;
   logoutChatGptOAuth(): Promise<ApiResponse<ChatGptOAuthStatus>>;
   openChatGptDeviceAuthorizationPage(): Promise<ApiResponse<{ readonly opened: boolean }>>;
-  getBrowserSessionStatuses(): Promise<ApiResponse<readonly BrowserSessionStatus[]>>;
-  startBrowserSession(providerId: BrowserSessionProviderId): Promise<ApiResponse<BrowserSessionStatus>>;
-  clearBrowserSession(providerId: BrowserSessionProviderId): Promise<ApiResponse<BrowserSessionStatus>>;
   executeLlmPrompt(request: {
     modelId: string;
     prompt: string;
@@ -133,7 +112,6 @@ export interface VideoToolApi {
     ollamaBaseUrl?: string;
     openAiAuthMode?: OpenAiAuthMode;
   }): Promise<ApiResponse<{ ok: boolean; modelId: string; providerId: string; completion?: string; error?: string }>>;
-  generateWriterDraft(input: WriterGenerationInput): Promise<ApiResponse<WriterDraft>>;
   mcpGetTools(): Promise<ApiResponse<unknown>>;
   mcpExecuteTool(toolName: string, params: unknown): Promise<ApiResponse<unknown>>;
   agentChatSend(input: AgentChatSendInput): Promise<ApiResponse<AgentChatTurnState>>;
@@ -143,14 +121,6 @@ export interface VideoToolApi {
   agentChatHistoryList(): Promise<ApiResponse<readonly AgentChatHistoryEntry[]>>;
   agentChatHistoryGet(input: AgentChatHistoryGetInput): Promise<ApiResponse<AgentChatStoredConversation | null>>;
   agentChatHistoryDelete(input: AgentChatHistoryGetInput): Promise<ApiResponse<boolean>>;
-  aiGenerateImage(request: ImageGenerationRequest): Promise<ApiResponse<ImageGenerationJob>>;
-  aiGetImageJob(jobId: string): Promise<ApiResponse<ImageGenerationJob>>;
-  aiUseImageAsVideoReference(jobId: string): Promise<ApiResponse<ReferenceImageSelection>>;
-  aiSaveImageResult(jobId: string): Promise<ApiResponse<{ readonly saved: boolean }>>;
-  /** What generation has cost this month, and the ceiling if one is set. */
-  getGenerationSpend(): Promise<ApiResponse<GenerationSpendView>>;
-  /** Null removes the ceiling. A person's decision, never the agent's. */
-  setGenerationSpendCap(capUsd: number | null): Promise<ApiResponse<GenerationSpendView>>;
   onUpdaterStateChanged(listener: (snapshot: UpdaterSnapshot) => void): () => void;
   getUpdaterState(): Promise<ApiResponse<UpdaterSnapshot>>;
   checkForUpdates(): Promise<ApiResponse<UpdaterSnapshot>>;
@@ -207,15 +177,12 @@ const videoTool: VideoToolApi = {
   createProject: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsCreate, input) as Promise<ApiResponse<CreateProjectResult>>,
   openProject: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsOpen, input) as Promise<ApiResponse<LocalProjectSnapshot>>,
   openProjectFolder: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsOpenFolder, input) as Promise<ApiResponse<OpenProjectFolderResult>>,
-  createEditingCopy: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsCreateEditingCopy, input) as Promise<ApiResponse<LocalProjectSnapshot>>,
   deleteProject: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsDelete, input) as Promise<ApiResponse<{ readonly deleted: boolean }>>,
   renameProject: (input) => ipcRenderer.invoke(IPC_CHANNELS.projectsRename, input) as Promise<ApiResponse<LocalProjectSnapshot>>,
   importProjectAssets: (input) =>
     ipcRenderer.invoke(IPC_CHANNELS.projectAssetsImport, input) as Promise<ApiResponse<ImportProjectAssetsResult>>,
   importRecordingResultAsset: (input) =>
     ipcRenderer.invoke(IPC_CHANNELS.projectRecordingResultImport, input) as Promise<ApiResponse<ImportProjectAssetsResult>>,
-  importAiResultAsset: (input) =>
-    ipcRenderer.invoke(IPC_CHANNELS.projectAiResultImport, input) as Promise<ApiResponse<ImportProjectAssetsResult>>,
   updateAssetMetadata: (input) =>
     ipcRenderer.invoke(IPC_CHANNELS.projectAssetMetadataUpdate, input) as Promise<ApiResponse<MediaAsset>>,
   detachVideoAudio: (input) =>
@@ -234,18 +201,6 @@ const videoTool: VideoToolApi = {
     ipcRenderer.invoke(IPC_CHANNELS.openExportResult, input) as Promise<ApiResponse<{ readonly opened: boolean }>>,
   revealExportResult: (input) =>
     ipcRenderer.invoke(IPC_CHANNELS.revealExportResult, input) as Promise<ApiResponse<{ readonly revealed: boolean }>>,
-  aiGenerateVideo: (request) => ipcRenderer.invoke(IPC_CHANNELS.aiGenerateVideo, request) as Promise<ApiResponse<VideoGenerationJob>>,
-  aiGetComfyUiMotionStatus: () => ipcRenderer.invoke(IPC_CHANNELS.aiGetComfyUiMotionStatus) as Promise<ApiResponse<ComfyUiMotionWorkerStatus>>,
-  aiSelectReferenceImage: () => ipcRenderer.invoke(IPC_CHANNELS.aiSelectReferenceImage) as Promise<ApiResponse<ReferenceImageSelection | null>>,
-  aiExtractContinuationFrame: (input) =>
-    ipcRenderer.invoke(IPC_CHANNELS.aiExtractContinuationFrame, input) as Promise<ApiResponse<ExtractContinuationFrameResult>>,
-  aiGetProjectImageReference: (input) =>
-    ipcRenderer.invoke(IPC_CHANNELS.aiGetProjectImageReference, input) as Promise<ApiResponse<ReferenceImageSelection>>,
-  aiGetVideoJob: (jobId) => ipcRenderer.invoke(IPC_CHANNELS.aiGetVideoJob, jobId) as Promise<ApiResponse<VideoGenerationJob>>,
-  aiGenerateSpeech: (request) => ipcRenderer.invoke(IPC_CHANNELS.aiGenerateSpeech, request) as Promise<ApiResponse<TextToSpeechJob>>,
-  aiListSpeechVoices: (modelId) =>
-    ipcRenderer.invoke(IPC_CHANNELS.aiListSpeechVoices, modelId) as Promise<ApiResponse<readonly VoiceChoice[]>>,
-  aiGetSpeechJob: (jobId) => ipcRenderer.invoke(IPC_CHANNELS.aiGetSpeechJob, jobId) as Promise<ApiResponse<TextToSpeechJob>>,
   getTranscriptionRuntimeStatus: () => ipcRenderer.invoke(IPC_CHANNELS.transcriptionRuntimeStatus) as Promise<ApiResponse<WhisperCppRuntimeStatus>>,
   startTranscription: (input) => ipcRenderer.invoke(IPC_CHANNELS.transcriptionStart, input) as Promise<ApiResponse<TranscriptionJob>>,
   getTranscriptionJob: (jobId) => ipcRenderer.invoke(IPC_CHANNELS.transcriptionGetJob, jobId) as Promise<ApiResponse<TranscriptionJob>>,
@@ -264,18 +219,10 @@ const videoTool: VideoToolApi = {
     ipcRenderer.invoke(IPC_CHANNELS.logoutChatGptOAuth) as Promise<ApiResponse<ChatGptOAuthStatus>>,
   openChatGptDeviceAuthorizationPage: () =>
     ipcRenderer.invoke(IPC_CHANNELS.openChatGptDeviceAuthorizationPage) as Promise<ApiResponse<{ readonly opened: boolean }>>,
-  getBrowserSessionStatuses: () =>
-    ipcRenderer.invoke(IPC_CHANNELS.getBrowserSessionStatuses) as Promise<ApiResponse<readonly BrowserSessionStatus[]>>,
-  startBrowserSession: (providerId) =>
-    ipcRenderer.invoke(IPC_CHANNELS.startBrowserSession, providerId) as Promise<ApiResponse<BrowserSessionStatus>>,
-  clearBrowserSession: (providerId) =>
-    ipcRenderer.invoke(IPC_CHANNELS.clearBrowserSession, providerId) as Promise<ApiResponse<BrowserSessionStatus>>,
   executeLlmPrompt: (request) =>
     ipcRenderer.invoke(IPC_CHANNELS.executeLlmPrompt, request) as Promise<
       ApiResponse<{ ok: boolean; modelId: string; providerId: string; completion?: string; error?: string }>
     >,
-  generateWriterDraft: (input) =>
-    ipcRenderer.invoke(IPC_CHANNELS.writerGenerate, input) as Promise<ApiResponse<WriterDraft>>,
   mcpGetTools: () => ipcRenderer.invoke(IPC_CHANNELS.mcpGetTools) as Promise<ApiResponse<unknown>>,
   mcpExecuteTool: (toolName: string, params: unknown) =>
     ipcRenderer.invoke(IPC_CHANNELS.mcpExecuteTool, toolName, params) as Promise<ApiResponse<unknown>>,
@@ -290,17 +237,6 @@ const videoTool: VideoToolApi = {
     ipcRenderer.invoke(IPC_CHANNELS.agentChatHistoryGet, input) as Promise<ApiResponse<AgentChatStoredConversation | null>>,
   agentChatHistoryDelete: (input) =>
     ipcRenderer.invoke(IPC_CHANNELS.agentChatHistoryDelete, input) as Promise<ApiResponse<boolean>>,
-  aiGenerateImage: (request) =>
-    ipcRenderer.invoke(IPC_CHANNELS.aiGenerateImage, request) as Promise<ApiResponse<ImageGenerationJob>>,
-  aiGetImageJob: (jobId) => ipcRenderer.invoke(IPC_CHANNELS.aiGetImageJob, jobId) as Promise<ApiResponse<ImageGenerationJob>>,
-  aiUseImageAsVideoReference: (jobId) =>
-    ipcRenderer.invoke(IPC_CHANNELS.aiUseImageAsVideoReference, jobId) as Promise<ApiResponse<ReferenceImageSelection>>,
-  aiSaveImageResult: (jobId) =>
-    ipcRenderer.invoke(IPC_CHANNELS.aiSaveImageResult, jobId) as Promise<ApiResponse<{ readonly saved: boolean }>>,
-  getGenerationSpend: () =>
-    ipcRenderer.invoke(IPC_CHANNELS.generationSpendGet) as Promise<ApiResponse<GenerationSpendView>>,
-  setGenerationSpendCap: (capUsd) =>
-    ipcRenderer.invoke(IPC_CHANNELS.generationSpendSetCap, capUsd) as Promise<ApiResponse<GenerationSpendView>>,
   onUpdaterStateChanged: (listener) => {
     const subscription = (_event: IpcRendererEvent, payload: unknown): void => {
       const snapshot = parseUpdaterSnapshot(payload);

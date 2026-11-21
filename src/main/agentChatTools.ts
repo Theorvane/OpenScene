@@ -24,10 +24,6 @@ import { OpenVideoMcpServer } from './openVideoMcpServer';
  * (See docs/hybrid-ai-editor-direction.md §2.2/§4.3.)
  */
 export const AGENT_CHAT_READ_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set([
-  'planVideoScenario',
-  'checkNarrationLength',
-  'estimateGenerationCost',
-  'getJobStatus',
   'getProjectTimeline',
   'watchProjectVideo'
 ]);
@@ -44,12 +40,7 @@ export function agentChatMutatingToolNames(tools: readonly { readonly name: stri
 
 export async function createAgentChatTools(instance: OpenVideoMcpServer): Promise<readonly DynamicStructuredTool[]> {
   const resolver: InstanceResolver<OpenVideoMcpServer> = { resolve: () => instance };
-  const tools = await createLangChainTools(OpenVideoMcpServer, { resolver });
-  const generationTools = new Set([
-    'planVideoScenario', 'checkNarrationLength', 'estimateGenerationCost', 'getGenerationSpend',
-    'createVideoJob', 'createImageJob', 'createSpeechJob', 'importGeneratedResult', 'getJobStatus'
-  ]);
-  return tools.filter((tool) => !generationTools.has(tool.name));
+  return createLangChainTools(OpenVideoMcpServer, { resolver });
 }
 
 /**
@@ -58,8 +49,4 @@ export async function createAgentChatTools(instance: OpenVideoMcpServer): Promis
  * reasonable answer to "may I trim this clip again", and an unreasonable one to
  * "may I charge your card whenever I like". Every charge stays visible.
  */
-export const AGENT_CHAT_SPEND_TOOL_NAMES: ReadonlySet<string> = new Set([
-  'createVideoJob',
-  'createSpeechJob',
-  'createImageJob'
-]);
+export const AGENT_CHAT_SPEND_TOOL_NAMES: ReadonlySet<string> = new Set();

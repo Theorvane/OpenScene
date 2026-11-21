@@ -2,33 +2,27 @@ import { useEffect, useState, type ReactElement, type ReactNode } from 'react';
 
 import type { LocalFfmpegRuntimeStatus } from '../../shared/exportTypes';
 import { DEFAULT_LLM_MODELS, type LlmProviderId } from '../../shared/llmModels';
-import { alibabaVideoBaseUrl } from '../../shared/videoGeneration';
-import { LLM_PROVIDERS, MEDIA_PROVIDERS, POPULAR_LLM_PROVIDER_IDS, isProviderConnected, type LlmProviderInfo } from '../../shared/llmProviders';
+import { LLM_PROVIDERS, POPULAR_LLM_PROVIDER_IDS, isProviderConnected, type LlmProviderInfo } from '../../shared/llmProviders';
 import { isOpenAiCodexModelKey, resolveOpenAiAuthMode } from '../../shared/openAiAuth';
 import { useChatGptAuth } from './ChatGptAuthContext';
-import { useModelVisibility } from './ModelVisibilityContext';
-import { ProviderConnectDialog, type ProviderOAuthMethod } from './ProviderConnectDialog';
-import { SpendSettings } from './SpendSettings';
-import { UpdatesSettings } from './UpdatesSettings';
-import { AiDomainModelSelector } from './AiDomainModelSelector';
 import { TimelineShortcutMap } from './editor/TimelineEditorLayoutControls';
 import { useEditorShortcutPreference } from './editor/useEditorShortcutPreference';
 import { useLlmModel, type LlmCredentialKey } from './LlmProviderContext';
-import { useTheme } from './ThemeProvider';
+import { useModelVisibility } from './ModelVisibilityContext';
+import { ProviderConnectDialog, type ProviderOAuthMethod } from './ProviderConnectDialog';
 import { THEME_PRESETS } from './theme';
+import { useTheme } from './ThemeProvider';
 import { Button, MetadataList, Panel, PanelHeading, StatusCard } from './ui';
 import { classNames } from './ui/classNames';
-import { BrowserSessionSettings } from './BrowserSessionSettings';
+import { UpdatesSettings } from './UpdatesSettings';
 
 const SETTINGS_SECTIONS = [
   { id: 'appearance', title: 'Appearance', description: 'Theme mode and command desk presets.' },
   { id: 'local-tools', title: 'Local Tools', description: 'Local runtime readiness for desktop capture, narration, and final export.' },
-  { id: 'voice', title: 'Voice', description: 'Local and cloud voice models and their setup.' },
   { id: 'providers', title: 'Providers', description: 'Connected providers, and popular providers to connect.' },
   { id: 'models', title: 'Models', description: 'Search the model catalog and choose which models appear in pickers.' },
   { id: 'edit-agent', title: 'Edit Agent', description: 'Model preference for the persistent right-side agent.' },
   { id: 'shortcuts', title: 'Shortcuts', description: 'Timeline editor keyboard shortcut remapping.' },
-  { id: 'spending', title: 'Spending', description: 'What generation has cost this month, and the ceiling on it.' },
   { id: 'updates', title: 'Updates', description: 'Installed version and how new releases reach this build.' },
   { id: 'data-privacy', title: 'Data & Privacy', description: 'Local storage, provider authorization, and deletion expectations.' }
 ] as const;
@@ -52,7 +46,7 @@ type SettingsWorkspaceProps = {
 };
 
 // Cloud LLM provider rows derive from the shared provider
-// registry; media-generation providers get their own subsection.
+// registry for the editing assistant.
 const CLOUD_PROVIDERS: readonly LlmProviderInfo[] = LLM_PROVIDERS.filter(
   (provider) => provider.auth === 'api-key' && provider.credentialKey !== undefined && provider.adapter !== 'media'
 );
@@ -120,9 +114,6 @@ export function SettingsWorkspace({ onReplayFirstRunOnboarding }: SettingsWorksp
   const [showAllProviders, setShowAllProviders] = useState(false);
   const [providerFilter, setProviderFilter] = useState('');
   const [disconnectingKey, setDisconnectingKey] = useState<string | null>(null);
-  const [alibabaWorkspaceDraft, setAlibabaWorkspaceDraft] = useState('');
-  const [alibabaWorkspaceError, setAlibabaWorkspaceError] = useState('');
-  const [savingAlibabaWorkspace, setSavingAlibabaWorkspace] = useState(false);
   const [modelFilter, setModelFilter] = useState('');
   const [testState, setTestState] = useState<ModelTestState>({ status: 'idle' });
   const [ffmpegState, setFfmpegState] = useState<FfmpegStatusState>({ status: 'loading' });
@@ -172,20 +163,6 @@ export function SettingsWorkspace({ onReplayFirstRunOnboarding }: SettingsWorksp
     setDisconnectingKey(null);
   };
 
-  const saveAlibabaWorkspace = async (): Promise<void> => {
-    try {
-      alibabaVideoBaseUrl(alibabaWorkspaceDraft);
-      setSavingAlibabaWorkspace(true);
-      const saved = await saveProviderCredential('alibabaWorkspaceId', alibabaWorkspaceDraft.trim());
-      setAlibabaWorkspaceError(saved ? '' : 'Could not save the Workspace ID.');
-      if (saved) setAlibabaWorkspaceDraft('');
-    } catch {
-      setAlibabaWorkspaceError('Enter a valid Singapore Workspace ID, such as llm-123.');
-    } finally {
-      setSavingAlibabaWorkspace(false);
-    }
-  };
-
   const isProviderKeyStored = (provider: LlmProviderInfo): boolean =>
     provider.credentialKey !== undefined && credentialStatus[provider.credentialKey] === true;
 
@@ -229,14 +206,10 @@ export function SettingsWorkspace({ onReplayFirstRunOnboarding }: SettingsWorksp
         return (
           <>
             <StatusCard tone={ffmpegView.tone}>{ffmpegView.text}</StatusCard>
-            <MetadataList items={[{ term: 'Screen permission', description: 'Checked by the recorder when capture starts.' }, { term: 'Ollama', description: 'User-managed local engine for the Edit Agent; OpenScene downloads no model.' }, { term: 'Qwen TTS', description: 'Default local voice option. Configure a local wrapper and authorized voice sample through VIDEO_TOOL_TTS_CONFIG_PATH; OpenScene downloads no model.' }, { term: 'VieNeu-TTS', description: 'Optional local Vietnamese voice server, started only after you select VieNeu.' }]} />
-          </>
-        );
-      case 'voice':
-        return (
-          <>
-            <StatusCard tone="neutral">Local voice runtimes can be configured for narration. Qwen TTS is the default local option and needs <code>VIDEO_TOOL_TTS_CONFIG_PATH</code> (see <code>docs/local-qwen-tts.md</code>). Choose VieNeu-TTS explicitly if you prefer it; its runtime starts when selected.</StatusCard>
-            <StatusCard tone="neutral">Scripts leave the app only when you generate with a cloud model. Qwen runs your configured local wrapper; VieNeu requests stay on loopback. Generated audio is written to local app storage.</StatusCard>
+            <MetadataList items={[
+              { term: 'Ollama', description: 'User-managed local engine for the editing assistant.' },
+              { term: 'Whisper.cpp', description: 'Local speech transcription. Run npm run setup:transcription or configure an executable and model.' }
+            ]} />
           </>
         );
       case 'providers': {
@@ -319,41 +292,6 @@ export function SettingsWorkspace({ onReplayFirstRunOnboarding }: SettingsWorksp
               </div>
             </div>
 
-            <div className="settings-group">
-              <h3 className="settings-subheading">Media providers</h3>
-              <div className="settings-list">
-                {MEDIA_PROVIDERS.map((provider) => {
-                  const connected = isProviderKeyStored(provider);
-                  return (
-                    <div key={provider.id} className="settings-list__row">
-                      <div className="settings-list__main settings-list__main--stacked">
-                        <span className="settings-list__name">{provider.label}</span>
-                        <span className="settings-list__note">{provider.description}</span>
-                        {provider.id === 'alibaba_dashscope' && (
-                          <div className="studio-field settings-list__inline-field">
-                            <label className="studio-field__label" htmlFor="alibaba-workspace-id">Singapore Workspace ID {credentialStatus.alibabaWorkspaceId ? '✓ saved' : '· required for video'}</label>
-                            <input id="alibaba-workspace-id" value={alibabaWorkspaceDraft} placeholder="llm-..."
-                              onChange={(event) => { setAlibabaWorkspaceDraft(event.target.value); setAlibabaWorkspaceError(''); }} />
-                            <Button variant="ghost" onClick={() => void saveAlibabaWorkspace()} disabled={savingAlibabaWorkspace || !alibabaWorkspaceDraft.trim()}>
-                              {savingAlibabaWorkspace ? 'Saving…' : 'Save Workspace ID'}
-                            </Button>
-                            {alibabaWorkspaceError && <span role="alert">{alibabaWorkspaceError}</span>}
-                          </div>
-                        )}
-                      </div>
-                      {connected ? (
-                        <Button variant="ghost" onClick={() => void disconnectProvider(provider)} disabled={disconnectingKey === provider.credentialKey}>
-                          {disconnectingKey === provider.credentialKey ? 'Disconnecting…' : 'Disconnect'}
-                        </Button>
-                      ) : (
-                        <Button variant="default" onClick={() => setConnectTarget(provider)}>+ Connect</Button>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
             {!showAllProviders ? (
               <Button variant="ghost" className="settings-show-all" onClick={() => setShowAllProviders(true)}>
                 Show all providers ({otherProviders.length} more)
@@ -396,12 +334,10 @@ export function SettingsWorkspace({ onReplayFirstRunOnboarding }: SettingsWorksp
             )}
 
             <StatusCard tone="neutral">API keys live in main-process safe storage, are write-only from this screen, and are never rendered back.</StatusCard>
-            <BrowserSessionSettings />
             {connectTarget !== null && connectTarget.credentialKey !== undefined && (
               <ProviderConnectDialog
                 provider={connectTarget}
-                onConnect={async (apiKey, workspaceId) => {
-                  if (workspaceId !== undefined && !(await saveProviderCredential('alibabaWorkspaceId', workspaceId))) return false;
+                onConnect={async (apiKey) => {
                   return saveProviderCredential(connectTarget.credentialKey as LlmCredentialKey, apiKey);
                 }}
                 onClose={() => setConnectTarget(null)}
@@ -480,7 +416,6 @@ export function SettingsWorkspace({ onReplayFirstRunOnboarding }: SettingsWorksp
       case 'edit-agent':
         return (
           <>
-            <AiDomainModelSelector domain="edit-agent" label="Edit Agent model" description="Choose the model preference for the persistent right-side Edit Agent panel." />
             <label className="field-label" htmlFor="primary-model">Primary LLM model</label>
             <select id="primary-model" value={selectedModelId} onChange={(event) => setSelectedModelId(event.target.value)}>
               {DEFAULT_LLM_MODELS
@@ -505,8 +440,6 @@ export function SettingsWorkspace({ onReplayFirstRunOnboarding }: SettingsWorksp
             <StatusCard tone="neutral">Shortcut changes persist locally and apply immediately inside the Editing workspace.</StatusCard>
           </>
         );
-      case 'spending':
-        return <SpendSettings />;
       case 'updates':
         return <UpdatesSettings />;
       case 'data-privacy':

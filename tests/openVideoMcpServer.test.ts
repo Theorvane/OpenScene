@@ -40,102 +40,16 @@ describe('OpenScene TypeMCP Server and Tool declarations', () => {
 
     const toolNames = definition?.tools.map((t) => t.name);
     expect(toolNames).toContain('watchProjectVideo');
-    expect(toolNames).toContain('createVideoJob');
-    expect(toolNames).toContain('createSpeechJob');
-    expect(toolNames).toContain('getJobStatus');
+    expect(toolNames).not.toContain('createVideoJob');
+    expect(toolNames).not.toContain('createSpeechJob');
+    expect(toolNames).not.toContain('getJobStatus');
     expect(toolNames).toContain('getProjectTimeline');
     expect(toolNames).toContain('trimTimelineClip');
     expect(toolNames).toContain('updateClipEffects');
     expect(toolNames).toContain('addClipToTimeline');
-    expect(toolNames).toContain('importGeneratedResult');
+    expect(toolNames).not.toContain('importGeneratedResult');
     expect(toolNames).toContain('removeTimelineClip');
     expect(toolNames).toContain('exportProjectVideo');
-  });
-
-  it('imports a completed generation job as a project asset and tells open editors to reload', async () => {
-    const server = new OpenVideoMcpServer();
-    const changed: string[] = [];
-    server.setProjectTimelineChangeNotifier((projectId) => changed.push(projectId));
-
-    // Without the service the tool refuses instead of pretending to import.
-    expect(await server.importGeneratedResult({ projectId: 'p1', jobId: 'job-1' })).toMatchObject({
-      success: false,
-      error: 'Result import service is not available.'
-    });
-
-    server.setResultImportService({
-      importAiResult: async () => ok({
-        assets: [{
-          id: 'asset-generated',
-          displayName: 'narration.wav',
-          kind: 'audio',
-          mimeType: 'audio/wav',
-          projectRelativePath: 'assets/asset-generated/original.wav',
-          byteLength: 2048,
-          metadata: { durationMs: 4_000 },
-          createdAt: '2026-07-29T00:00:00.000Z',
-          updatedAt: '2026-07-29T00:00:00.000Z'
-        }]
-      })
-    } as unknown as Parameters<OpenVideoMcpServer['setResultImportService']>[0]);
-
-    const imported = await server.importGeneratedResult({ projectId: 'p1', jobId: 'job-1' });
-
-    expect(imported).toMatchObject({ success: true, projectId: 'p1', jobId: 'job-1' });
-    expect(imported.assets).toEqual([{ id: 'asset-generated', displayName: 'narration.wav', kind: 'audio', durationMs: 4_000 }]);
-    expect(changed).toEqual(['p1']);
-  });
-
-  it('reports an import failure instead of claiming the asset landed', async () => {
-    const server = new OpenVideoMcpServer();
-    server.setResultImportService({
-      importAiResult: async () => fail('TTS_RESULT_UNAVAILABLE', 'The completed AI generation result is not available.')
-    } as unknown as Parameters<OpenVideoMcpServer['setResultImportService']>[0]);
-
-    expect(await server.importGeneratedResult({ projectId: 'p1', jobId: 'missing' })).toEqual({
-      success: false,
-      error: 'The completed AI generation result is not available.'
-    });
-  });
-
-  it('executes createVideoJob MCP tool against the selected cloud model', async () => {
-    const server = new OpenVideoMcpServer();
-    const result = await server.createVideoJob({
-      prompt: 'Cinematic intro shot of Seoul skyline',
-      aspectRatio: '16:9',
-      modelId: 'sora-2'
-    });
-
-    expect(result.success).toBe(true);
-    const okResult = result as { success: true; jobId: string; mode: string; provider: string };
-    expect(okResult.jobId.length).toBeGreaterThan(0);
-    // Media generation is cloud-only; Ollama is the app's only local engine.
-    expect(okResult.mode).toBe('api');
-    expect(okResult.provider).toBe('openai_sora');
-  });
-
-  it('rejects a video model whose adapter is not implemented', async () => {
-    const server = new OpenVideoMcpServer();
-
-    await expect(server.createVideoJob({
-      prompt: 'Cinematic intro shot of Seoul skyline',
-      modelId: 'kling-v2.5-turbo'
-    })).rejects.toThrow('is not available for video-generation');
-  });
-
-  it('executes createSpeechJob MCP tool against the selected cloud model', async () => {
-    const server = new OpenVideoMcpServer();
-    const result = await server.createSpeechJob({
-      script: 'Welcome to OpenScene desktop suite',
-      voiceId: '',
-      modelId: 'eleven_multilingual_v2'
-    });
-
-    expect(result.success).toBe(true);
-    const okResult = result as { success: true; jobId: string; mode: string; provider: string };
-    expect(okResult.jobId.length).toBeGreaterThan(0);
-    expect(okResult.mode).toBe('api');
-    expect(okResult.provider).toBe('elevenlabs');
   });
 
   it('returns a path-free read-only timeline summary only for an existing project', async () => {
@@ -457,65 +371,6 @@ describe('OpenScene TypeMCP Server and Tool declarations', () => {
     expect(receivedInputs).toEqual([{ projectId: 'proj-123', metadataPrivacyMode: 'privacy_clean' }]);
   });
 
-  it('handles job creation, status polling, and timeline clip placement end-to-end workflow', async () => {
-    const server = new OpenVideoMcpServer();
-    server.setServices(projectStore);
-
-    // 1. Create Video Job
-    const jobResult = await server.createVideoJob({
-      prompt: 'Cinematic intro shot',
-      aspectRatio: '16:9',
-      durationSeconds: 4,
-      modelId: 'sora-2'
-    });
-    expect(jobResult.success).toBe(true);
-    const okJobResult = jobResult as { success: true; jobId: string };
-    expect(okJobResult.jobId.length).toBeGreaterThan(0);
-
-    // 2. Poll Status
-    const statusResult = await server.getJobStatus({
-      jobId: okJobResult.jobId,
-      kind: 'video'
-    });
-    expect(statusResult.success).toBe(true);
-    expect(statusResult.status).toBeDefined();
-    expect(statusResult).not.toHaveProperty('outputFilePath');
-
-    // 3. Register asset & add to real project timeline
-    const project = await projectStore.create({ name: 'Copilot Workflow Project' });
-    const nowIso = new Date('2026-07-24T12:00:00.000Z').toISOString();
-    const assetId = `asset-${okJobResult.jobId}`;
-    const dummyAsset: MediaAsset = {
-      id: assetId,
-      displayName: 'generated-video.mp4',
-      projectRelativePath: `assets/${assetId}/original.mp4`,
-      kind: 'video',
-      mimeType: 'video/mp4',
-      byteLength: 2048,
-      createdAt: nowIso,
-      updatedAt: nowIso,
-      metadata: { durationMs: 5000, width: 1920, height: 1080 }
-    };
-
-    await projectStore.registerAsset(project.id, dummyAsset);
-    const trackId = project.timeline.tracks[0]!.id;
-
-    const clipResult = await server.addClipToTimeline({
-      projectId: project.id,
-      trackId,
-      assetId: dummyAsset.id,
-      startOffsetSeconds: 0,
-      durationSeconds: 5
-    });
-
-    expect(clipResult.success).toBe(true);
-
-    const reloaded = await projectStore.open(project.id);
-    const targetTrack = reloaded?.timeline.tracks.find((t) => t.id === trackId);
-    expect(targetTrack?.clips).toHaveLength(1);
-    expect(targetTrack?.clips[0]!.assetId).toBe(assetId);
-  });
-
   it('watchProjectVideo samples a confined video asset and returns path-free frames with timestamps', async () => {
     const server = new OpenVideoMcpServer();
     const seenPaths: string[] = [];
@@ -710,32 +565,5 @@ describe('OpenScene TypeMCP Server and Tool declarations', () => {
     // A refused write leaves a project that still opens.
     const reopened = await projectStore.open(project.id);
     expect(reopened?.timeline.tracks[0]!.clips).toHaveLength(2);
-  });
-
-  it('composes a shot prompt, and refines one without losing what it already said', () => {
-    const server = new OpenVideoMcpServer();
-
-    const first = server.composeShotPrompt({
-      scenario: 'A courier cycles through a wet city at night',
-      description: 'Close on the front wheel throwing spray',
-      shotIndex: 2,
-      shotCount: 4,
-      durationSeconds: 8,
-      continuesFromFrame: true
-    });
-    expect(first).toMatchObject({ success: true });
-    const prompt = (first as { prompt: string }).prompt;
-    expect(prompt).toContain('Close on the front wheel throwing spray');
-    expect(prompt).toContain('Shot 2 of 4, 8s.');
-
-    const refined = server.composeShotPrompt({ previousPrompt: prompt, change: 'Slower camera move' });
-    expect(refined).toMatchObject({ success: true, revisions: ['Slower camera move'] });
-    // The take being refined is still described in full: a rewrite would lose
-    // the wardrobe, lens and location nobody mentioned in the note.
-    expect((refined as { prompt: string }).prompt).toContain('Close on the front wheel throwing spray');
-
-    // Half a refinement is refused rather than guessed at.
-    expect(server.composeShotPrompt({ previousPrompt: prompt })).toMatchObject({ success: false });
-    expect(server.composeShotPrompt({})).toMatchObject({ success: false });
   });
 });

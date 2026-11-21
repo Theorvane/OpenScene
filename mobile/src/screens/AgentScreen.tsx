@@ -11,20 +11,18 @@ import {
   View
 } from 'react-native';
 
-import { LLM_PROVIDERS, POPULAR_LLM_PROVIDER_IDS, getLlmCatalogProvider } from '@openvideo/shared/llmProviders';
-import { FFMPEG_EDITING_WORKFLOW } from '@openvideo/shared/ffmpegEditingWorkflow';
 import { AGENT_SCOPE_POLICY } from '@openvideo/shared/agentScope';
+import { FFMPEG_EDITING_WORKFLOW } from '@openvideo/shared/ffmpegEditingWorkflow';
+import { LLM_PROVIDERS, POPULAR_LLM_PROVIDER_IDS, getLlmCatalogProvider } from '@openvideo/shared/llmProviders';
 
-import { readSlot } from '../lib/credentials';
-import { customCredentialKey, useCustomProviders } from '../lib/customProviders';
-import { useSpendPermissions, type Decision } from '../lib/permissions';
-import { AGENT_TOOLS, findTool } from '../lib/agentTools';
-import { sendChatTurn, type ChatMessage, type ToolCallProposal } from '../lib/agentChatClient';
-import { dropUnansweredCalls, trimHistory } from '../lib/chatMemory';
-import { clearChat, readChat, writeChat } from '../lib/chatStore';
-import { SpendPrompt } from '../components/SpendPrompt';
 import { AddCustomProvider } from '../components/AddCustomProvider';
 import { ChatText } from '../components/ChatText';
+import { sendChatTurn, type ChatMessage, type ToolCallProposal } from '../lib/agentChatClient';
+import { AGENT_TOOLS, findTool } from '../lib/agentTools';
+import { dropUnansweredCalls, trimHistory } from '../lib/chatMemory';
+import { clearChat, readChat, writeChat } from '../lib/chatStore';
+import { readSlot } from '../lib/credentials';
+import { customCredentialKey, useCustomProviders } from '../lib/customProviders';
 import { theme } from '../lib/theme';
 import { MIN_TAP, press } from '../lib/touch';
 
@@ -76,7 +74,7 @@ const SYSTEM_PROMPT =
   '\n\n' +
   AGENT_SCOPE_POLICY;
 
-type Pending = { readonly proposal: ToolCallProposal; readonly cost: string };
+type Pending = { readonly proposal: ToolCallProposal };
 
 export function AgentScreen({
   topInset,
@@ -88,7 +86,6 @@ export function AgentScreen({
   readonly keyboardOffset: number;
   readonly projectId: string | null;
 }) {
-  const permissions = useSpendPermissions();
   const { providers: customProviders, refresh: refreshCustom } = useCustomProviders();
   const [connected, setConnected] = useState<Readonly<Record<string, boolean>>>({});
   const [providerId, setProviderId] = useState('openai');
@@ -220,37 +217,20 @@ export function AgentScreen({
       return;
     }
 
-    // A free tool still asks, but with a plain approval; a spending one asks with
-    // the price, unless the user already answered for that feature.
-    if (tool.spends === null) {
-      setPending({ proposal, cost: 'free' });
-      return;
-    }
-    const standing = permissions.standingFor(tool.spends);
-    if (standing === 'reject') {
-      await complete(next, proposal, `The user has ${tool.spends} set to never charge. Do not try again.`);
-      return;
-    }
-    if (standing === 'always') {
-      await run(next, proposal);
-      return;
-    }
-    setPending({ proposal, cost: tool.costOf(proposal.args) });
+    setPending({ proposal });
   };
 
   /** Feeds a tool reply back to the model and continues the loop. */
   const complete = async (
     history: readonly ChatMessage[],
     proposal: ToolCallProposal,
-    summary: string,
-    image?: string
+    summary: string
   ): Promise<void> => {
     const reply: ChatMessage = {
       role: 'tool',
       content: summary,
       toolCallId: proposal.id,
-      toolName: proposal.name,
-      ...(image === undefined ? {} : { image })
+      toolName: proposal.name
     };
     const next = [...history, reply];
     setMessages(next);
@@ -265,14 +245,8 @@ export function AgentScreen({
     try {
       const result = await tool.run(proposal.args, { projectId, onProgress: setProgress });
       if (started !== era.current) return;
-      const image = result.image;
       setProgress(null);
-      await complete(
-        history,
-        proposal,
-        result.summary,
-        image === undefined ? undefined : `data:${image.mimeType};base64,${image.base64}`
-      );
+      await complete(history, proposal, result.summary);
     } catch (failure) {
       if (started !== era.current) return;
       setProgress(null);
@@ -290,12 +264,11 @@ export function AgentScreen({
     void complete(messages, request.proposal, 'The user dismissed this without deciding. Ask again if it matters.');
   };
 
-  const decide = (decision: Decision): void => {
+  const decide = (decision: 'once' | 'reject'): void => {
     const request = pending;
     setPending(null);
     if (request === null) return;
     const tool = findTool(request.proposal.name);
-    if (tool?.spends != null) permissions.remember(tool.spends, decision);
     if (decision === 'reject') {
       void complete(messages, request.proposal, 'The user declined this call.');
       return;
@@ -318,7 +291,6 @@ export function AgentScreen({
   };
 
   const providerLabel = providers.find((provider) => provider.id === providerId)?.label ?? providerId;
-  const spendTool = pending === null ? undefined : findTool(pending.proposal.name);
 
   return (
     // The composer is the bottom-most thing on the screen, so the keyboard
@@ -432,7 +404,7 @@ export function AgentScreen({
       >
         {messages.length === 0 && (
           <Text style={styles.empty}>
-            Ask for a plan, a script check, an image, or a shot. Every tool call is shown for approval first, and
+            Ask about your footage, clip sequence, or editing choices. Every tool call is shown for approval first, and
             anything that charges your provider says the price before it runs.
           </Text>
         )}
@@ -475,7 +447,7 @@ export function AgentScreen({
 
       {/* Free tools get a plain approval — there is no price to show, and dressing
           a read-only call up as a spend would train the user to tap through. */}
-      {pending !== null && spendTool?.spends == null && (
+      {pending !== null && (
         <View style={styles.approveCard}>
           <Text style={styles.approveTitle}>Run {pending.proposal.name}?</Text>
           <Text style={styles.approveArgs} numberOfLines={4}>
@@ -492,15 +464,6 @@ export function AgentScreen({
         </View>
       )}
 
-      {spendTool?.spends != null && (
-        <SpendPrompt
-          feature={spendTool.spends}
-          headline={pending?.cost ?? ''}
-          visible={pending !== null}
-          onDecide={decide}
-          onDismiss={dismiss}
-        />
-      )}
 
       <View style={styles.composer}>
         <TextInput
