@@ -179,6 +179,9 @@ function AppShellContent({ activePage, children, hasActiveProject, onPageChange,
               {projectTabs.length === 0 && <span className="product-chrome__empty">{activePage.chromeLabel}</span>}
             </div>
             <div className="product-chrome__actions">
+              {showChatPanel && <Button variant={chatPanelCollapsed ? 'ghost' : 'primary'}
+                aria-controls="app-shell-agent-chat" aria-expanded={!chatPanelCollapsed}
+                onClick={() => setChatPanelCollapsed(!chatPanelCollapsed)}>Assistant</Button>}
               <Button
                 aria-label="Back"
                 className="product-chrome__nav-button"
@@ -225,21 +228,6 @@ function AppShellContent({ activePage, children, hasActiveProject, onPageChange,
             </div>
           )}
         </div>
-        {showChatPanel && chatPanelCollapsed && (
-          <div className="agent-chat-collapsed-rail">
-            <button
-              className="agent-chat-collapsed-rail__button"
-              type="button"
-              aria-controls="app-shell-agent-chat"
-              aria-expanded={false}
-              title="Expand Edit Agent chat sidebar"
-              onClick={() => setChatPanelCollapsed(false)}
-            >
-              <span aria-hidden="true" className="agent-chat-collapsed-rail__glyph">⇤</span>
-              <span className="agent-chat-collapsed-rail__label">Edit Agent</span>
-            </button>
-          </div>
-        )}
         {showChatPanel && !chatPanelCollapsed && (
           <>
             <div

@@ -8,7 +8,7 @@ Use the existing OpenCut presentation with a media library, Program Monitor, Ins
 
 ## Canvas mode
 
-The header switches between Timeline and Canvas. Canvas fills the editor's central workspace with clip cards and connections. The media panel and assistant remain available. The last selected mode is stored locally.
+The header switches between Timeline and Canvas. Canvas fills the editor workspace with a searchable Blocks / Sources library and a graph. Sources handles media imports and clip placement. Auto arrange follows source → processing → composition dependencies, and Fit frames the workflow. Assistant opens from application chrome when needed. The last selected mode and existing panel preferences are stored locally. See the [menu tree and layout](docs/editor-menu-layout.md).
 
 Each video card references an existing timeline clip ID. Dragging a card changes its device-local position. Output followed by Input proposes a connection between different clips on the same video track. Applying the connection moves the target after the source, closes gaps on that track and records an undo step.
 
@@ -30,4 +30,4 @@ Project mutations require approval. Provider credentials are stored through the 
 
 ## Mobile
 
-Edit, Canvas, Library and the assistant are project views. Canvas uses the shared evaluator with the same four function blocks in a compact touch layout, including typed connections, input expansion, disconnect, removal, apply and undo. Free card positioning remains desktop-only. Desktop frame inspection and speech analysis remain explicitly unavailable in mobile chat.
+Edit, Canvas, Library and the assistant are project views. Canvas separates Workflow / Sources / Blocks and uses the shared catalog and evaluator, including typed connections, input expansion, disconnect, removal, apply and undo. Free card positioning remains desktop-only. Desktop frame inspection and speech analysis remain explicitly unavailable in mobile chat.

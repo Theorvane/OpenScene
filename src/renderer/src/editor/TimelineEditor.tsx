@@ -1,6 +1,6 @@
 import { useEffect, useState, type CSSProperties, type ReactElement, type ReactNode } from 'react';
 import { EditorWorkspace } from '../../../../external/opencut/apps/web/src/components/editor/editor-workspace';
-import { EditorHeader } from '../../../../external/opencut/apps/web/src/components/editor/editor-header';
+import { EditorHeader } from './EditorWorkbenchHeader';
 
 import { AssetMetadataProbeHost } from './AssetMetadataProbeHost';
 import { EDITOR_INSPECTOR_DOCK_TAB_IDS, getDefaultEditorDockTabs, getDefaultEditorLeftDockTabId } from './dockTabs';
@@ -42,6 +42,7 @@ import { THEME_PRESETS, type ThemePresetId } from '../theme';
 import type { TabDefinition } from '../ui';
 import { VideoConnectionCanvas } from './VideoConnectionCanvas';
 import './videoCanvas.css';
+import './editorWorkbench.css';
 
 export type InspectorTabId = (typeof EDITOR_INSPECTOR_DOCK_TAB_IDS)[number];
 
@@ -107,6 +108,26 @@ export function TimelineEditor({ editor, onProjectSettings }: TimelineEditorProp
     }
   });
   const canvasMode = editorView === 'canvas';
+  useEffect(() => {
+    const closeOutside = (event: globalThis.PointerEvent) => {
+      document.querySelectorAll<HTMLDetailsElement>('details.workbench-menu[open]').forEach(menu => {
+        if (!menu.contains(event.target as Node)) menu.open = false;
+      });
+    };
+    const closeWithEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      document.querySelectorAll<HTMLDetailsElement>('details.workbench-menu[open]').forEach(menu => {
+        if (menu.contains(document.activeElement)) menu.querySelector('summary')?.focus();
+        menu.open = false;
+      });
+    };
+    document.addEventListener('pointerdown', closeOutside);
+    document.addEventListener('keydown', closeWithEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeOutside);
+      document.removeEventListener('keydown', closeWithEscape);
+    };
+  }, []);
   const { isBusy: isAgentBusy } = useAgentChat();
   const { mode: themeMode, preset, setPreset, toggleTheme } = useTheme();
   const [leftDockTabId, setLeftDockTabId] = useState<EditorLeftDockTabId>('project');
@@ -149,7 +170,7 @@ export function TimelineEditor({ editor, onProjectSettings }: TimelineEditorProp
 
   const workspaceClassName = [
     canvasMode ? 'oc-editor-host--canvas' : null,
-    layoutPreference.leftDockVisible ? null : 'oc-editor-host--left-hidden',
+    canvasMode || !layoutPreference.leftDockVisible ? 'oc-editor-host--left-hidden' : null,
     layoutPreference.inspectorVisible ? null : 'oc-editor-host--inspector-hidden',
     `oc-editor-host--inspector-${layoutPreference.inspectorPlacement}`
   ].filter((className): className is string => className !== null).join(' ');
@@ -252,12 +273,27 @@ export function TimelineEditor({ editor, onProjectSettings }: TimelineEditorProp
             <button type="button" aria-pressed={!canvasMode} onClick={() => selectEditorView('timeline')}>Timeline</button>
             <button type="button" aria-pressed={canvasMode} onClick={() => selectEditorView('canvas')}>Canvas</button>
           </div>
-          <button type="button" onClick={onProjectSettings}>Project settings</button>
+          <details className="workbench-menu">
+            <summary>Project</summary>
+            <div className="workbench-menu__popover">
+              <button type="button" onClick={onProjectSettings}>Project settings</button>
+              <button type="button" disabled={!editor.hasUnsavedTimeline || isAgentBusy || editor.isBusy} onClick={() => { void editor.saveTimeline(); }}>Save project</button>
+            </div>
+          </details>
+          <details className="workbench-menu">
+            <summary>View</summary>
+            <div className="workbench-menu__popover">
+              <span className="workbench-menu__label">WORKSPACE PANELS</span>
+              <button type="button" disabled={canvasMode} aria-pressed={layoutPreference.leftDockVisible} onClick={() => updateLayoutPreference(toggleEditorLeftDock)}>Media library {layoutPreference.leftDockVisible ? '✓' : ''}</button>
+              <button type="button" disabled={canvasMode} aria-pressed={layoutPreference.inspectorVisible} onClick={() => updateLayoutPreference(toggleEditorInspector)}>Inspector {layoutPreference.inspectorVisible ? '✓' : ''}</button>
+              <button type="button" onClick={resetLayout}>Reset layout</button>
+            </div>
+          </details>
           <button className="oc-editor-host__save" type="button" onClick={() => { void editor.saveTimeline(); }} disabled={editor.project === null || !editor.hasUnsavedTimeline}>Save{editor.hasUnsavedTimeline ? ' *' : ''}</button>
           {!floatingExportVisible && <ExportPanel editor={editor} />}
         </>}
       />}
-      left={<TimelineEditorLeftDock
+      left={canvasMode ? null : <TimelineEditorLeftDock
         activeTabId={leftDockTabId}
         editor={editor}
         leftDockVisible={layoutPreference.leftDockVisible}
@@ -265,7 +301,7 @@ export function TimelineEditor({ editor, onProjectSettings }: TimelineEditorProp
         onActiveTabChange={setLeftDockTabId}
       />}
 
-      leftSplitter={<EditorLeftDockSplitter leftDockVisible={layoutPreference.leftDockVisible} leftDockWidth={layoutPreference.leftDockWidth} onLeftDockWidthChange={setLeftDockWidth} />}
+      leftSplitter={canvasMode ? null : <EditorLeftDockSplitter leftDockVisible={layoutPreference.leftDockVisible} leftDockWidth={layoutPreference.leftDockWidth} onLeftDockWidthChange={setLeftDockWidth} />}
 
       auxiliary={<AssetMetadataProbeHost
         failuresByAssetId={editor.metadataProbeFailuresByAssetId}

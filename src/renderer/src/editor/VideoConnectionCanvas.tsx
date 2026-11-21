@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type PointerEvent } from 'react';
 import type { MediaAsset, PersistedTimelineClip } from '../../../shared/timelineTypes';
 import { clipDurationMs } from '../../../shared/timelineClipGeometry';
 import { evaluateCanvasBlock } from '../../../shared/videoCanvasBlocks';
+import { CANVAS_BLOCK_CATALOG } from '../../../shared/canvasBlockCatalog';
 import {
   CANVAS_BLOCK_KINDS, CANVAS_BLOCK_LABELS, CANVAS_BLOCK_LIMIT, CANVAS_INPUT_LIMIT,
   EMPTY_CANVAS_GRAPH, canvasInputType, canvasOutputType, connectCanvasInput,
@@ -53,8 +54,8 @@ export function VideoConnectionCanvas({ editor, locked, onPreview }: {
   const [zoom, setZoom] = useState(1);
   const [fromId, setFromId] = useState<string | null>(null);
   const [toId, setToId] = useState<string | null>(null);
-  const [assetId, setAssetId] = useState('');
-  const [blockKind, setBlockKind] = useState<CanvasBlockKind>('video-sequence');
+  const [libraryTab, setLibraryTab] = useState<'blocks' | 'sources'>('blocks');
+  const [search, setSearch] = useState('');
   const [notice, setNotice] = useState('');
   const [draggingBlockId, setDraggingBlockId] = useState<string | null>(null);
   const viewport = useRef<HTMLDivElement>(null);
@@ -138,13 +139,46 @@ export function VideoConnectionCanvas({ editor, locked, onPreview }: {
     setToId(id);
   };
 
-  const addBlock = () => {
+  const addBlock = (blockKind: CanvasBlockKind) => {
     const position = { x: 48 + graph.blocks.length * 300, y: Math.min(20000, Math.max(48, ...nodes.map(node => node.position.y + 270))) };
     const block: CanvasBlock = { id: 'block-' + crypto.randomUUID(), kind: blockKind, inputCount: 2, position };
     if (editor.updateCanvasGraph({ ...graph, blocks: [...graph.blocks, block] }) !== null) {
       setNotice('Select a source output, then an input on the block.');
       requestAnimationFrame(() => viewport.current?.scrollTo({ left: position.x * zoom, top: position.y * zoom, behavior: 'smooth' }));
     }
+  };
+  const fitView = () => {
+    if (viewport.current === null) return;
+    const right = Math.max(400, ...nodes.map(node => node.position.x + 280), ...graph.blocks.map(block => block.position.x + 320));
+    const bottom = Math.max(300, ...nodes.map(node => node.position.y + 250), ...graph.blocks.map(block => block.position.y + 200 + block.inputCount * 42));
+    setZoom(Math.max(.2, Math.min(1.2, (viewport.current.clientWidth - 40) / right, (viewport.current.clientHeight - 40) / bottom)));
+    viewport.current.scrollTo({ left: 0, top: 0 });
+  };
+  const arrange = () => {
+    const nextPositions = { ...positions };
+    nodes.forEach((node, index) => { nextPositions[node.clip.id] = { x: Math.min(20000, 48 + Math.floor(index / 72) * 290), y: 48 + (index % 72) * 245 }; });
+    const depths = new Map<string, number>();
+    const depth = (id: string, seen = new Set<string>()): number => {
+      const cached = depths.get(id);
+      if (cached !== undefined) return cached;
+      if (seen.has(id)) return 0;
+      const branch = new Set([...seen, id]);
+      const parents = graph.connections.filter(edge => edge.toId === id).map(edge => edge.fromId);
+      const result = Math.min(60, Math.max(0, ...parents.map(parent => graph.blocks.some(block => block.id === parent) ? depth(parent, branch) + 1 : 0)));
+      depths.set(id, result);
+      return result;
+    };
+    const rows = new Map<number, number>();
+    const blocks = graph.blocks.map(block => {
+      const column = depth(block.id);
+      const y = rows.get(column) ?? 48;
+      rows.set(column, y + 240 + block.inputCount * 42);
+      return { ...block, position: { x: Math.min(20000, 380 + column * 340), y: Math.min(20000, y) } };
+    });
+    setPositions(nextPositions);
+    try { localStorage.setItem(storageKey, JSON.stringify(nextPositions)); } catch { /* Keep layout in memory. */ }
+    editor.updateCanvasGraph({ ...graph, blocks });
+    setNotice('Arranged sources → processing blocks → composition. Use Fit to see the workflow.');
   };
   const connectBlock = (block: CanvasBlock, input: number) => {
     if (fromId === null) { setNotice('Select a source or block output first.'); return; }
@@ -162,26 +196,45 @@ export function VideoConnectionCanvas({ editor, locked, onPreview }: {
       (block === undefined ? 'Missing source' : CANVAS_BLOCK_LABELS[block.kind]);
   };
 
-  return <section className="video-canvas" aria-label="Video connection canvas">
+  return <section className="video-canvas canvas-workbench" aria-label="Video connection canvas">
+    <aside className="canvas-library" aria-label="Workflow library">
+      <div className="canvas-library__tabs" role="group" aria-label="Workflow library categories">
+        <button type="button" aria-pressed={libraryTab === 'blocks'} onClick={() => { setLibraryTab('blocks'); setSearch(''); }}>Blocks</button>
+        <button type="button" aria-pressed={libraryTab === 'sources'} onClick={() => { setLibraryTab('sources'); setSearch(''); }}>Sources</button>
+      </div>
+      <input aria-label="Search workflow library" placeholder={libraryTab === 'blocks' ? 'Search blocks…' : 'Search media…'} value={search} onChange={event => setSearch(event.target.value)} />
+      {libraryTab === 'blocks' ? <div className="canvas-library__items">
+        <p className="canvas-library__eyebrow">FUNCTION BLOCKS</p>
+        {CANVAS_BLOCK_KINDS.filter(kind => `${CANVAS_BLOCK_LABELS[kind]} ${CANVAS_BLOCK_CATALOG[kind].description}`.toLowerCase().includes(search.toLowerCase())).map(kind =>
+          <button className="canvas-library__item" type="button" key={kind} aria-label={`Add ${CANVAS_BLOCK_LABELS[kind]}`}
+            disabled={locked || graph.blocks.length >= CANVAS_BLOCK_LIMIT} onClick={() => addBlock(kind)}>
+            <span className={`canvas-library__badge canvas-library__badge--${CANVAS_BLOCK_CATALOG[kind].category.toLowerCase()}`}>{CANVAS_BLOCK_CATALOG[kind].category}</span>
+            <strong>{CANVAS_BLOCK_LABELS[kind]} <span aria-hidden="true">＋</span></strong>
+            <small>{CANVAS_BLOCK_CATALOG[kind].description}</small>
+          </button>)}
+      </div> : <div className="canvas-library__items">
+        <button type="button" disabled={locked} onClick={() => { void editor.importAssets(); }}>+ Import media</button>
+        {project.assets.filter(asset => asset.displayName.toLowerCase().includes(search.toLowerCase())).map(asset =>
+          <button className="canvas-library__item" type="button" key={asset.id} disabled={locked} aria-label={`Add source ${asset.displayName}`} onClick={() => editor.placeAssetOnTimeline(asset.id)}>
+            <span className="canvas-library__badge">{asset.kind}</span><strong>{asset.displayName}</strong>
+            <small>Add a source clip · {asset.metadata ? formatDuration(asset.metadata.durationMs) : 'Reading metadata'}</small>
+          </button>)}
+        {project.assets.length === 0 && <p>Import a video or audio file to start.</p>}
+      </div>}
+      <p className="canvas-library__hint">1. Add sources<br />2. Connect matching ports<br />3. Apply the final block<br />4. Review in Timeline</p>
+    </aside>
+    <div className="canvas-stage">
     <div className="video-canvas__toolbar">
-      <strong>Canvas</strong>
-      <select aria-label="Media to add to canvas" value={assetId} onChange={(event) => setAssetId(event.target.value)}>
-        <option value="">Choose media</option>
-        {project.assets.map((asset) =>
-          <option key={asset.id} value={asset.id}>{asset.displayName}</option>)}
-      </select>
-      <button type="button" disabled={!assetId || locked} onClick={() => editor.placeAssetOnTimeline(assetId)}>Add clip</button>
-      <select aria-label="Function block" value={blockKind} onChange={event => setBlockKind(event.target.value as CanvasBlockKind)}>
-        {CANVAS_BLOCK_KINDS.map(kind => <option key={kind} value={kind}>{CANVAS_BLOCK_LABELS[kind]}</option>)}
-      </select>
-      <button type="button" disabled={locked || graph.blocks.length >= CANVAS_BLOCK_LIMIT} onClick={addBlock}>Add block</button>
+      <strong>Workflow <small>{nodes.length} sources · {graph.blocks.length} blocks</small></strong>
       <button type="button" disabled={locked || !editor.canUndoTimeline} onClick={() => {
         editor.undoTimeline(); setFromId(null); setToId(null); setNotice('Canvas edit undone.');
       }}>Undo</button>
       <button type="button" disabled={locked || !editor.canRedoTimeline} onClick={() => {
         editor.redoTimeline(); setFromId(null); setToId(null); setNotice('Canvas edit restored.');
       }}>Redo</button>
-      <button type="button" aria-label="Zoom out canvas" onClick={() => setZoom(Math.max(.4, zoom - .1))}>−</button>
+      <button type="button" disabled={locked} onClick={arrange}>Auto arrange</button>
+      <button type="button" onClick={fitView}>Fit</button>
+      <button type="button" aria-label="Zoom out canvas" onClick={() => setZoom(Math.max(.2, zoom - .1))}>−</button>
       <button type="button" onClick={() => setZoom(1)}>{Math.round(zoom * 100)}%</button>
       <button type="button" aria-label="Zoom in canvas" onClick={() => setZoom(Math.min(1.8, zoom + .1))}>+</button>
     </div>
@@ -290,6 +343,7 @@ export function VideoConnectionCanvas({ editor, locked, onPreview }: {
         }}>Apply connection</button>
       </> : <span>{notice || 'Add function blocks, then connect source outputs to matching inputs. Apply a block to edit the timeline.'}</span>}
       {fromId !== null && <button type="button" onClick={() => { setFromId(null); setToId(null); setNotice(''); }}>Cancel</button>}
+    </div>
     </div>
   </section>;
 }

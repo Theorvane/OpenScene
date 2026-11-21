@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { CANVAS_BLOCK_CATALOG } from '@openvideo/shared/canvasBlockCatalog';
 import { connectVideoClips } from '@openvideo/shared/videoCanvas';
 import { applyCanvasBlock, evaluateCanvasBlock } from '@openvideo/shared/videoCanvasBlocks';
 import { CANVAS_BLOCK_KINDS, CANVAS_BLOCK_LABELS, CANVAS_BLOCK_LIMIT, CANVAS_INPUT_LIMIT, EMPTY_CANVAS_GRAPH, canvasInputType, connectCanvasInput, type VideoCanvasGraph } from '@openvideo/shared/videoCanvasGraph';
@@ -13,6 +14,8 @@ export function CanvasScreen({ projectId }: { projectId: string }) {
   const project = useProject(projectId);
   const [source, setSource] = useState<string | null>(null);
   const [target, setTarget] = useState<string | null>(null);
+  const [section, setSection] = useState<'workflow' | 'sources' | 'blocks'>('workflow');
+  const [search, setSearch] = useState('');
   const [notice, setNotice] = useState('Choose an output, then the next clip’s input.');
   const [undo, setUndo] = useState<{ before: TimelineDocument; after: TimelineDocument } | null>(null);
   if (project === null) return null;
@@ -41,15 +44,18 @@ export function CanvasScreen({ projectId }: { projectId: string }) {
     setNotice('Connection saved.');
   };
   return <ScrollView contentContainerStyle={styles.page}>
-    <Text style={styles.title}>Canvas</Text>
+    <Text style={styles.title}>Canvas workflow</Text>
+    <View style={styles.tabs}>{(['workflow', 'sources', 'blocks'] as const).map(tab => <Pressable key={tab} accessibilityRole="button" accessibilityState={{ selected: section === tab }} style={press([styles.button, section === tab && styles.selected])} onPress={() => setSection(tab)}><Text style={styles.label}>{tab[0]!.toUpperCase() + tab.slice(1)}</Text></Pressable>)}</View>
     <Text style={styles.note}>Choose a clip or block output, then connect a matching block input. Apply a block to arrange its clips in Edit.</Text>
-    <View style={styles.sequence}>
-      {CANVAS_BLOCK_KINDS.map(kind => <Pressable key={kind} accessibilityRole="button" disabled={graph.blocks.length >= CANVAS_BLOCK_LIMIT} style={press(styles.button)} onPress={() => {
+    {section === 'blocks' && <View style={styles.sequence}>
+      <TextInput accessibilityLabel="Search blocks" placeholder="Search blocks…" placeholderTextColor={theme.textWeaker} style={styles.search} value={search} onChangeText={setSearch} />
+      {CANVAS_BLOCK_KINDS.filter(kind => `${CANVAS_BLOCK_LABELS[kind]} ${CANVAS_BLOCK_CATALOG[kind].description}`.toLowerCase().includes(search.toLowerCase())).map(kind => <Pressable key={kind} accessibilityRole="button" disabled={graph.blocks.length >= CANVAS_BLOCK_LIMIT} style={press(styles.libraryItem)} onPress={() => {
         saveGraph({ ...graph, blocks: [...graph.blocks, { id: 'block-' + Date.now() + '-' + Math.random().toString(36).slice(2), kind, inputCount: 2, position: { x: 40, y: 40 + graph.blocks.length * 250 } }] });
         setNotice('Block added. Connect each input.');
-      }}><Text style={styles.label}>+ {CANVAS_BLOCK_LABELS[kind]}</Text></Pressable>)}
-    </View>
-    {project.timeline.tracks.map((track) => <View key={track.id}>
+        setSection('workflow');
+      }}><Text style={styles.note}>{CANVAS_BLOCK_CATALOG[kind].category.toUpperCase()}</Text><Text style={styles.label}>+ {CANVAS_BLOCK_LABELS[kind]}</Text><Text style={styles.note}>{CANVAS_BLOCK_CATALOG[kind].description}</Text></Pressable>)}
+    </View>}
+    {section !== 'blocks' && project.timeline.tracks.map((track) => <View key={track.id}>
       <Text style={styles.label}>{track.name}</Text>
       <ScrollView horizontal contentContainerStyle={styles.sequence}>
         {[...track.clips].sort((a, b) => a.timelineStartMs - b.timelineStartMs).map((clip, index) => <View key={clip.id} style={styles.row}>
@@ -64,7 +70,7 @@ export function CanvasScreen({ projectId }: { projectId: string }) {
       </ScrollView>
       {track.clips.length === 0 && <Text style={styles.note}>Add footage in Edit to start connecting clips.</Text>}
     </View>)}
-    {graph.blocks.map(block => {
+    {section === 'workflow' && graph.blocks.map(block => {
       const result = evaluateCanvasBlock(project.timeline, graph, block.id);
       return <View key={block.id} style={[styles.block, source === block.id && styles.selected]}>
         <Text style={styles.label}>{CANVAS_BLOCK_LABELS[block.kind]}</Text>
@@ -115,6 +121,9 @@ const styles = StyleSheet.create({
   label: { color: theme.text, fontSize: 13 },
   note: { color: theme.textWeak, fontSize: 12, lineHeight: 18 },
   sequence: { paddingVertical: 12 },
+  tabs: { flexDirection: 'row', gap: 8 },
+  search: { minHeight: 44, borderColor: theme.line, borderWidth: 1, color: theme.text, padding: 10, borderRadius: 8 },
+  libraryItem: { minHeight: 80, padding: 14, borderColor: theme.line, borderWidth: 1, borderRadius: 10, gap: 8, marginTop: 12, backgroundColor: theme.surface },
   row: { flexDirection: 'row', alignItems: 'center' },
   arrow: { color: theme.textWeak, paddingHorizontal: 12 },
   card: { width: 180, borderColor: theme.textWeaker, borderWidth: 1, borderRadius: 12, padding: 16, gap: 10 },

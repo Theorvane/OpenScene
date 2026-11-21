@@ -12,7 +12,9 @@ OpenScene is a local video editor with a timeline, a connected video canvas and 
 
 A canvas connection moves its target after the source and closes gaps on that video track. Other tracks and titles retain their positions. Source ranges, playback speed and clip keyframe offsets are preserved. Card coordinates are a device-local layout preference.
 
-Choose a function in **Function block**, then **Add block**. Select a clip's **Output** and the block's matching video or audio input. Block outputs can feed other blocks, for example `Join videos → Video + audio ← Mix audio`. Join and mix blocks accept 2–8 inputs. **Apply block** arranges the connected clips from 0 seconds on output tracks; Timeline provides preview, undo and export. Original video sound remains alongside added audio. Unconnected clips and titles keep their positions. Block positions and connections are saved with the project; source card positions stay local. Reusing a clip twice in one output requires duplicating it in Timeline first.
+Use the searchable **Blocks** library to add a function. **Sources** imports media and adds source clips. Select a clip's **Output** and the block's matching video or audio input. Block outputs can feed other blocks, for example `Join videos → Video + audio ← Mix audio`. Join and mix blocks accept 2–8 inputs. **Apply block** arranges the connected clips from 0 seconds on output tracks; Timeline provides preview, undo and export. **Auto arrange** lays out the workflow and **Fit** frames it. Original video sound remains alongside added audio. Unconnected clips and titles keep their positions. Block positions and connections are saved with the project; source card positions stay local. Reusing a clip twice in one output requires duplicating it in Timeline first.
+
+Project settings, panel controls and appearance live in separate menus. Open **Assistant** when needed. See the [menu tree and layout](docs/editor-menu-layout.md).
 
 ## Editing assistant
 

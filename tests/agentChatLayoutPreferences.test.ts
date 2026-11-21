@@ -18,12 +18,12 @@ describe('agent chat layout preferences', () => {
   });
 
   it('Given missing or malformed storage, When parsed, Then the default chat width is used', () => {
-    expect(parseAgentChatLayoutPreference(null)).toEqual({ schemaVersion: 1, chatPanelWidth: AGENT_CHAT_LAYOUT_DEFAULT_WIDTH, chatPanelCollapsed: false });
-    expect(parseAgentChatLayoutPreference('{')).toEqual({ schemaVersion: 1, chatPanelWidth: AGENT_CHAT_LAYOUT_DEFAULT_WIDTH, chatPanelCollapsed: false });
+    expect(parseAgentChatLayoutPreference(null)).toEqual({ schemaVersion: 1, chatPanelWidth: AGENT_CHAT_LAYOUT_DEFAULT_WIDTH, chatPanelCollapsed: true });
+    expect(parseAgentChatLayoutPreference('{')).toEqual({ schemaVersion: 1, chatPanelWidth: AGENT_CHAT_LAYOUT_DEFAULT_WIDTH, chatPanelCollapsed: true });
     expect(parseAgentChatLayoutPreference(JSON.stringify({ schemaVersion: 1, chatPanel: { width: 'wide' } }))).toEqual({
       schemaVersion: 1,
       chatPanelWidth: AGENT_CHAT_LAYOUT_DEFAULT_WIDTH,
-      chatPanelCollapsed: false
+      chatPanelCollapsed: true
     });
   });
 
