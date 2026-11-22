@@ -6,6 +6,8 @@ mkdir -p /work/project /results
 tar -xf /input/.local-runtimes/verification-source.tar -C /work/project
 mkdir -p /work/project/external/opencut
 tar -xf /input/.local-runtimes/verification-opencut.tar -C /work/project/external/opencut
+mkdir -p /work/project/external/ffmpeg-skill
+tar -xf /input/.local-runtimes/verification-ffmpeg-skill.tar -C /work/project/external/ffmpeg-skill
 cd /work/project
 node --version > /results/tool-versions.txt
 ffmpeg -version >> /results/tool-versions.txt
@@ -19,7 +21,7 @@ node node_modules/typescript/bin/tsc --noEmit -p tsconfig.node.json
 node node_modules/typescript/bin/tsc --noEmit -p tsconfig.web.json
 node mobile/node_modules/typescript/bin/tsc --noEmit -p mobile/tsconfig.json
 if [[ -f /input/.local-runtimes/block-workflow-result.mp4 ]]; then
-  python3 .agents/skills/ffmpeg-skill/scripts/probe.py /input/.local-runtimes/block-workflow-result.mp4 --json > /results/block-output-probe.json
-  python3 .agents/skills/ffmpeg-skill/scripts/look.py /input/.local-runtimes/block-workflow-result.mp4 --tiles 3x2 --no-timecode --output /results/block-contact-sheet.png --overwrite --json > /results/block-look.json
+  python3 external/ffmpeg-skill/scripts/probe.py /input/.local-runtimes/block-workflow-result.mp4 --json > /results/block-output-probe.json
+  python3 external/ffmpeg-skill/scripts/look.py /input/.local-runtimes/block-workflow-result.mp4 --tiles 3x2 --no-timecode --output /results/block-contact-sheet.png --overwrite --json > /results/block-look.json
 fi
 node -e 'const r=require("/results/vitest.json"); console.log(JSON.stringify({success:r.success,passed:r.numPassedTests,failed:r.numFailedTests,pending:r.numPendingTests},null,2)); if(!r.success)process.exitCode=1'

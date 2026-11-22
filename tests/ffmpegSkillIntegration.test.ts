@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { AIMessage } from '@langchain/core/messages';
 import { describe, expect, it } from 'vitest';
@@ -42,10 +42,29 @@ describe('pinned ffmpeg-skill integration', () => {
     expect(manifest.files).toHaveProperty('mcp/server.py');
     expect(manifest.files).toHaveProperty('references/workflow.md');
     expect(manifest.files).toHaveProperty('docs/contract.md');
-    expect(execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()).toBe(manifest.commit);
+    // git archive omits .git; the complete manifest above remains mandatory there.
+    // Do not let git walk up to a parent checkout and compare its unrelated HEAD.
+    if (existsSync(resolve(root, '.git'))) {
+      expect(execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()).toBe(manifest.commit);
+    } else {
+      expect(existsSync(resolve(process.cwd(), '.git')), 'initialize the FFmpeg skill submodule in Git checkouts').toBe(false);
+    }
+    expect(read('UPSTREAM_PINS.md')).toContain(manifest.commit);
     const appPackage = JSON.parse(read('package.json'));
     expect(appPackage.dependencies).not.toHaveProperty('ffmpeg-skill');
     expect(appPackage.scripts).not.toHaveProperty('postinstall');
+  });
+
+  it('includes the pinned payload in the Git-free media verification snapshot', () => {
+    const snapshot = read('scripts/verify-media-analysis.ps1');
+    expect(snapshot).toContain("rev-parse 'HEAD:external/ffmpeg-skill'");
+    expect(snapshot).toContain("'external/ffmpeg-skill') archive $skillCommit");
+    expect(snapshot).toContain('verification-ffmpeg-skill.tar');
+    const verification = read('scripts/media-analysis/verify.sh');
+    expect(verification).toContain('tar -xf /input/.local-runtimes/verification-ffmpeg-skill.tar -C /work/project/external/ffmpeg-skill');
+    expect(verification).toContain('python3 external/ffmpeg-skill/scripts/probe.py');
+    expect(verification).toContain('python3 external/ffmpeg-skill/scripts/look.py');
+    expect(verification).not.toContain('.agents/skills/ffmpeg-skill/scripts/');
   });
 
   it('places the shared workflow in the actual desktop model system message', async () => {
