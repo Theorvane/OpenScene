@@ -103,9 +103,14 @@ export function applyEditorOperations(timeline: TimelineDocument, operations: re
           }
           case 'canvas.disconnect': case 'canvas.remove': {
             const blockId = id(op.id);
-            if (!graph.blocks.some(block => block.id === blockId)) throw new Error('Choose an existing block.');
+            const block = graph.blocks.find(block => block.id === blockId);
+            if (!block) throw new Error('Choose an existing block.');
+            const input = action === 'canvas.disconnect' ? number(op.input) : undefined;
+            if (input !== undefined && (!Number.isInteger(input) || input < 0 || input >= block.inputCount)) {
+              throw new Error('Choose an input on an existing block.');
+            }
             changed = { ...next, canvas: { ...graph, blocks: action === 'canvas.remove' ? graph.blocks.filter(block => block.id !== blockId) : graph.blocks,
-              connections: graph.connections.filter(edge => action === 'canvas.remove' ? edge.toId !== blockId && edge.fromId !== blockId : edge.toId !== blockId || edge.input !== number(op.input)) } }; break;
+              connections: graph.connections.filter(edge => action === 'canvas.remove' ? edge.toId !== blockId && edge.fromId !== blockId : edge.toId !== blockId || edge.input !== input) } }; break;
           }
           case 'canvas.template': {
             if (op.sourceIds !== undefined && (!Array.isArray(op.sourceIds) || op.sourceIds.some(value => typeof value !== 'string'))) throw new Error('Source ids must be an array.');
