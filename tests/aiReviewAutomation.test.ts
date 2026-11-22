@@ -48,7 +48,7 @@ describe("AI pull request automation", () => {
 
     expect(workflow).toContain('| [.number, .baseRefName] | @tsv')
     expect(workflow).toContain("while IFS=$'\\t' read -r number base; do")
-    expect(workflow).toMatch(/if \[ "\$base" = "main" \]; then\s+gh pr merge "\$number" --repo "\$GITHUB_REPOSITORY" --auto --merge --delete-branch\s+else\s+gh pr merge "\$number" --repo "\$GITHUB_REPOSITORY" --auto --squash --delete-branch\s+fi/)
+    expect(workflow).toMatch(/if \[ "\$base" = "main" \]; then\s+gh pr merge "\$number" --repo "\$GITHUB_REPOSITORY" --auto --merge\s+else\s+gh pr merge "\$number" --repo "\$GITHUB_REPOSITORY" --auto --squash --delete-branch\s+fi/)
     expect(workflow).not.toContain("--admin")
   })
 })

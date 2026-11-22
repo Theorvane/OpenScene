@@ -35,9 +35,9 @@ jobs:
             if gh pr view "$number" --repo "$GITHUB_REPOSITORY" --json labels --jq '.labels[].name' | grep -Fxq 'ai-review-requested'; then
               gh api --method DELETE "repos/${GITHUB_REPOSITORY}/issues/${number}/labels/ai-review-requested"
             fi
-            # Release promotion preserves dev's ancestry; main only permits merge commits.
+            # Release promotion preserves dev's ancestry and its long-lived branch.
             if [ "$base" = "main" ]; then
-              gh pr merge "$number" --repo "$GITHUB_REPOSITORY" --auto --merge --delete-branch
+              gh pr merge "$number" --repo "$GITHUB_REPOSITORY" --auto --merge
             else
               gh pr merge "$number" --repo "$GITHUB_REPOSITORY" --auto --squash --delete-branch
             fi
