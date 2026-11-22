@@ -49,12 +49,14 @@ Connect a supported chat provider in Settings or configure a local Ollama model.
 Use Node.js 22 or newer and initialize the pinned OpenCut submodule.
 
 ```sh
-git submodule update --init external/opencut
+git -c core.autocrlf=false submodule update --init --recursive
 npm ci
 npm run dev
 ```
 
 FFmpeg is required for desktop export and source analysis. The Windows setup executable installs it through WinGet when no existing copy is found. Other packages and source builds use `ffmpeg` on `PATH` or an absolute `VIDEO_TOOL_FFMPEG_PATH`.
+
+Keep the pinned skill submodule's original line endings when initializing on Windows; its manifest verifies exact bytes. The command above initializes both OpenCut and the FFmpeg skill without CRLF conversion.
 
 For local transcription, explicitly run `npm run setup:transcription`. This downloads pinned whisper.cpp binaries and a model into ignored local storage and verifies checksums. See [.env.example](.env.example) for runtime settings.
 
@@ -77,7 +79,7 @@ Media tests need executable FFmpeg and FFprobe. The [Linux verification environm
 
 ## Mobile
 
-Mobile provides **Edit**, **Canvas**, **Library** and an editing assistant over the shared core. It includes the same block catalog, quick starts and batch operations. Its touch canvas edits connections and saved layout settings; free-position cards and Fit are desktop controls. Chat-based frame inspection and speech analysis are desktop capabilities.
+Mobile provides **Edit**, **Canvas**, **Library** and an editing assistant over the shared core. Its graph fills the workspace with pannable/zoomable cards and connections, a floating add/library button and contextual bottom sheets. It includes the same blocks, quick starts, saved node layout and batch operations. Chat-based frame inspection and speech analysis remain desktop capabilities.
 
 Mobile rendering uses native AVFoundation/Media3 modules and needs a development build; Expo Go cannot load the exporter. See the [mobile guide](mobile/README.md). Desktop verification does not establish mobile device behavior.
 

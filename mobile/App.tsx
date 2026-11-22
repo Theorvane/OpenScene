@@ -286,9 +286,9 @@ function Shell() {
         for the opposite, and the Video tab already does it for frame extraction.
       */}
       {!isExportAvailable && (
-        <Text style={styles.limit}>
-          Export needs a development build — Expo Go carries only the modules baked into it, and the renderer is this
-          project&apos;s own. Everything else on this screen works.
+        <Text style={[styles.limit, tab === 'canvas' && { paddingVertical: 5 }]}>
+          {tab === 'canvas' ? 'Export needs a development build.' : <>Export needs a development build — Expo Go carries only the modules baked into it, and the renderer is this
+          project&apos;s own. Everything else on this screen works.</>}
         </Text>
       )}
 
@@ -321,10 +321,10 @@ function Shell() {
         </Pressable>
       )}
 
-      <Text style={styles.workspaceIdentity}>OPENSCENE / EDIT</Text>
+      {tab !== 'canvas' && <Text style={styles.workspaceIdentity}>OPENSCENE / EDIT</Text>}
       <View key={route.projectId} style={styles.body} onLayout={(event) => setBodyTop(event.nativeEvent.layout.y)}>
         <RetainedScreen active={tab === 'edit'}><EditScreen active={tab === 'edit'} topInset={0} projectId={route.projectId} /></RetainedScreen>
-        {tab === 'canvas' && <CanvasScreen projectId={route.projectId} />}
+        {tab === 'canvas' && <CanvasScreen projectId={route.projectId} onOpenEditor={sendToEditing} />}
         {tab === 'agent' && <AgentScreen topInset={0} keyboardOffset={bodyTop} projectId={route.projectId} />}
         {tab === 'library' && <LibraryScreen topInset={0} keyboardOffset={bodyTop} projectId={route.projectId} onOpenEditor={sendToEditing} />}
       </View>

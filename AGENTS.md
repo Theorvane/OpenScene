@@ -101,7 +101,7 @@ A feature is not finished on one of them.
   and image adapters returning a Node `Buffer` — each caught by the mobile
   typecheck and by nothing else.
 - **Say so when a surface genuinely cannot have it.** Some things are honestly
-  platform-bound: window capture, free-position canvas cards and chat-based frame/speech inspection are desktop capabilities. Native export requires a mobile development build and cannot run in Expo Go. Unsupported capabilities stay visible with the reason, in the UI and
+  platform-bound: window capture and chat-based frame/speech inspection are desktop capabilities. Native export requires a mobile development build and cannot run in Expo Go. Unsupported capabilities stay visible with the reason, in the UI and
   in the pull request. Silence reads as an oversight; a stated limit reads as a
   decision.
 - **Verify on both.** `npm run typecheck && npm test && npm run build` at the

@@ -65,7 +65,7 @@ Source **Use** checkboxes also select sources for arrangement. Block **Select** 
 
 An empty selection arranges all nodes. Auto arrange always arranges the whole graph. Layout changes are saved with the project and can be undone. They do not change connections, source times or media settings. Extremely large arrangements are refused rather than silently clamped into overlapping positions; select a smaller group or use a grid.
 
-Desktop additionally supports card dragging, zoom, scrolling and Fit. Mobile saves the same layout operations through touch controls and displays a compact workflow rather than a free-position viewport.
+Desktop and mobile support card positioning, zoom and Fit. Mobile uses a graph viewport with drag/pinch navigation, a floating add/library button and contextual bottom sheets. Enable multi-select to select sources/blocks; open Canvas actions for arrangement. Native touch behavior requires development-device validation.
 
 ## Agent access
 

@@ -52,9 +52,9 @@ Native FFprobe is preferred. Windows can use a prepared local Linux container wh
 
 ## Mobile
 
-Edit, Canvas, Library and Assistant share the core. Mobile Canvas exposes quick starts, blocks, typed connections, settings, final-output application and saved layout operations in a touch layout. Its agent uses shared batch edits and native export after approval.
+Edit, Canvas, Library and Assistant share the core. Mobile Canvas is a graph-first touch workspace with pan/pinch/zoom/Fit, draggable source/block cards and coloured connections. A compact toolbar contains undo/redo/actions; a floating add button opens Quick starts/Blocks/Media/Layers. Tapping a node opens a contextual bottom sheet for its inputs and settings. Multi-select and arrangement live in actions, while a persistent bottom bar applies the final output. Its agent uses shared batch edits and native export after approval.
 
-Mobile uses native composition/export. Free-position cards, viewport Fit and chat-based frame/speech inspection remain desktop capabilities. Mobile changes require development-client checks; desktop tests do not establish device behavior.
+Mobile uses native composition/export. Chat-based frame/speech inspection remains a desktop capability. Mobile changes require development-client checks; browser-native adapters and desktop tests do not establish native gesture or device export behavior.
 
 ## Compatibility
 
