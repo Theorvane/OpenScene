@@ -10,7 +10,7 @@ Canvas assembles imported media using typed function blocks. A graph describes p
 4. Adjust settings and choose **Final workflow output**.
 5. **Apply workflow**, then **Review timeline**. Save and export the reviewed cut.
 
-An empty quick-start selection uses matching clips in timeline order. Explicit selection order is retained. Quick starts select between one and eight matching clips per joined/mixed input set; picture in picture needs exactly two videos.
+An empty quick-start selection uses matching clips by start time across tracks, using preserved input times when available. Equal start times retain track/clip order. Explicit selection order is retained. Quick starts select between one and eight matching clips per joined/mixed input set; picture in picture needs exactly two videos.
 
 | Quick start | Connections |
 | --- | --- |

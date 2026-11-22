@@ -13,9 +13,12 @@ export type CanvasTemplateId = (typeof CANVAS_TEMPLATES)[number]['id'];
 
 export function createCanvasTemplate(timeline: TimelineDocument, graph: VideoCanvasGraph, templateId: CanvasTemplateId, prefix: string, selectedIds?: readonly string[]): { readonly graph: VideoCanvasGraph; readonly rootId: string } {
   if (!CANVAS_TEMPLATES.some(template => template.id === templateId)) throw new Error('Choose a supported quick start.');
-  const sources = canvasSourceTimeline(timeline, graph).tracks.flatMap(track => track.clips.map(clip => ({ id: clip.id, kind: track.kind })));
+  const sources = canvasSourceTimeline(timeline, graph).tracks.flatMap(track => track.clips.map(clip => ({ id: clip.id, kind: track.kind, startMs: clip.timelineStartMs })));
   if (selectedIds && (new Set(selectedIds).size !== selectedIds.length || selectedIds.some(id => !sources.some(source => source.id === id)))) throw new Error('Choose existing, distinct source clips.');
-  const selected = selectedIds?.length ? selectedIds.map(id => sources.find(source => source.id === id)!) : sources;
+  // Automatic selection follows time across lanes; stable ties retain track/clip order.
+  // Explicit user selections remain authoritative, including their order.
+  const selected = selectedIds?.length ? selectedIds.map(id => sources.find(source => source.id === id)!)
+    : sources.sort((left, right) => left.startMs - right.startMs);
   const videos = selected.filter(source => source.kind === 'video').map(source => source.id);
   const audio = selected.filter(source => source.kind === 'audio').map(source => source.id);
   let next = graph, count = 0;
