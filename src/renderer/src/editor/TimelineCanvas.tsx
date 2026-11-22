@@ -168,7 +168,7 @@ function trackToggleStyle(isOn: boolean, tone: 'danger' | 'warning' | 'primary')
  * the two makes the mismatch unrepresentable: until the answer matches the asked
  * question, the answer is null.
  */
-function useAssetPlaybackUrl(projectId: string, assetId: string): string | null {
+export function useAssetPlaybackUrl(projectId: string, assetId: string): string | null {
   const [resolved, setResolved] = useState<{ readonly assetId: string; readonly url: string } | null>(null);
 
   useEffect(() => {
@@ -566,11 +566,8 @@ export function TimelineCanvas({ editor, id }: TimelineCanvasProps): ReactElemen
             >
               {ICONS.trash}
             </button>
-            <button type="button" disabled style={DISABLED_TOOL_BUTTON_STYLE} aria-label="Separate audio (coming soon)" title="Separate audio — coming soon">
+            <button type="button" disabled={selectedClip?.asset?.kind !== 'video' || editor.isBusy} onClick={() => void editor.detachSelectedClipAudio()} style={selectedClip?.asset?.kind !== 'video' || editor.isBusy ? DISABLED_TOOL_BUTTON_STYLE : TOOL_BUTTON_STYLE} aria-label="Detach selected clip audio" title="Detach audio to an aligned audio track">
               {ICONS.separateAudio}
-            </button>
-            <button type="button" disabled style={DISABLED_TOOL_BUTTON_STYLE} aria-label="Freeze frame (coming soon)" title="Freeze frame — coming soon">
-              {ICONS.freeze}
             </button>
           </div>
         </div>

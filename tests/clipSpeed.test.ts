@@ -12,7 +12,7 @@ import { isValidClipEffects } from '../src/shared/timelineEffects';
 import { clipDurationMs, clipSourceSpanMs, clipSpeed, playheadForClipSelection, sourceTimeMsAt } from '../src/shared/timelineClipGeometry';
 import { createInitialTimeline } from '../src/shared/timelineLogic';
 import { parseTimelineDocument } from '../src/shared/timelineDocumentValidators';
-import { DEFAULT_CLIP_EFFECTS, type TimelineDocument } from '../src/shared/timelineTypes';
+import { DEFAULT_AUDIO_TRACK_MIX, DEFAULT_CLIP_EFFECTS, type TimelineDocument } from '../src/shared/timelineTypes';
 import { discoverFfmpeg } from '../src/main/ffmpegDiscovery';
 import { ffprobePathFor } from '../src/main/exportMeasurement';
 
@@ -279,6 +279,35 @@ afterEach(async () => {
 });
 
 describe('a rendered retime', () => {
+  it('keeps delayed, retimed low-rate audio mixes at real timestamps and audible after the delay', async () => {
+    const discovery = await discoverFfmpeg();
+    if (discovery.kind === 'unavailable') throw new Error(discovery.reason);
+    directory = await mkdtemp(join(tmpdir(), 'openscene-delayed-mix-'));
+    const picture = join(directory, 'picture.mp4'), voice = join(directory, 'voice.wav'), outputPath = join(directory, 'mix.mp4');
+    await execFileAsync(discovery.executablePath, ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc=size=64x48:rate=24:duration=4', '-pix_fmt', 'yuv420p', '-y', picture]);
+    await execFileAsync(discovery.executablePath, ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=22050:duration=2', '-y', voice]);
+    const base = timelineWithSpeed(2), video = { ...clipOf(base), timelineStartMs: 500, effects: { ...DEFAULT_CLIP_EFFECTS, speed: 2, volume: 0 } };
+    const timeline: TimelineDocument = { ...base, tracks: [
+      { id: 'video', name: 'Video', kind: 'video', clips: [video] },
+      ...[0, 1].map(index => ({ id: `voice-${index}`, name: 'Voice', kind: 'audio' as const, mix: { ...DEFAULT_AUDIO_TRACK_MIX }, clips: [{ ...video, id: `audio-${index}`, assetId: 'voice', sourceEndMs: 2000, sourceDurationMs: 2000, effects: { ...video.effects, volume: 0.3 } }] }))
+    ] };
+    const { args } = compileFfmpegTimeline({ timeline, assetPaths: new Map([['asset-a', picture], ['voice', voice]]), outputPath, width: 64, height: 48, frameRate: 24 });
+    await execFileAsync(discovery.executablePath, args);
+    const { stdout } = await execFileAsync(ffprobePathFor(discovery.executablePath), ['-v', 'error', '-select_streams', 'a', '-show_entries', 'stream=start_time,duration', '-of', 'json', outputPath]);
+    const audio = JSON.parse(stdout).streams[0];
+    expect(Number(audio.start_time)).toBeGreaterThanOrEqual(0);
+    expect(Number(audio.start_time)).toBeLessThan(0.1);
+    expect(Number(audio.duration)).toBeGreaterThan(1.4);
+    expect(Number(audio.duration)).toBeLessThan(1.6);
+    const decoded = await execFileAsync(discovery.executablePath, ['-hide_banner', '-loglevel', 'error', '-i', outputPath, '-vn', '-ac', '1', '-ar', '22050', '-f', 's16le', 'pipe:1'], { encoding: 'buffer' });
+    const rms = (start: number, end: number): number => {
+      let sum = 0, count = 0;
+      for (let offset = Math.floor(start * 22050) * 2; offset < Math.min(decoded.stdout.length, Math.floor(end * 22050) * 2); offset += 2) { sum += decoded.stdout.readInt16LE(offset) ** 2; count++; }
+      return Math.sqrt(sum / count);
+    };
+    expect(rms(0, 0.4)).toBeLessThan(5);
+    expect(rms(0.6, 1.2)).toBeGreaterThan(100);
+  }, 60_000);
   it('produces a file of the length the timeline promised, with its sound retimed too', async () => {
     const discovery = await discoverFfmpeg();
     if (discovery.kind === 'unavailable') throw new Error(discovery.reason);

@@ -27,10 +27,10 @@ const ONBOARDING_STEPS = [
     bullets: ['Configure FFmpeg through an absolute path or PATH discovery.', 'Grant Screen Recording permission when macOS asks.', 'OpenScene never shows FFmpeg paths or arguments in the renderer.']
   },
   {
-    kicker: 'Voice',
-    title: 'Voice setup',
-    body: 'Voice Generation uses consent-based samples and your configured local narration workflow.',
-    bullets: ['Use only samples you own or have permission to use.', 'Samples and generated audio stay in local app storage.', 'Local Qwen is user-configured; OpenScene does not download models.']
+    kicker: 'Analysis',
+    title: 'Video analysis',
+    body: 'Use frame inspection and timestamped transcripts to find the parts of your footage you want to keep.',
+    bullets: ['A vision model reads extracted frames with source timecodes.', 'Local whisper.cpp transcribes the selected audio range.', 'Approve the proposed edit before applying it.']
   },
   {
     kicker: 'Edit Agent',
@@ -41,14 +41,14 @@ const ONBOARDING_STEPS = [
   {
     kicker: 'Privacy',
     title: 'Privacy boundary',
-    body: 'OpenScene keeps recordings, imports, projects, voice profiles, TTS output, and exports local unless a future reviewed provider operation is explicitly authorized.',
-    bullets: ['No analytics, crash reporting, or account system is implemented.', 'Provider seams are configuration surfaces, not hidden uploads.', 'Delete local samples and projects from inside the app.']
+    body: 'Project media and exports stay local. Frame images and transcript text are shared with your selected chat model when you request analysis.',
+    bullets: ['Connect your preferred model in Settings.', 'Review source analysis and editing approvals.', 'Manage saved projects inside the app.']
   },
   {
     kicker: 'Start',
     title: 'Start local editing',
-    body: 'You can revisit setup details in Settings. Start on Home by choosing Editing, Voice Generation, or Video Generation.',
-    bullets: ['Editing opens the local timeline workspace.', 'Voice Generation manages narration assets.', 'Video Generation manages configured result workflows.']
+    body: 'Open a project, import footage and connect clips on the canvas. Refine the result on the timeline.',
+    bullets: ['Select a card to preview its source range.', 'Connect Output to Input and apply the new order.', 'Save your sequence, then export the finished cut.']
   }
 ] as const satisfies readonly OnboardingStep[];
 

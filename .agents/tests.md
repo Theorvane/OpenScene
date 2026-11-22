@@ -6,8 +6,13 @@ Core checks:
 npm run typecheck
 npm test
 npm run build
+cd mobile
+npm ci
+npm run typecheck
 ```
 
-Vitest uses `tests/**/*.test.ts` with a Node environment. Use targeted tests for stores, validators, timeline logic, FFmpeg export boundaries, and local TTS config logic when touching those areas.
+Vitest uses `tests/**/*.test.ts` with a Node environment. Target stores, project/graph validators, timeline rules, canvas processing/templates/layout, atomic editing and registered tool dispatch when touching those areas. Initialize the OpenCut submodule first.
 
-Manual QA is still required for OS permission flows, selected-window capture, real FFmpeg export, and real local Qwen wrapper execution. Automated tests cannot grant macOS Screen Recording permission or prove voice sample quality.
+Media tests require executable FFmpeg/FFprobe; the Linux environment in `docs/media-analysis-environment.md` tests committed HEAD without skipping Windows-restricted cases. Verify real frames/audio, source ranges, delay/speed, Apply/reapply, saved layout and Undo for changed media workflows.
+
+Manual checks remain necessary for OS permissions, UI interaction and mobile native exports. Mobile typecheck is required but does not replace a development-client run. Scripted tool calls do not prove a model conversation. For docs-only work, check links, stale feature claims and existing documentation-sensitive tests; do not invent new runtime evidence.

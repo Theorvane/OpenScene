@@ -25,6 +25,7 @@ export type ExportPromise = {
 
 /** What the finished file turned out to be. */
 export type ExportMeasurement = {
+  readonly verificationRuntime?: 'native' | 'linux-container';
   readonly widthPx: number;
   readonly heightPx: number;
   /** Absent when the container does not report one; a missing rate is not a fault. */
@@ -44,7 +45,7 @@ export type ExportProblem = {
 export type ExportReview =
   /** Nothing could be measured — an honest gap, not a pass. */
   | { readonly checked: false; readonly why: string }
-  | { readonly checked: true; readonly ok: boolean; readonly problems: readonly ExportProblem[] };
+  | { readonly checked: true; readonly ok: boolean; readonly problems: readonly ExportProblem[]; readonly verificationRuntime?: 'native' | 'linux-container' };
 
 /**
  * How far off is still the same file.
@@ -68,12 +69,14 @@ export function reviewExport(promise: ExportPromise, measurement: ExportMeasurem
   }
 
   const problems: ExportProblem[] = [];
+  const runtime = measurement.verificationRuntime === undefined ? {} : { verificationRuntime: measurement.verificationRuntime };
 
   if (measurement.durationMs <= 0 || measurement.widthPx <= 0 || measurement.heightPx <= 0) {
     // A file with no picture and no length is not a near miss to be measured
     // against tolerances; nothing else said about it would mean anything.
     return {
       checked: true,
+      ...runtime,
       ok: false,
       problems: [{ kind: 'empty', detail: 'The finished file has no picture in it.' }]
     };
@@ -113,12 +116,12 @@ export function reviewExport(promise: ExportPromise, measurement: ExportMeasurem
     problems.push({ kind: 'sound', detail: 'The timeline has sound on it and the file has none.' });
   }
 
-  return { checked: true, ok: problems.length === 0, problems };
+  return { checked: true, ok: problems.length === 0, problems, ...runtime };
 }
 
 /** One line for a person, whatever the review turned out to be. */
 export function exportReviewSummary(review: ExportReview): string {
   if (!review.checked) return review.why;
-  if (review.ok) return 'The finished file matches the cut.';
+  if (review.ok) return 'The finished file matches the cut.' + (review.verificationRuntime === 'linux-container' ? ' Verified with Linux FFprobe.' : '');
   return review.problems.map((problem) => problem.detail).join(' ');
 }

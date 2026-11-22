@@ -16,6 +16,8 @@ import {
 import { buildProgramMonitorPreview, type ProgramMonitorAudioLayer, type ProgramMonitorVisualLayer } from './programMonitorPreview';
 import { titlePreviewLayout, titlesAt } from '../../../shared/titlePreviewLayout';
 import { resolvedTitleStyle } from '../../../shared/captionStyle';
+import { titleFontCssFamily, titleShadowColor } from '../../../shared/titleTypography';
+import { useTitleFontFaces } from './useTitleFontFaces';
 import { outputFrameFor } from '../../../shared/outputFrame';
 import { DEFAULT_EXPORT_FRAME, EXPORT_FRAME_CHANGE_EVENT, readExportFramePreference } from './exportFramePreference';
 
@@ -239,6 +241,7 @@ export function ProgramMonitor({ editor, exportControl }: ProgramMonitorProps): 
   }, []);
 
   const visibleTitles = titlesAt(editor.project?.timeline.titles, editor.playheadMs);
+  const titleFonts = useTitleFontFaces(visibleTitles);
   const [framePreference, setFramePreference] = useState(DEFAULT_EXPORT_FRAME);
   useEffect(() => {
     const projectId = editor.project?.id;
@@ -322,7 +325,8 @@ export function ProgramMonitor({ editor, exportControl }: ProgramMonitorProps): 
             Titles, over the picture and under the safe margins — the margins
             exist to be checked against the words, so they have to stay on top.
           */}
-          {visibleTitles.length > 0 && (
+          {titleFonts.error && <span role="alert">{titleFonts.error}</span>}
+          {visibleTitles.length > 0 && titleFonts.ready && (
             <div className="preview-titles" aria-label="Titles at the playhead">
               {visibleTitles.map((title) => {
                 const layout = titlePreviewLayout(title, frameSize, titleReferenceFrame ?? undefined);
@@ -338,6 +342,10 @@ export function ProgramMonitor({ editor, exportControl }: ProgramMonitorProps): 
                       color: title.color,
                       fontSize: `${layout.fontSizePx}px`,
                       fontWeight: titleStyle.fontWeight === 'bold' ? 700 : 400,
+                      fontFamily: `"${titleFontCssFamily(titleStyle.fontFamily ?? 'sans')}"`,
+                      fontSynthesis: 'none',
+                      textShadow: titleStyle.shadow && titleStyle.shadow.opacity > 0
+                        ? `${titleStyle.shadow.offsetX * layout.fontSizePx / title.sizePx}px ${titleStyle.shadow.offsetY * layout.fontSizePx / title.sizePx}px 0 ${titleShadowColor(titleStyle.shadow)}` : undefined,
                       backgroundColor: background,
                       padding: `${layout.paddingPx}px`,
                       WebkitTextStroke: layout.outlineWidthPx > 0 ? `${layout.outlineWidthPx}px ${titleStyle.outlineColor}` : undefined,

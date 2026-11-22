@@ -1,40 +1,29 @@
 # OpenScene mobile
 
-A React Native app that consumes the desktop app's domain code rather than a copy of it.
+OpenScene mobile edits supplied media through **Edit**, **Canvas**, **Library** and an editing assistant. It shares timeline and workflow rules with the desktop editor.
 
-## Why this exists
+## Editing
 
-Choosing between React Native and Flutter came down to one question about this repository: does `src/shared` — 4,105 lines of timeline model, clip placement, shot planning, pricing, and narration timing, with most of the repo's subtler rules and tests — cross to mobile unchanged?
+Edit refines clips, tracks, effects, keyframes, titles and captions. Canvas provides the same 12 blocks and four quick starts, with typed inputs, parameter controls, final-output application and undo. Graph changes become timeline edits when applied.
 
-This app is the answer. It imports those modules directly and runs them.
+Source selection chooses quick-start inputs. Workflow controls connect/disconnect inputs, expand join/mix inputs and remove blocks. Node arrangement saves flow/grid/alignment/spacing coordinates for the shared project; the phone displays a compact touch workflow. Free-position cards and viewport Fit are desktop controls.
 
-## The seam
+Processing keeps original input ranges so repeated application is stable. Refresh inputs explicitly adopts the current timeline. Imported media and earlier project metadata remain readable. See [canvas workflows](../docs/canvas-workflows.md).
 
-Nothing is copied or vendored:
+## Assistant and privacy
 
-- `metro.config.js` adds `../src/shared` as a watch folder and maps it to `@openvideo/shared`. Only that directory, not the repository root — watching the root would pull the Electron sources into the bundler's graph.
-- `tsconfig.json` maps the same alias and includes `../src/shared/**/*.ts`, so the mobile typecheck covers the shared core as the app actually sees it.
+The assistant can discover capabilities, inspect the timeline/graph, apply the 34 shared batch editing operations and start native export through approval. Approved batches save once after validation; a rejected batch changes nothing. Chat-based source frame and speech inspection remain desktop capabilities.
 
-That second part earned its keep immediately: it caught `models.ts` and `updater.ts` using `NodeJS.Platform`, a type that exists only inside a Node type environment. The shared core had a quiet dependency the desktop build could never reveal. `HostPlatform` replaced it, and `tests/sharedCorePortability.test.ts` now fails if any shared module reaches for a Node built-in, Electron, the DOM, or a `NodeJS.*` type.
+The chosen provider receives authorized chat/project context and can charge the user's account. Credentials use platform secure storage. Anonymous usage counts go to the publisher's OpenPanel instance; the Settings switch disables reporting. Event values cannot contain prompts, paths or credentials.
 
-## Access and provider costs
+## Develop and verify
 
-The app is free, with no subscription, paid tier, or ads. Video editing and local export do not need
-a provider account. AI generation uses accounts the user connects; the provider may charge for those
-requests, and the app asks for spending permission before making them. Mobile usage reporting is
-optional in Settings. `RELEASING.md` covers the store disclosures for the ad-free build.
-
-## Running it
-
-```bash
+```sh
 cd mobile
-npm install
-npm run ios      # or: npm run android
+npm ci
 npm run typecheck
 ```
 
-## What is not here
+The native export module requires an Expo development build; Expo Go cannot load it. AVFoundation renders on iOS and Media3 on Android. Rendering and Photos/share delivery are separate outcomes. Mobile supports automatic-caption burn choice; separate subtitle sidecar delivery remains unavailable.
 
-The video pipeline. `ffmpegTimelineCompiler` and its neighbours are built on spawning a system FFmpeg binary, which a phone does not have, and `ffmpeg-kit` — the obvious substitute — was archived by its maintainer in early 2025. Replacing it means `AVFoundation` on iOS and `Media3 Transformer` on Android, which is the real work and the real risk. It is framework-independent, and it does not belong in a scaffold.
-
-The likely shape of this app is a companion rather than a replacement: shoot, generate in the cloud, approve the spend, edit on the desktop. That needs the generation studios and the approval surface, not a timeline editor.
+Follow [native setup](README-native.md) and repeat edit → canvas apply → review → export on a development device. Desktop tests and mobile typecheck do not replace device validation. [RELEASING.md](RELEASING.md) covers packaging and store declarations.

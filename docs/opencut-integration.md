@@ -1,92 +1,29 @@
-# OpenCut editor integration
+# OpenCut presentation integration
 
-OpenScene tracks the MIT-licensed [Theorvane/OpenCut](https://github.com/Theorvane/OpenCut)
-fork at `external/opencut` as a pinned Git submodule. Its upstream is
-[OpenCut-app/OpenCut](https://github.com/OpenCut-app/OpenCut). Initialize after
-cloning with `git submodule update --init external/opencut`.
+OpenScene uses the MIT-licensed [Theorvane/OpenCut](https://github.com/Theorvane/OpenCut) fork at `external/opencut` as a pinned Git submodule. Initialize it with `git submodule update --init external/opencut`. Pins advance through reviewed fork changes; upstream updates are not automatic.
 
-The pinned commit is a reviewed merge on the independent `Theorvane/OpenCut`
-`main` branch. OpenScene does not track upstream changes automatically.
-
-## Runtime boundary
+## Ownership
 
 | Responsibility | Owner |
-|---|---|
-| Workbench layout, shared header, tool rail, media list, and edit-point controls | OpenCut |
-| Project identity, media and timeline state, editing decisions, and desktop/mobile parity | OpenScene shared model and host adapter |
-| Local project files, asset URLs, FFmpeg MP4 export, and Agent tools | OpenScene main process |
-| Theme preference and save/export actions in the desktop workbench | OpenScene host, passed to OpenCut as values and callbacks |
+| --- | --- |
+| Imported editor workspace, header, tool rail, media list and edit-point presentation | Pinned OpenCut components. |
+| Project identity, timeline state, graph, processing and editing decisions | OpenScene controller and shared core. |
+| Canvas library, blocks, node layout and workflow application | OpenScene UI and shared rules. |
+| Local files, credentials, FFmpeg, transcription and agent tools | OpenScene main process. |
+| Mobile interface and native export | Mobile host over shared editing rules. |
 
-The host adapter in `src/renderer/src/editor/` converts one live OpenScene
-project into OpenCut presentation props and routes UI intent back into the
-OpenScene editor controller. OpenCut's `EditorHeader` renders the same project
-and theme controls in its web route and in the desktop host; it receives state
-and callbacks and does not save projects or run exports itself. The web route
-supplies its own browser session state and WebM action. It does not synchronize
-that session with an OpenScene desktop project.
+Adapters in `src/renderer/src/editor/` supply live panels, state and callbacks. Imported `EditorWorkspace`, `EditorHeader`, `EditorToolRail`, `MediaLibrary` and `EditPointNavigation` components do not become another authority for the desktop project. OpenCut's standalone web route has its own browser session; that session and WebM behavior are not OpenScene project state or export capabilities.
 
-A desktop media import enters through OpenScene's local project store, appears
-in OpenCut's media list, and reaches the shared placement rule through the
-host callback. Selection and playback use that same project in the Program
-Monitor; saving and Agent tools then read or update the local project. The
-mobile editor uses the same shared editing rules while rendering its own
-phone-sized interface.
+## Editing surfaces
 
-OpenCut's web `/editor` route supports a local Classic-inspired workflow.
-OpenScene renders its editor through OpenCut's `EditorWorkspace` component,
-which now owns the visible header, panel frames, responsive workbench grid, and
-timeline frame. The host supplies the live panels as slots. It also compiles these controls
-directly from the same source:
+Timeline combines the hosted workbench with OpenScene's media dock, Program Monitor, Inspector, timeline, splitters and panel preferences. Project/View/Appearance controls and Windows custom menus route to existing host actions. OpenScene theme tokens style the whole interface.
 
-- `EditorToolRail` — project, media, audio, and text tabs with keyboard access;
-- `MediaLibrary` — search, sort, unused filter, grid/list view, import, drag, and placement controls, including direct placement on a double-click;
-- `EditPointNavigation` — previous/next timeline boundary buttons.
+Canvas switches the central workspace to OpenScene's graph. Its catalog, templates, settings, source snapshots, node coordinates and evaluation belong to the shared core. Applying a graph updates the same timeline used by the hosted editor and FFmpeg export.
 
-OpenScene supplies its project dock, Program Monitor, inspector, timeline,
-layout splitters, floating panels, and metadata probe to the OpenCut workspace.
-They all receive the existing `TimelineEditorController`, so opening a project,
-editing clips, saving, agent actions, and native MP4 export still act on one
-OpenScene project. The OpenCut web route supplies its own browser panels to the
-same workspace; no browser-local clips or object URLs enter OpenScene.
-OpenCut's host stylesheet reads OpenScene theme tokens from the document root,
-so light, dark, and preset changes restyle the workspace without a second theme
-state. The standalone OpenCut web route uses the same panel geometry and offers a
-persisted light/dark choice, initially following the system preference. Its
-theme stays local to that route; the OpenScene host follows the existing app
-theme and preset selectors without a second editor-specific setting. Both
-workbench headers provide a theme toggle and the four named preset choices.
-The OpenScene controls call its existing `ThemeProvider`, so the whole app
-follows either change. Selecting a timeline clip on desktop or mobile focuses
-the Program Monitor on that clip when the playhead was elsewhere, while keeping
-the current frame when it is already inside the clip.
+Agent tools save current project edits before execution and notify the host after mutations. They operate on shared timeline/graph data without OpenCut browser storage or Electron internals. Filmstrips and waveforms use validated `video-tool-asset:` URLs, never exposed filesystem paths.
 
-The side Agent uses OpenScene's existing approved timeline tools on the same
-project shown inside the OpenCut frame. Before an Agent turn or approved edit,
-the host saves any unsaved timeline so the tools read the current cut. Tool
-changes notify the open editor, which reloads the saved project. The Agent does
-not need access to OpenCut's browser storage or Electron internals.
+## Development
 
-Filmstrip decoding and waveform sampling use the local `video-tool-asset:` URL.
-The asset protocol allows only the local renderer origin for these reads; it
-never exposes a filesystem path to the web component.
+Keep the submodule initialized before root typecheck, tests and build; renderer TypeScript includes imported presentation components. Update the fork through its own review before advancing the OpenScene pin. Preserve main/preload/renderer isolation and mobile parity for editing rules. A newer presentation pin does not by itself migrate the project model or introduce another render engine.
 
-The OpenScene adapters in `src/renderer/src/editor/` supply project assets,
-callbacks, labels, and drag payloads. Media filtering, usage counts, edit-point
-calculation, timeline operations, and mobile parity remain in `src/shared/`.
-The desktop still owns its project, monitor, FFmpeg export, and agent tools.
-The OpenCut web route's browser-local timeline model is separate and is not
-used to decide OpenScene editing outcomes.
-
-The fork's web route can apply basic brightness, contrast, saturation, opacity,
-and overlapping clip fades in its preview and local WebM recording. These
-visual editing rules are limited to that standalone web editor. OpenScene
-continues to use its own desktop FFmpeg pipeline, and mobile behavior stays on
-its existing path; advancing the submodule adds no new cross-surface editing rule.
-
-OpenCut UI source is bundled by Electron Vite, and `tsconfig.web.json` includes
-the imported editor components. The submodule must be initialized before
-`npm run typecheck`, `npm test`, or `npm run build`.
-
-Keep local file paths and FFmpeg execution in Electron main. The renderer and
-OpenCut components receive only typed data and callbacks. Update the fork in a
-reviewed PR first, then update the submodule pointer in a separate OpenScene PR.
+See the [architecture decision](adr/0001-opencut-presentation-boundary.md) and [shared project model](architecture/editor-project.md).

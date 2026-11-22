@@ -1,10 +1,11 @@
-import { useState, type ReactElement, type ReactNode } from 'react';
+import { PropertyGroup, PropertyRow, TimingInput } from './InspectorControls';
+import { TypographyInspector } from './TypographyInspector';
+import { VisualEffectsInspector } from './VisualEffectsInspector';
+import { useEffect, useState, type ReactElement } from 'react';
 
 import { CLIP_EFFECT_RANGES, DEFAULT_CLIP_EFFECTS, TRANSITION_TYPES } from '../../../shared/timelineTypes';
 import type { TransitionType } from '../../../shared/timelineTypes';
-import type { TimelineTitleStyle } from '../../../shared/timelineTypes';
-import { applyCaptionPreset, CAPTION_FONT_WEIGHTS, CAPTION_PLACEMENTS, CAPTION_STYLE_PRESETS, isAutomaticCaptionId, resolvedTitleStyle, type CaptionPresetId } from '../../../shared/captionStyle';
-import { clipDurationMs } from '../../../shared/timelineClipGeometry';
+import { clipDurationMs, clipTimelineEndMs } from '../../../shared/timelineClipGeometry';
 import { STILL_DEFAULT_HOLD_MS } from '../../../shared/timelineStills';
 import { formatDuration, formatTimestamp } from '../format';
 import { Button, MetadataList, PanelHeading, TabPanel, Tabs } from '../ui';
@@ -29,47 +30,6 @@ type InspectorPanelProps = {
 type InspectorContentProps = {
   readonly editor: TimelineEditorController;
 };
-
-type PropertyGroupProps = {
-  readonly title: string;
-  readonly children: ReactNode;
-  readonly defaultExpanded?: boolean;
-};
-
-/* Collapsible property group: hairline separators, xs medium title, −/+ toggle. */
-function PropertyGroup({ title, children, defaultExpanded = true }: PropertyGroupProps): ReactElement {
-  const [isExpanded, setIsExpanded] = useState(defaultExpanded);
-
-  return (
-    <div className="property-group">
-      <button
-        className="property-group__header"
-        type="button"
-        aria-expanded={isExpanded}
-        onClick={() => setIsExpanded((expanded) => !expanded)}
-      >
-        <span className={`property-group__title${isExpanded ? ' property-group__title--expanded' : ''}`}>{title}</span>
-        <span aria-hidden="true" className="property-group__toggle">{isExpanded ? '−' : '+'}</span>
-      </button>
-      {isExpanded && <div className="property-group__body">{children}</div>}
-    </div>
-  );
-}
-
-type PropertyRowProps = {
-  readonly label: string;
-  readonly children: ReactNode;
-};
-
-/* Label/value property row: muted caption label left, value right. */
-function PropertyRow({ label, children }: PropertyRowProps): ReactElement {
-  return (
-    <div className="property-row">
-      <span className="property-row__label">{label}</span>
-      <div className="property-row__value">{children}</div>
-    </div>
-  );
-}
 
 /*
   Transitions.
@@ -138,210 +98,55 @@ function TransitionControls({ editor }: InspectorContentProps): ReactElement {
   );
 }
 
-/*
-  Titles.
-
-  Addressed by the playhead rather than by selection, because a title is not a
-  clip and there is nothing on the timeline to click. Park the playhead where
-  the words should be, add one, and the group edits whichever title covers that
-  moment — which is also the one the program monitor is drawing, so the numbers
-  and the picture always describe each other.
-*/
-function TitleControls({ editor }: InspectorContentProps): ReactElement {
-  const title = editor.titleAtPlayhead;
-  const automaticCaptionCount = editor.project?.timeline.titles?.filter((entry) => isAutomaticCaptionId(entry.id)).length ?? 0;
-  const style = title === null ? null : resolvedTitleStyle(title);
-
-  return (
-    <PropertyGroup title="Titles">
-      <div className="inspector-action-grid" role="toolbar" aria-label="Title controls">
-        <Button className="inspector-action" onClick={editor.addTitleAtPlayhead}>Add title</Button>
-        {title !== null && (
-          <Button className="inspector-action" variant="stop" onClick={() => editor.deleteTitle(title.id)}>
-            Delete title
-          </Button>
-        )}
-      </div>
-
-      {title === null ? (
-        <div className="empty-slate">No title at the playhead. Add one to caption this moment.</div>
-      ) : (
-        <>
-          <PropertyRow label="Text">
-            <input
-              className="property-text-input"
-              type="text"
-              aria-label="Title text"
-              value={title.text}
-              onChange={(event) => editor.editTitle(title.id, { text: event.currentTarget.value })}
-            />
-          </PropertyRow>
-          <PropertyRow label="Size">
-            <input
-              className="property-number-input"
-              type="number"
-              aria-label="Title size"
-              value={title.sizePx}
-              min={8}
-              max={512}
-              onChange={(event) => editor.editTitle(title.id, { sizePx: Number(event.currentTarget.value) })}
-            />
-          </PropertyRow>
-          <PropertyRow label="Colour">
-            <input
-              className="property-color-input"
-              type="color"
-              aria-label="Title colour"
-              value={title.color}
-              onChange={(event) => editor.editTitle(title.id, { color: event.currentTarget.value })}
-            />
-          </PropertyRow>
-          <PropertyRow label="Preset">
-            <select
-              className="property-text-input"
-              aria-label="Caption style preset"
-              value=""
-              onChange={(event) => {
-                const next = applyCaptionPreset(title, event.currentTarget.value as CaptionPresetId);
-                editor.editTitle(title.id, {
-                  sizePx: next.sizePx,
-                  color: next.color,
-                  positionX: next.positionX,
-                  positionY: next.positionY,
-                  ...(next.style === undefined ? {} : { style: next.style })
-                });
-              }}
-            >
-              <option value="" disabled>Choose preset…</option>
-              {CAPTION_STYLE_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}
-            </select>
-          </PropertyRow>
-          {style !== null && (
-            <>
-              <PropertyRow label="Anchor">
-                <select
-                  className="property-text-input"
-                  aria-label="Title safe-area anchor"
-                  value={style.placement}
-                  onChange={(event) => editor.editTitle(title.id, { style: { ...style, placement: event.currentTarget.value as TimelineTitleStyle['placement'] } })}
-                >
-                  {CAPTION_PLACEMENTS.map((placement) => <option key={placement} value={placement}>{placement[0]?.toUpperCase()}{placement.slice(1)}</option>)}
-                </select>
-              </PropertyRow>
-              <PropertyRow label="Weight">
-                <select
-                  className="property-text-input"
-                  aria-label="Title font weight"
-                  value={style.fontWeight}
-                  onChange={(event) => editor.editTitle(title.id, { style: { ...style, fontWeight: event.currentTarget.value as TimelineTitleStyle['fontWeight'] } })}
-                >
-                  {CAPTION_FONT_WEIGHTS.map((weight) => <option key={weight} value={weight}>{weight[0]?.toUpperCase()}{weight.slice(1)}</option>)}
-                </select>
-              </PropertyRow>
-              <PropertyRow label="Outline">
-                <input className="property-color-input" type="color" aria-label="Title outline colour" value={style.outlineColor}
-                  onChange={(event) => editor.editTitle(title.id, { style: { ...style, outlineColor: event.currentTarget.value } })} />
-                <input className="property-number-input" type="number" aria-label="Title outline width" min={0} max={24} step={1} value={style.outlineWidthPx}
-                  onChange={(event) => editor.editTitle(title.id, { style: { ...style, outlineWidthPx: Number(event.currentTarget.value) } })} />
-              </PropertyRow>
-              <PropertyRow label="Background">
-                <input className="property-color-input" type="color" aria-label="Title background colour" value={style.backgroundColor}
-                  onChange={(event) => editor.editTitle(title.id, { style: { ...style, backgroundColor: event.currentTarget.value } })} />
-                <input className="property-number-input" type="number" aria-label="Title background opacity" min={0} max={1} step={0.05} value={style.backgroundOpacity}
-                  onChange={(event) => editor.editTitle(title.id, { style: { ...style, backgroundOpacity: Number(event.currentTarget.value) } })} />
-              </PropertyRow>
-              <PropertyRow label="Padding">
-                <input className="property-number-input" type="number" aria-label="Title background padding" min={0} max={64} step={1} value={style.paddingPx}
-                  onChange={(event) => editor.editTitle(title.id, { style: { ...style, paddingPx: Number(event.currentTarget.value) } })} />
-              </PropertyRow>
-            </>
-          )}
-          <PropertyRow label="Position">
-            <span className="property-axis-label" aria-hidden="true">X</span>
-            <input
-              className="property-number-input"
-              type="number"
-              aria-label="Title position X"
-              value={title.positionX}
-              onChange={(event) => editor.editTitle(title.id, { positionX: Number(event.currentTarget.value) })}
-            />
-            <span className="property-axis-label" aria-hidden="true">Y</span>
-            <input
-              className="property-number-input"
-              type="number"
-              aria-label="Title position Y"
-              value={title.positionY}
-              onChange={(event) => editor.editTitle(title.id, { positionY: Number(event.currentTarget.value) })}
-            />
-          </PropertyRow>
-          <PropertyRow label="Start">
-            <span className="property-value-chip">{formatDuration(title.timelineStartMs)}</span>
-          </PropertyRow>
-          <PropertyRow label="End">
-            <span className="property-value-chip">{formatDuration(title.timelineEndMs)}</span>
-          </PropertyRow>
-          <div className="inspector-action-grid" role="toolbar" aria-label="Title timing controls">
-            <Button
-              className="inspector-action"
-              onClick={() => editor.editTitle(title.id, { timelineEndMs: title.timelineEndMs - 500 })}
-            >
-              Shorten -0.5s
-            </Button>
-            <Button
-              className="inspector-action"
-              onClick={() => editor.editTitle(title.id, { timelineEndMs: title.timelineEndMs + 500 })}
-            >
-              Lengthen +0.5s
-            </Button>
-          </div>
-          <Button
-            className="inspector-action caption-style-apply"
-            disabled={automaticCaptionCount === 0}
-            onClick={() => editor.applyTitleStyleToAutomaticCaptions(title.id)}
-          >
-            Apply appearance to {automaticCaptionCount} automatic caption{automaticCaptionCount === 1 ? '' : 's'}
-          </Button>
-          <p className="caption-style-note">Top, center and bottom anchors stay inside the title-safe region when the export aspect ratio changes. X/Y remain fine-tuning offsets.</p>
-        </>
-      )}
-    </PropertyGroup>
-  );
-}
-
 function SelectionInspector({ editor }: InspectorContentProps): ReactElement {
+  const [section, setSection] = useState<'edit' | 'video' | 'effects' | 'audio' | 'text'>('edit');
   const clip = editor.selectedClip;
   const effects = clip?.clip.effects ?? DEFAULT_CLIP_EFFECTS;
   const opacityPercent = effectUnitToPercent(effects.opacity);
   const scalePercent = effectUnitToPercent(effects.scale);
   const volumeDb = effectVolumeToDb(effects.volume);
+  const canCut = clip !== null && editor.playheadMs > clip.clip.timelineStartMs && editor.playheadMs < clipTimelineEndMs(clip.clip);
+  useEffect(() => {
+    if (((section === 'video' || section === 'effects') && clip?.asset?.kind === 'audio') || (section === 'audio' && clip?.asset?.kind === 'image')) setSection('edit');
+  }, [clip?.asset?.kind, section]);
 
   return (
     <section className="clip-controls inspector-section" aria-label="Selected clip controls">
       <h3 className="inspector-section__title">
-        {clip === null ? 'No clip selected' : clip.asset?.displayName ?? 'Missing asset'}
+        {section === 'text' ? 'Titles & captions' : clip === null ? 'No clip selected' : clip.asset?.displayName ?? 'Missing asset'}
       </h3>
+      <div className="inspector-categories" role="group" aria-label="Clip editing categories">
+        {(['edit', 'video', 'effects', 'audio', 'text'] as const).map(id => <button key={id} type="button" aria-pressed={section === id}
+          disabled={((id === 'video' || id === 'effects') && clip?.asset?.kind === 'audio') || (id === 'audio' && clip?.asset?.kind === 'image')}
+          onClick={() => setSection(id)}>{({ edit: 'Edit', video: 'Video', effects: 'Effects', audio: 'Audio', text: 'Text' })[id]}</button>)}
+      </div>
 
       {editor.project === null ? (
         <div className="empty-slate">Create or open a project before editing clips.</div>
-      ) : clip === null ? (
-        <div className="empty-slate">Select a timeline clip to nudge, trim, split, or delete it.</div>
-      ) : (
+      ) : clip === null && section !== 'text' ? (
+        <div className="empty-slate">Select a clip on the timeline to edit its timing, picture and sound.</div>
+      ) : clip === null ? null : (
         <>
-          <div className="inspector-action-grid" role="toolbar" aria-label="Selected clip trim controls">
-            <Button className="inspector-action" onClick={() => editor.moveSelectedClip(-500)}>Nudge -0.5s</Button>
-            <Button className="inspector-action" onClick={() => editor.moveSelectedClip(500)}>Nudge +0.5s</Button>
-            <Button className="inspector-action" onClick={() => editor.trimSelectedClip('left', 500)}>Trim left</Button>
-            <Button className="inspector-action" onClick={() => editor.trimSelectedClip('right', -500)}>Trim right</Button>
-            <Button className="inspector-action" onClick={editor.splitSelectedClip}>Split middle</Button>
-            <Button className="inspector-action" variant="stop" onClick={editor.deleteSelectedClip}>Delete clip</Button>
-          </div>
+          <div className="inspector-selection-summary"><span>{clip.asset?.kind ?? 'Clip'} · {clip.track.name}</span><strong>{formatDuration(clipDurationMs(clip.clip))}</strong></div>
+          <fieldset className="inspector-fields" disabled={editor.isBusy}>
+          <div hidden={section !== 'edit'}>
+          <PropertyGroup title="Cut & trim">
+            <p className="inspector-help">Cuts use the playhead position. Move it inside the selected clip.</p>
+            <div className="inspector-action-grid" role="toolbar" aria-label="Selected clip trim controls">
+              <Button className="inspector-action inspector-action--wide" disabled={!canCut} onClick={editor.splitAtPlayhead}>Split at playhead</Button>
+              <Button className="inspector-action" disabled={!canCut} onClick={() => editor.trimClipTo(clip.clip.id, 'left', editor.playheadMs)}>Trim start here</Button>
+              <Button className="inspector-action" disabled={!canCut} onClick={() => editor.trimClipTo(clip.clip.id, 'right', editor.playheadMs)}>Trim end here</Button>
+              <Button className="inspector-action" onClick={editor.duplicateSelectedClip}>Duplicate clip</Button>
+              <Button className="inspector-action" variant="stop" onClick={editor.deleteSelectedClip}>Delete selection</Button>
+            </div>
+          </PropertyGroup>
 
           <PropertyGroup title="Timing">
+            <PropertyRow label="Start (s)"><TimingInput label="Clip timeline start in seconds" valueMs={clip.clip.timelineStartMs} onCommit={ms => editor.moveSelectedClip(ms - clip.clip.timelineStartMs)} /></PropertyRow>
+            <PropertyRow label="End (s)"><TimingInput label="Clip timeline end in seconds" valueMs={clipTimelineEndMs(clip.clip)} onCommit={ms => editor.trimClipTo(clip.clip.id, 'right', ms)} /></PropertyRow>
             <MetadataList
               className="editor-meta"
               items={[
-                { term: 'Track', description: clip.track.name },
-                { term: 'Start', description: formatDuration(clip.clip.timelineStartMs) },
                 { term: 'Source in', description: formatDuration(clip.clip.sourceStartMs) },
                 { term: 'Source out', description: formatDuration(clip.clip.sourceEndMs) }
               ]}
@@ -353,7 +158,7 @@ function SelectionInspector({ editor }: InspectorContentProps): ReactElement {
             control here that changes how much room the clip takes, and putting
             it beside opacity would suggest otherwise.
           */}
-          <PropertyGroup title="Speed">
+          <PropertyGroup title="Speed" onReset={() => editor.updateSelectedClipEffects({ speed: 1 })}>
             <PropertyRow label="Rate">
               <input
                 className="property-number-input"
@@ -370,8 +175,11 @@ function SelectionInspector({ editor }: InspectorContentProps): ReactElement {
               <span className="property-value-chip">{formatDuration(clipDurationMs(clip.clip))}</span>
             </PropertyRow>
           </PropertyGroup>
+          <TransitionControls editor={editor} />
+          </div>
+          <div hidden={section !== 'video'}>
 
-          <PropertyGroup title="Colour">
+          <PropertyGroup title="Colour" onReset={() => editor.updateSelectedClipEffects({ brightness: 0, contrast: 1, saturation: 1 })}>
             <PropertyRow label="Brightness">
               <input
                 className="property-slider"
@@ -413,7 +221,7 @@ function SelectionInspector({ editor }: InspectorContentProps): ReactElement {
             </PropertyRow>
           </PropertyGroup>
 
-          <PropertyGroup title="Transform">
+          <PropertyGroup title="Transform" onReset={() => editor.updateSelectedClipEffects({ positionX: 0, positionY: 0, scale: 1, rotation: 0 })}>
             <PropertyRow label="Position">
               <span className="property-axis-label" aria-hidden="true">X</span>
               <input
@@ -465,7 +273,7 @@ function SelectionInspector({ editor }: InspectorContentProps): ReactElement {
             </PropertyRow>
           </PropertyGroup>
 
-          <PropertyGroup title="Opacity">
+          <PropertyGroup title="Opacity" onReset={() => editor.updateSelectedClipEffects({ opacity: 1 })}>
             <PropertyRow label="Opacity">
               <input
                 className="property-slider"
@@ -479,8 +287,11 @@ function SelectionInspector({ editor }: InspectorContentProps): ReactElement {
               <span className="property-value-chip">{opacityPercent}%</span>
             </PropertyRow>
           </PropertyGroup>
+          </div>
+          <div hidden={section !== 'effects'}><VisualEffectsInspector editor={editor} /></div>
+          <div hidden={section !== 'audio'}>
 
-          <PropertyGroup title="Audio">
+          <PropertyGroup title="Audio" onReset={() => editor.updateSelectedClipEffects({ volume: 1 })}>
             <PropertyRow label="Volume">
               <input
                 className="property-slider"
@@ -506,13 +317,14 @@ function SelectionInspector({ editor }: InspectorContentProps): ReactElement {
               </PropertyRow>
             )}
           </PropertyGroup>
+          </div>
+          </fieldset>
         </>
       )}
 
-      {editor.project !== null && <TransitionControls editor={editor} />}
-      {editor.project !== null && <TitleControls editor={editor} />}
+      {editor.project !== null && <div hidden={section !== 'text'}><TypographyInspector editor={editor} /></div>}
 
-      {editor.activePlaybackClip !== null && (
+      {editor.activePlaybackClip !== null && section === 'edit' && (
         <PropertyGroup title="Playback">
           <PropertyRow label="Playhead"><span className="property-value-chip">{formatDuration(editor.playheadMs)}</span></PropertyRow>
           <PropertyRow label="Source time"><span className="property-value-chip">{formatDuration(editor.activePlaybackClip.sourceTimeMs)}</span></PropertyRow>
@@ -553,7 +365,7 @@ export function InspectorPanel({ activeTabId, editor, onActiveTabChange, tabs }:
   return (
     <aside className="inspector-panel" aria-labelledby="inspector-title">
       <PanelHeading>
-        <h2 id="inspector-title" className="inspector-panel__title">Inspector</h2>
+        <h2 id="inspector-title" className="inspector-panel__title">Properties</h2>
       </PanelHeading>
 
       <Tabs activeTabId={activeTabId} idBase="inspector" tabs={tabs} onActiveTabChange={onActiveTabChange} aria-label="Inspector sections" />

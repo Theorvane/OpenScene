@@ -60,5 +60,17 @@ export async function discoverFfmpeg(options: FfmpegDiscoveryOptions = {}): Prom
       }
     }
   }
+
+  // The installer can launch OpenScene before Windows refreshes its inherited PATH.
+  const localAppData = environment.LOCALAPPDATA;
+  if (platform === 'win32' && localAppData && isAbsolute(localAppData)) {
+    const executablePath = await resolveExecutable(
+      join(localAppData, 'Microsoft', 'WinGet', 'Links', 'ffmpeg.exe'),
+      platform
+    );
+    if (executablePath !== null) {
+      return { kind: 'system', executablePath };
+    }
+  }
   return { kind: 'unavailable', reason: 'FFmpeg was not configured and was not found on the system PATH.' };
 }

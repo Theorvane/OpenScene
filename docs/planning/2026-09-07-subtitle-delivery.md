@@ -1,4 +1,6 @@
-# Reviewed subtitle delivery
+# Timeline caption delivery
+
+This guide describes the current delivery contract for captions already applied to the shared timeline. Canvas output is applied before export; caption styling and delivery use the same timeline as manual and agent edits. The dated path is retained for existing links.
 
 Issue: [#330](https://github.com/Theorvane/openscene/issues/330)
 
@@ -29,15 +31,12 @@ Mobile uses the same shared decision to include or omit automatic captions from 
 
 ## Verification
 
-- Focused subtitle/export/renderer contract suite: 24/24 passed.
-- Root TypeScript check and production Electron build passed.
-- Mobile TypeScript check passed.
-- Full root suite: 1,274/1,298 passed. The remaining 24 failures are the existing Windows CRLF, symlink-permission, FFmpeg/source-fixture, and source-assertion baseline; no subtitle-delivery test failed.
-- Electron development smoke loaded main, preload, renderer, and the managed VieNeu runtime; shutdown released ports 5173 and 8001. Interactive visual QA was not claimed in this terminal-only run.
+Run focused subtitle/export tests and both surfaces' type checks after changes. Verify burn-only, sidecar-only, both and neither against the saved timeline. Manual titles must remain; requesting a sidecar without automatic captions must fail before starting a job. Check native mobile burn choice on a development device and keep sidecar delivery explicitly unavailable there.
+
+The latest revision-specific suite and app results are in [canvas/export verification](../canvas-export-verification.md). Historical Windows failures are not the current verification status.
 
 ## Deferred
 
-- style presets and safe-area controls;
 - word-level karaoke and forced alignment;
 - speaker diarization and translation;
 - audio ducking and loudness normalization.
