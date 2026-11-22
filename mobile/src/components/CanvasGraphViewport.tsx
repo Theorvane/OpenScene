@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Image, PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
-import { fitCanvasBounds, zoomCanvasAt, type CanvasCamera } from '@openvideo/shared/canvasViewport';
+import { beginCanvasGesture, moveCanvasGesture, fitCanvasBounds, zoomCanvasAt, type CanvasCamera, type CanvasGesture } from '@openvideo/shared/canvasViewport';
 import { theme } from '../lib/theme';
 import { press } from '../lib/touch';
 
@@ -44,15 +44,20 @@ export function CanvasGraphViewport({ nodes, edges, selection, connectingId, fit
   const [camera, setCamera] = useState<CanvasCamera>({ x: 24, y: 32, zoom: 0.85 });
   const host = useRef<View>(null), origin = useRef({ x: 0, y: 0 });
   const live = useRef({ camera, size }); live.current = { camera, size };
-  const start = useRef<CanvasCamera>(camera), pinch = useRef<{ distance: number; x: number; y: number } | null>(null);
+  const gesture = useRef<CanvasGesture | null>(null);
   const pan = useMemo(() => PanResponder.create({
     onMoveShouldSetPanResponder: (_event, gesture) => gesture.numberActiveTouches > 1 || Math.abs(gesture.dx) + Math.abs(gesture.dy) > 6,
-    onPanResponderGrant: event => { start.current = live.current.camera; const [a, b] = event.nativeEvent.touches; pinch.current = a && b ? { distance: Math.hypot(b.pageX - a.pageX, b.pageY - a.pageY), x: (a.pageX + b.pageX) / 2 - origin.current.x, y: (a.pageY + b.pageY) / 2 - origin.current.y } : null; },
-    onPanResponderMove: (event, gesture) => {
-      const [a, b] = event.nativeEvent.touches;
-      if (a && b && pinch.current) { const distance = Math.hypot(b.pageX - a.pageX, b.pageY - a.pageY); setCamera(zoomCanvasAt(start.current, start.current.zoom * distance / Math.max(1, pinch.current.distance), pinch.current)); }
-      else setCamera({ ...start.current, x: start.current.x + gesture.dx, y: start.current.y + gesture.dy });
-    }, onPanResponderRelease: () => { pinch.current = null; }
+    onPanResponderGrant: event => { gesture.current = beginCanvasGesture(live.current.camera, event.nativeEvent.touches.map(touch => ({ id: touch.identifier, x: touch.pageX - origin.current.x, y: touch.pageY - origin.current.y }))); },
+    onPanResponderStart: event => { gesture.current = beginCanvasGesture(live.current.camera, event.nativeEvent.touches.map(touch => ({ id: touch.identifier, x: touch.pageX - origin.current.x, y: touch.pageY - origin.current.y }))); },
+    onPanResponderEnd: event => { gesture.current = beginCanvasGesture(live.current.camera, event.nativeEvent.touches.map(touch => ({ id: touch.identifier, x: touch.pageX - origin.current.x, y: touch.pageY - origin.current.y }))); },
+    onPanResponderMove: event => {
+      const next = moveCanvasGesture(gesture.current, live.current.camera, event.nativeEvent.touches.map(touch => ({ id: touch.identifier, x: touch.pageX - origin.current.x, y: touch.pageY - origin.current.y })));
+      gesture.current = next.gesture;
+      live.current.camera = next.camera;
+      setCamera(next.camera);
+    },
+    onPanResponderRelease: () => { gesture.current = null; },
+    onPanResponderTerminate: () => { gesture.current = null; }
   }), []);
   const fit = (overview = false) => {
     if (!nodes.length || !size.width) return;
