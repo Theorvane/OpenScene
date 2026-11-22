@@ -6,12 +6,13 @@ import * as viewport from '../src/shared/canvasViewport';
 
 type Touch = { identifier: number; pageX: number; pageY: number };
 type Event = { nativeEvent: { touches: Touch[] } };
-type Handlers = Record<string, (event: Event) => void>;
+type Handlers = Record<string, (event: Event, gesture: { dx: number; dy: number; numberActiveTouches: number }) => void>;
 const touch = (identifier: number, pageX: number, pageY = 100): Touch => ({ identifier, pageX, pageY });
 
 /** Execute the shipped responder callbacks with inert rendering, without a native device. */
 function mountResponder() {
   let handlers: Handlers = {};
+  let grantPoint = { pageX: 0, pageY: 0 };
   const states: unknown[] = [];
   const react = {
     useState: (initial: unknown) => { const index = states.push(initial) - 1; return [initial, (value: unknown) => { states[index] = value; }]; },
@@ -38,7 +39,11 @@ function mountResponder() {
   });
   module.exports.CanvasGraphViewport({ nodes: [], edges: [], selection: [], connectingId: null, fitKey: 0 });
   return {
-    send: (name: string, ...touches: Touch[]) => { if (!handlers[name]) throw new Error(`Missing responder: ${name}`); handlers[name]({ nativeEvent: { touches } }); },
+    send: (name: string, ...touches: Touch[]) => {
+      if (name === 'onPanResponderGrant' && touches[0]) grantPoint = touches[0];
+      const point = touches[0] ?? grantPoint;
+      handlers[name]?.({ nativeEvent: { touches } }, { dx: point.pageX - grantPoint.pageX, dy: point.pageY - grantPoint.pageY, numberActiveTouches: touches.length });
+    },
     camera: () => states[1] as viewport.CanvasCamera
   };
 }
