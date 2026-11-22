@@ -21,7 +21,7 @@ describe("AI pull request automation", () => {
     expect(workflow).not.toContain("actions/checkout")
   })
 
-  it("enables squash auto-merge only for current-HEAD AI approvals", () => {
+  it("enables native auto-merge only for current-HEAD AI approvals", () => {
     const workflow = readWorkflow("ai-approved-automerge.yml")
 
     expect(workflow).toContain("schedule:")
@@ -41,5 +41,14 @@ describe("AI pull request automation", () => {
     expect(workflow).toContain('gh pr view "$number" --repo "$GITHUB_REPOSITORY"')
     expect(workflow).toContain('gh pr merge "$number" --repo "$GITHUB_REPOSITORY" --auto --squash --delete-branch')
     expect(workflow).not.toContain("actions/checkout")
+  })
+
+  it("preserves release ancestry on main while squashing dev changes", () => {
+    const workflow = readWorkflow("ai-approved-automerge.yml")
+
+    expect(workflow).toContain('| [.number, .baseRefName] | @tsv')
+    expect(workflow).toContain("while IFS=$'\\t' read -r number base; do")
+    expect(workflow).toMatch(/if \[ "\$base" = "main" \]; then\s+gh pr merge "\$number" --repo "\$GITHUB_REPOSITORY" --auto --merge --delete-branch\s+else\s+gh pr merge "\$number" --repo "\$GITHUB_REPOSITORY" --auto --squash --delete-branch\s+fi/)
+    expect(workflow).not.toContain("--admin")
   })
 })
