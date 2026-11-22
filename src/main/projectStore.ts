@@ -1,4 +1,4 @@
-import { chmod, mkdir, readdir, rm, stat } from 'node:fs/promises';
+import { chmod, mkdir, readdir, rm } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
@@ -16,7 +16,6 @@ import { parseCreateProjectInput, parseTimelineDocument, parseUpdateAssetMetadat
 import { createEmptyAiProjectDocument, parseAiProjectDocument, type AiProjectDocument } from '../shared/aiProjectDomain';
 import { assertAssetImportQuota, DEFAULT_ASSET_IMPORT_LIMITS, type AssetImportLimits } from './assetImportPolicy';
 import {
-  PROJECT_FILE_NAME,
   ProjectStoreError,
   isOpaqueId,
   projectDirectory,
@@ -157,7 +156,9 @@ export class ProjectStore {
    * folder itself — its existing files are left untouched; only project.json
    * is written. A folder whose project.json exists but cannot be read is
    * rejected so a real (possibly newer or corrupt) project is never
-   * overwritten.
+   * overwritten. Initialization requires exclusive, same-filesystem hard-link
+   * publication; unsupported filesystems fail safely rather than replacing. A
+   * published project is retained if retryable location registration fails.
    */
   async openOrInitializeFolder(directory: string, now = new Date(), projectType: import('../shared/projectTypes').ProjectType = 'editing'): Promise<OpenOrInitializeFolderResult | null> {
     if (projectType !== 'editing' && projectType !== 'generation') throw new ProjectStoreError('Invalid project type.');
@@ -169,10 +170,6 @@ export class ProjectStore {
     if (existing !== null) {
       await this.locations.register(existing.id, resolved);
       return { project: existing, created: false };
-    }
-    const hasProjectFile = await stat(join(resolved, PROJECT_FILE_NAME)).then(() => true).catch(() => false);
-    if (hasProjectFile) {
-      return null;
     }
     const id = randomUUID();
     const timestamp = now.toISOString();
@@ -188,15 +185,20 @@ export class ProjectStore {
       ai: createEmptyAiProjectDocument()
     };
     try {
-      await writeProjectSnapshotAtDirectory(resolved, snapshot);
-      await this.locations.register(id, resolved);
-      return { project: snapshot, created: true };
+      await writeProjectSnapshotAtDirectory(resolved, snapshot, 'create');
     } catch (error) {
-      // The folder belongs to the user: roll back only the file we wrote.
-      await rm(join(resolved, PROJECT_FILE_NAME), { force: true }).catch(() => undefined);
-      await this.locations.unregister(id).catch(() => undefined);
-      throw error;
+      if (!(error instanceof Error && 'code' in error && error.code === 'EEXIST')) throw error;
+      // Another initializer may have published a valid project since our read.
+      // Invalid/newer files, directories and symlinks are never ours to replace.
+      const winner = await readProjectSnapshotAtDirectory(resolved, null);
+      if (winner === null) return null;
+      await this.locations.register(winner.id, resolved);
+      return { project: winner, created: false };
     }
+    // Registration is retryable metadata. Once published, keep the project even
+    // if registration fails: deleting it could also erase a concurrent edit.
+    await this.locations.register(id, resolved);
+    return { project: snapshot, created: true };
   }
 
   async create(input: CreateProjectInput, now = new Date()): Promise<LocalProjectSnapshot> {

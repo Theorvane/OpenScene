@@ -1,5 +1,6 @@
 import { safeStorage } from 'electron';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { mkdir, open, readFile, rename, rm, type FileHandle } from 'node:fs/promises';
 import { join } from 'node:path';
 
 /**
@@ -28,6 +29,7 @@ const ALWAYS_REPORTED_CREDENTIAL_KEYS = [
 export class CredentialStore {
   private readonly filePath: string;
   private memoryCache: ProviderCredentials = {};
+  private work: Promise<void> = Promise.resolve();
 
   constructor(directory: string) {
     this.filePath = join(directory, 'encrypted_credentials.bin');
@@ -71,19 +73,47 @@ export class CredentialStore {
     return creds[provider];
   }
 
-  async setCredential(provider: keyof ProviderCredentials, apiKey: string): Promise<void> {
+  setCredential(provider: keyof ProviderCredentials, apiKey: string): Promise<void> {
+    // The application owns one store. Keep its read/modify/replace operations in
+    // invocation order, without allowing one failed save to poison later saves.
+    const operation = this.work.then(() => this.saveCredential(provider, apiKey));
+    this.work = operation.then(() => undefined, () => undefined);
+    return operation;
+  }
+
+  private async saveCredential(provider: keyof ProviderCredentials, apiKey: string): Promise<void> {
     if (!this.isEncryptionSupported()) {
       throw new Error('Electron safeStorage encryption is unavailable on this system.');
     }
 
-    await this.getCredentials();
-    this.memoryCache = { ...this.memoryCache, [provider]: apiKey };
-
-    const jsonString = JSON.stringify(this.memoryCache);
-    const outputBuffer = safeStorage.encryptString(jsonString);
-
-    const dir = join(this.filePath, '..');
-    await mkdir(dir, { recursive: true });
-    await writeFile(this.filePath, outputBuffer);
+    const current = await this.getCredentials();
+    const candidate = { ...current, [provider]: apiKey };
+    const outputBuffer = safeStorage.encryptString(JSON.stringify(candidate));
+    const directory = join(this.filePath, '..');
+    await mkdir(directory, { recursive: true });
+    const temporaryPath = join(directory, `.encrypted_credentials.${randomUUID()}.tmp`);
+    let temporary: FileHandle | undefined;
+    let created = false;
+    try {
+      // Exclusive creation avoids following an existing path. Only ciphertext is
+      // written; replacement also tightens permissions on older POSIX bundles.
+      temporary = await open(temporaryPath, 'wx', 0o600);
+      created = true;
+      await temporary.writeFile(outputBuffer);
+      await temporary.sync();
+      await temporary.close();
+      temporary = undefined;
+      await rename(temporaryPath, this.filePath);
+    } catch (error) {
+      try {
+        await temporary?.close();
+      } finally {
+        if (created) await rm(temporaryPath, { force: true });
+      }
+      throw error;
+    }
+    // Reads can continue to return the previous complete bundle until rename.
+    // A failed encryption/write/replacement must never publish the candidate.
+    this.memoryCache = candidate;
   }
 }

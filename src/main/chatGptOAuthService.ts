@@ -83,6 +83,7 @@ export class ChatGptOAuthService {
   private activeStatus: ChatGptOAuthStatus | null = null;
   private credentialOperation: Promise<void> = Promise.resolve();
   private sessionGeneration = 0;
+  private acquisition: { generation: number; promise: Promise<ChatGptCodexCredentials> } | null = null;
 
   constructor(directory: string, dependencies: ChatGptOAuthServiceDependencies = {}) {
     this.tokenStore = new ChatGptOAuthTokenStore(directory);
@@ -144,6 +145,19 @@ export class ChatGptOAuthService {
 
   async acquireCredentials(): Promise<ChatGptCodexCredentials> {
     const generation = this.sessionGeneration;
+    if (this.acquisition?.generation === generation) return this.acquisition.promise;
+    const promise = this.acquireSessionCredentials(generation);
+    const work = { generation, promise };
+    this.acquisition = work;
+    try {
+      return await promise;
+    } finally {
+      // An old session finishing must not evict a newer session's work.
+      if (this.acquisition === work) this.acquisition = null;
+    }
+  }
+
+  private async acquireSessionCredentials(generation: number): Promise<ChatGptCodexCredentials> {
     // Observe earlier clears/saves before reading a session. Do not wait on network refreshes.
     await this.credentialOperation;
     this.assertCurrentSession(generation);
