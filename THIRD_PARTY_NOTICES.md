@@ -55,23 +55,38 @@ For distribution, choose and document one of these paths:
 2. ship a separately reviewed LGPL-compatible build with only the required codecs; or
 3. accept the applicable GPL obligations for a bundled GPL build.
 
-## Planned external services and model runtimes
+## Local transcription runtime
 
-| Component | Intended boundary | License action required before release |
-|---|---|---|
-| Gemini/Grok browser session | Connected service, per-operation approval | Review service terms and UI automation behavior; never redistribute session credentials |
-| Gemini/xAI APIs | Connected service, per-operation approval | Record API terms, retention and pricing disclosure |
-| ComfyUI | Separate worker process | Review GPL service/bundling boundary |
-| Wan 2.2 and related weights | Worker model | Record code license, exact weight license and checksum separately |
-| whisper.cpp | Installer-fetched ASR executable, MIT, pinned in `UPSTREAM_PINS.md` | The setup script downloads it to ignored local storage and verifies the official release digest; preserve its MIT notice in any redistributed installer/bundle |
-| ggml-small.bin | Installer-fetched multilingual ASR model, MIT metadata, pinned in `UPSTREAM_PINS.md` | The setup script downloads it to ignored local storage and verifies the exact SHA-256; review redistribution terms again before bundling |
-| VieNeu-TTS v3 Turbo | Separate Apache-2.0 checkout and local process | OpenScene does not copy its source or weights; its included voice notice says non-commercial use only and requires attribution, so do not redistribute or enable commercial use without a separate rights review |
+The optional setup script downloads pinned whisper.cpp binaries and model files into ignored local storage. Runtime and model provenance are recorded by scripts/install-transcription-runtime.ps1.
 
-## Dependency security snapshot
+## ffmpeg-skill repository tools and workflow
 
-`npm ci` reported the following on 2026-09-02:
+- Upstream: https://github.com/kajisho5/ffmpeg-skill
+- Version: 3.13.1; commit: 3145261a1c19f399b9520fad7fdac741871e1426
+- Copyright: 2026 kajisho5
+- License: MIT; complete notice: `external/ffmpeg-skill/LICENSE`
+- Snapshot provenance and file hashes: `.agents/skills/ffmpeg-skill/UPSTREAM.json`
 
-- root workspace: 7 advisories (1 moderate, 6 high);
-- mobile workspace: 18 advisories (11 moderate, 7 high).
+The repository includes the Python tools and documentation for coding-agent use. The packaged app uses only a compact adapted editing workflow, not the upstream scripts or MCP server. See `docs/ffmpeg-skill-integration.md`.
 
-No automatic `npm audit fix` was run. Each advisory must be triaged on an issue-scoped branch because forced upgrades may change Electron, Expo or native SDK behavior.
+MIT License
+
+Copyright (c) 2026 kajisho5
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

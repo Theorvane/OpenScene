@@ -1,9 +1,9 @@
-import { LLM_CATALOG, type LlmCatalogProvider } from './llmCatalog.generated';
 import {
   AGENT_ROUTER_BASE_URL,
   AGENT_ROUTER_CREDENTIAL_KEY,
   AGENT_ROUTER_PROVIDER_ID
 } from './agentRouter';
+import { LLM_CATALOG, type LlmCatalogProvider } from './llmCatalog.generated';
 
 /**
  * Provider registry: a provider is a source of models with its
@@ -82,101 +82,10 @@ function toProviderInfo(provider: LlmCatalogProvider): LlmProviderInfo {
  * providers — an API key in safe storage — but expose no chat models; their
  * models live in the voice/video generation domain catalogs.
  */
-export const MEDIA_PROVIDERS: readonly LlmProviderInfo[] = [
-  {
-    id: 'elevenlabs',
-    label: 'ElevenLabs',
-    kind: 'cloud',
-    auth: 'api-key',
-    adapter: 'media',
-    credentialKey: 'elevenlabsApiKey',
-    keyPlaceholder: 'sk_...',
-    description: 'Speech synthesis over the ElevenLabs API.'
-  },
-  {
-    id: 'runway',
-    label: 'Runway',
-    kind: 'cloud',
-    auth: 'api-key',
-    adapter: 'media',
-    credentialKey: 'runwayApiKey',
-    keyPlaceholder: 'key_...',
-    description: 'Video generation over the Runway API.'
-  },
-  {
-    id: 'kling',
-    label: 'Kling',
-    kind: 'cloud',
-    auth: 'api-key',
-    adapter: 'media',
-    credentialKey: 'klingApiKey',
-    description: 'Video generation over the Kling API.'
-  },
-  {
-    id: 'luma',
-    label: 'Luma',
-    kind: 'cloud',
-    auth: 'api-key',
-    adapter: 'media',
-    credentialKey: 'lumaApiKey',
-    keyPlaceholder: 'luma-...',
-    description: 'Video generation over the Luma Dream Machine API.'
-  },
-  {
-    // Distinct from the catalog's `minimax` chat provider; both read the same
-    // MiniMax credential slot, so one key connects chat and video.
-    id: 'minimax_hailuo',
-    label: 'MiniMax Hailuo',
-    kind: 'cloud',
-    auth: 'api-key',
-    adapter: 'media',
-    credentialKey: 'minimax',
-    description: 'Video generation over the MiniMax Hailuo API.'
-  },
-  {
-    id: 'byteplus',
-    label: 'BytePlus ModelArk',
-    kind: 'cloud',
-    auth: 'api-key',
-    adapter: 'media',
-    credentialKey: 'bytePlusApiKey',
-    description: 'ByteDance Seedream image generation and Seedance video over BytePlus ModelArk.'
-  },
-  {
-    id: 'stability',
-    label: 'Stability AI',
-    kind: 'cloud',
-    auth: 'api-key',
-    adapter: 'media',
-    credentialKey: 'stabilityApiKey',
-    keyPlaceholder: 'sk-...',
-    description: 'Image generation over the Stability AI API.'
-  },
-  {
-    id: 'black_forest_labs',
-    label: 'Black Forest Labs',
-    kind: 'cloud',
-    auth: 'api-key',
-    adapter: 'media',
-    credentialKey: 'blackForestLabsApiKey',
-    description: 'FLUX image generation over the Black Forest Labs API.'
-  },
-  {
-    id: 'alibaba_dashscope',
-    label: 'Alibaba DashScope',
-    kind: 'cloud',
-    auth: 'api-key',
-    adapter: 'media',
-    credentialKey: 'dashscopeApiKey',
-    description: 'Alibaba Wan and Qwen image and video generation over DashScope.'
-  }
-];
-
 export const LLM_PROVIDERS: readonly LlmProviderInfo[] = [
   OLLAMA_PROVIDER,
   AGENT_ROUTER_PROVIDER,
-  ...LLM_CATALOG.map(toProviderInfo),
-  ...MEDIA_PROVIDERS
+  ...LLM_CATALOG.map(toProviderInfo)
 ];
 
 /** Popular shortlist shown before "Show all providers". */

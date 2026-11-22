@@ -1,6 +1,6 @@
 # Contributing to OpenScene
 
-Thanks for improving OpenScene. This is a local-first Electron desktop app: keep project media, recordings, exports, voice samples, and processing on the user's device unless a proposal explicitly changes that boundary.
+OpenScene is a local video editor with Timeline, a node Canvas and an editing agent. Desktop and mobile share the project editing rules. Keep media storage and rendering on the user's device; model requests use the explicitly chosen provider and existing approval gates.
 
 ## Before You Start
 
@@ -26,6 +26,7 @@ Thanks for improving OpenScene. This is a local-first Electron desktop app: keep
    npm run build
    ```
    FFmpeg-backed tests require a local `ffmpeg` executable on `PATH` or `VIDEO_TOOL_FFMPEG_PATH`; do not skip or weaken media tests.
+   Initialize `external/opencut` before these checks. Also run `npm ci` and `npm run typecheck` in `mobile/`. Editing behavior belongs in `src/shared/` and must be exposed in both surfaces and agent capability discovery. Exercise affected mobile screens in a development client and report any unverified device behavior.
 5. Push the branch and open a pull request **to `dev`**. Complete the pull request template, link the issue, and describe validation performed.
 
 Releases are prepared separately through reviewed pull requests from **`dev` to `main`**. Do not target feature work directly at `main`.
@@ -33,6 +34,10 @@ Releases are prepared separately through reviewed pull requests from **`dev` to 
 ## Code and Security Expectations
 
 Read [AGENTS.md](AGENTS.md) before changing application code. Preserve the Electron main/preload/renderer boundary, typed IPC contracts, and local-first behavior. Never expose raw Electron or Node APIs to the renderer, add telemetry or network calls incidentally, or commit generated media, secrets, or user data.
+
+Canvas evaluation, templates and node arrangement share one implementation. Agent batches must validate before one save; malformed inputs must not partially mutate a project. Keep original media intact and preserve old project codecs and identifiers. See the [architecture](docs/architecture/editor-project.md) and [documentation index](docs/README.md).
+
+For media changes, verify a real export's frames, audio and measured output. The optional [Linux environment](docs/media-analysis-environment.md) runs a committed snapshot with executable FFmpeg/FFprobe and separate dependencies. Documentation-only changes need link/content checks and relevant existing documentation tests; report historical media results as historical.
 
 ## Review Expectations
 

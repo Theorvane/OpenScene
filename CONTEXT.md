@@ -1,20 +1,15 @@
-# OpenScene editing
+# Current project context
 
-OpenScene organizes local media into projects and lets people make cuts through an editor workbench.
+OpenScene is a local video editor with Timeline, a node Canvas and an editing agent over one project. The product starts with imported media and ends with a reviewed export.
 
-## Language
+- Timeline uses pinned OpenCut presentation with OpenScene's controller, shared rules and FFmpeg export.
+- Canvas has 12 block types, four quick starts, typed connections, inline settings and final-output application to tracks.
+- Node layout supports flow, grid, alignment and spacing. Source/block positions are saved and undoable.
+- Processing preserves original inputs. Refresh inputs explicitly adopts the current timeline.
+- The shared batch surface exposes 34 editing operations to desktop and mobile agents. Invalid batches do not partially save.
+- Desktop multimodal review attaches timestamped source frames; transcription uses configured local FFmpeg/whisper.cpp runtimes.
+- Mobile uses shared editing rules, touch controls and native export. Chat-based frame/speech inspection remains desktop-only.
 
-**Project**:
-A named collection of media assets, a cut, and related production material that can be reopened for further work.
+Generation workspaces, production planning and voice synthesis have been removed. Legacy fields and identifiers remain for stored-document compatibility.
 
-**Media asset**:
-A source video, audio recording, or still image available to use in a project.
-_Avoid_: Timeline clip, file path
-
-**Cut**:
-The timed arrangement of clips, titles, and transitions that determines a project's finished video.
-_Avoid_: Editor screen
-
-**Editor workbench**:
-The visual surface where a person previews and changes a cut.
-_Avoid_: Project, cut
+Read [AGENTS.md](AGENTS.md) before changing code. [README.md](README.md) introduces the product, [DESIGN.md](DESIGN.md) describes interaction rules, and the [documentation index](docs/README.md) links implementation and verification guides. Record verification against a specific revision; historical test counts are not permanent guarantees.

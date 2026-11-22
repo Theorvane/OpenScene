@@ -4,6 +4,20 @@ import { EDITOR_LAYOUT_DEFAULT_PREFERENCE } from '../src/renderer/src/editor/edi
 import { getEditorNativeMenuState } from '../src/renderer/src/editor/editorNativeMenuState';
 
 describe('editor native menu state mapping', () => {
+  it('keeps trim disabled outside the clip and disables timeline panels in Canvas', () => {
+    const state = getEditorNativeMenuState({
+      canRedoTimeline: false, canUndoTimeline: true, hasProject: true, hasSelectedClip: true,
+      hasUnsavedTimeline: true, isBusy: false, isPlaying: false, canSplitAtPlayhead: false,
+      canDetachAudio: true, canvasMode: true, layoutPreference: EDITOR_LAYOUT_DEFAULT_PREFERENCE
+    });
+    expect(state.commands.trimStartToPlayhead.enabled).toBe(false);
+    expect(state.commands.trimEndToPlayhead.enabled).toBe(false);
+    expect(state.commands.duplicateClip.enabled).toBe(true);
+    expect(state.commands.detachAudio.enabled).toBe(true);
+    expect(state.commands.toggleInspector.enabled).toBe(false);
+    expect(state.commands.toggleLeftDock.enabled).toBe(false);
+    expect(state.commands.saveTimeline.enabled).toBe(true);
+  });
   it('Given no open project, When menu state is derived, Then timeline mutations are disabled while layout commands remain enabled', () => {
     const state = getEditorNativeMenuState({
       canRedoTimeline: false,

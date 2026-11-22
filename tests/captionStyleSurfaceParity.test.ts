@@ -29,7 +29,7 @@ describe('Caption Studio surface parity', () => {
 
   it('exposes batch styling on both editors and keeps custom font upload out of the contract', async () => {
     const [desktop, mobile, shared] = await Promise.all([
-      source('src/renderer/src/editor/InspectorPanel.tsx'),
+      source('src/renderer/src/editor/TypographyInspector.tsx'),
       source('mobile/src/screens/EditScreen.tsx'),
       source('src/shared/captionStyle.ts')
     ]);

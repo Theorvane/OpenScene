@@ -11,6 +11,11 @@ const promise: ExportPromise = {
 };
 
 describe('reviewing the finished file against the cut it came from', () => {
+  it('reports Linux verification only after measured metadata passes review', () => {
+    const review = reviewExport(promise, { ...promise, hasSoundTrack: true, verificationRuntime: 'linux-container' });
+    expect(review).toEqual({ checked: true, ok: true, problems: [], verificationRuntime: 'linux-container' });
+    expect(exportReviewSummary(review)).toContain('Verified with Linux FFprobe.');
+  });
   it('passes a file that matches, and tolerates the rounding a container does', () => {
     const review = reviewExport(promise, {
       widthPx: 1920,

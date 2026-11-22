@@ -62,6 +62,11 @@ export type NativeTitle = {
   positionX: number;
   positionY: number;
   fontWeight: 'regular' | 'bold';
+  fontFamily?: 'sans' | 'serif' | 'mono' | 'korean';
+  shadowColor?: string;
+  shadowOpacity?: number;
+  shadowOffsetX?: number;
+  shadowOffsetY?: number;
   outlineColor: string;
   outlineWidthPx: number;
   backgroundColor: string;

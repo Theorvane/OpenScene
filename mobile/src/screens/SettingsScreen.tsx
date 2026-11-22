@@ -1,41 +1,19 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
+import { useCallback, useEffect, useState } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { PROVIDER_KEYS, readSlot } from '../lib/credentials';
-import { useAnalyticsPreference } from '../lib/analyticsClient';
-import { describeSpend, type GenerationSpendView } from '@openvideo/shared/generationSpend';
-import { SPEND_FEATURES, useSpendPermissions } from '../lib/permissions';
-import { setSpendCap, spendView } from '../lib/spendLedger';
-import { describeProvider, providersForDomain } from '../lib/mediaProviders';
-import { ProviderConnect } from '../components/ProviderConnect';
-import { AddCustomProvider } from '../components/AddCustomProvider';
-import { customCredentialKey, removeCustomProvider, useCustomProviders } from '../lib/customProviders';
-import { LLM_PROVIDERS, POPULAR_LLM_PROVIDER_IDS, getLlmCatalogProvider } from '@openvideo/shared/llmProviders';
 import { DEFAULT_LLM_MODELS } from '@openvideo/shared/llmModels';
+import { LLM_PROVIDERS, POPULAR_LLM_PROVIDER_IDS, getLlmCatalogProvider } from '@openvideo/shared/llmProviders';
+import { AddCustomProvider } from '../components/AddCustomProvider';
 import { FormScreen } from '../components/FormScreen';
+import { ProviderConnect } from '../components/ProviderConnect';
 import { APP_VERSION, CONTACT_EMAIL, DEVELOPER_NAME, DEVELOPER_SITE, PRIVACY_URL, TERMS_URL } from '../lib/about';
+import { useAnalyticsPreference } from '../lib/analyticsClient';
+import { PROVIDER_KEYS, readSlot } from '../lib/credentials';
+import { customCredentialKey, removeCustomProvider, useCustomProviders } from '../lib/customProviders';
 import { theme } from '../lib/theme';
 import { MIN_TAP, press } from '../lib/touch';
-
-/**
- * Providers, grouped by what connecting one lets you do.
- *
- * A flat list of every credential answered "what keys exist" and never "what do
- * I need for the thing I am trying to do". Generation is chosen per domain, so
- * the keys are presented per domain — and a provider that serves two, as OpenAI
- * serves both video and images, appears under both, because in each place it
- * answers a different question. It is one key underneath: the LLM catalog and
- * the media table name the same slot, so connecting it anywhere connects it
- * everywhere, which is why connection state is read by slot and not by section.
- */
-
-const MEDIA_SECTIONS = [
-  { domain: 'video-generation', title: 'Video', blurb: 'Engines that render shots.' },
-  { domain: 'image-generation', title: 'Images', blurb: 'Stills, and reference frames for video.' },
-  { domain: 'voice-generation', title: 'Voice', blurb: 'Narration. Synthesis is not ported to mobile yet.' }
-] as const;
 
 type Row = { readonly slot: string; readonly label: string; readonly hint: string; readonly meta: string };
 
@@ -57,33 +35,6 @@ function chatRows(): readonly Row[] {
 
 export function SettingsScreen({ topInset }: { readonly topInset: number }) {
   const [connected, setConnected] = useState<Readonly<Record<string, boolean>>>({});
-  const permissions = useSpendPermissions();
-  // What generation has cost this month, and the ceiling on it. Read once on
-  // mount and after a change, because nothing else on this screen moves it.
-  const [spend, setSpend] = useState<GenerationSpendView>(() => spendView(new Date().toISOString()));
-  const [capDraft, setCapDraft] = useState(() => {
-    const current = spendView(new Date().toISOString()).capUsd;
-    return current === undefined ? '' : String(current);
-  });
-  const [capError, setCapError] = useState('');
-
-  const saveCap = (): void => {
-    const trimmed = capDraft.trim();
-    if (trimmed.length === 0) {
-      setCapError('');
-      setSpend(setSpendCap(null));
-      return;
-    }
-    const parsed = Number(trimmed);
-    if (!Number.isFinite(parsed) || parsed <= 0) {
-      // Refused rather than rounded into something: a limit nobody meant is
-      // worse than no limit, because it is trusted.
-      setCapError('Enter a number of dollars greater than zero, or leave it empty for no limit.');
-      return;
-    }
-    setCapError('');
-    setSpend(setSpendCap(parsed));
-  };
   const analytics = useAnalyticsPreference();
   const { providers: customProviders, refresh: refreshCustom } = useCustomProviders();
 
@@ -105,27 +56,11 @@ export function SettingsScreen({ topInset }: { readonly topInset: number }) {
     <FormScreen topInset={topInset}>
       <Text style={styles.h1}>Providers</Text>
       <Text style={styles.sub}>
-        Everything the app generates runs against your own accounts. Keys are held in the device keystore — Keychain on
+        The editing assistant uses a provider you connect. Keys are held in the device keystore — Keychain on
         iOS, Keystore on Android — never in the app bundle or in plain storage, and never read back for display.
       </Text>
 
-      {MEDIA_SECTIONS.map((section) => (
-        <View key={section.domain} style={styles.section}>
-          <Text style={styles.sectionTitle}>{section.title}</Text>
-          <Text style={styles.sectionBlurb}>{section.blurb}</Text>
-          {providersForDomain(section.domain).map((provider) => (
-            <ProviderConnect
-              key={`${section.domain}-${provider.slot}`}
-              slot={provider.slot}
-              label={provider.label}
-              hint={provider.hint}
-              meta={describeProvider(provider)}
-              connected={connected[provider.slot] === true}
-              onChange={() => void refresh()}
-            />
-          ))}
-        </View>
-      ))}
+
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Assistant</Text>
@@ -168,59 +103,11 @@ export function SettingsScreen({ topInset }: { readonly topInset: number }) {
         <AddCustomProvider onAdded={refreshCustom} />
       </View>
 
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Browser sessions</Text>
-        <Text style={styles.sectionBlurb}>
-          Gemini and Grok browser-session sign-in is desktop-only because it needs an isolated Electron profile and OS
-          safeStorage. Mobile keeps this path disabled; use provider API keys stored in Keychain or Keystore here.
-        </Text>
-      </View>
 
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Spending permissions</Text>
-        <Text style={styles.sectionBlurb}>
-          Generation charges your own provider account, so each kind asks before the first one. “Always” is remembered
-          per kind — allowing every image is a different decision from allowing every video, and they do not cost the
-          same.
-        </Text>
-        {SPEND_FEATURES.map((feature) => {
-          const standing = permissions.standingFor(feature);
-          return (
-            <View key={feature} style={styles.permRow}>
-              <Text style={styles.permLabel}>{feature.replace('-generation', '')}</Text>
-              <Text style={styles.permValue}>{standing === null ? 'asks each time' : standing}</Text>
-              {standing !== null && (
-                <Pressable accessibilityRole="button" onPress={() => permissions.forget(feature)} style={press(styles.permReset)}>
-                  <Text style={styles.permResetText}>Reset</Text>
-                </Pressable>
-              )}
-            </View>
-          );
-        })}
-      </View>
 
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Monthly limit</Text>
-        <Text style={styles.sectionBlurb}>
-          {describeSpend(spend.total, spend.capUsd)} A job that would take the month past the limit is refused before
-          it reaches a provider. Leave it empty for no limit.
-        </Text>
-        <View style={styles.capRow}>
-          <TextInput
-            style={styles.capInput}
-            value={capDraft}
-            onChangeText={setCapDraft}
-            placeholder="No limit"
-            placeholderTextColor={theme.textWeak}
-            keyboardType="decimal-pad"
-            accessibilityLabel="Monthly spending limit in dollars"
-          />
-          <Pressable accessibilityRole="button" onPress={saveCap} style={press(styles.permReset)}>
-            <Text style={styles.permResetText}>Save</Text>
-          </Pressable>
-        </View>
-        {capError.length > 0 && <Text style={styles.capError}>{capError}</Text>}
-      </View>
+
+
+
 
       {/*
         Usage reporting, and the switch for it.
@@ -253,8 +140,7 @@ export function SettingsScreen({ topInset }: { readonly topInset: number }) {
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>About</Text>
         <Text style={styles.sectionBlurb}>
-          OpenScene is free, with no subscription, paid tier, or ads. AI generation uses providers you connect and may
-          incur charges on your own provider account; each kind asks for spending permission first.
+          OpenScene is free, with no subscription, paid tier, or ads. OpenScene edits imported media locally. Requests to the editing assistant may incur charges on your own provider account.
         </Text>
         <View style={styles.aboutRow}>
           <Text style={styles.aboutLabel}>Developer</Text>

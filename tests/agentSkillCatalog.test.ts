@@ -35,8 +35,8 @@ const skills = loadSkills();
 describe('agent skill catalog', () => {
   it('found the skills to check', () => {
     expect(definedTools.size).toBeGreaterThan(10);
-    expect(skills.map((skill) => skill.name)).toContain('video-from-scenario');
-    expect(skills.map((skill) => skill.name)).toContain('narration-to-timeline');
+    expect(skills.map((skill) => skill.name)).not.toContain('video-from-scenario');
+    expect(skills.map((skill) => skill.name)).toContain('ffmpeg-skill');
     expect(skills.map((skill) => skill.name)).toContain('cut-review');
   });
 
@@ -72,7 +72,7 @@ describe('agent skill catalog', () => {
     // A skill read as a spec while the code does something else is worse than
     // no skill; the ones backed by code say which file backs them.
     const codeBacked = skills.filter((skill) => skill.body.includes('Where this is enforced'));
-    expect(codeBacked.length).toBeGreaterThanOrEqual(3);
+    expect(skills.find(skill => skill.name === 'cut-review')?.allowedTools).toContain('getProjectTimeline');
     for (const skill of codeBacked) {
       expect(skill.body, `${skill.name} should cite a source file`).toMatch(/src\/(main|shared)\/[A-Za-z]+\.ts/);
     }
