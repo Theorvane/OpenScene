@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 
 import type { ApiResponse } from '../shared/models';
-import { resultAssetOriginKey, type ImportProjectAssetsResult, type ImportRecordingResultAssetInput, type ImportTtsResultAssetInput, type MediaKind, type ResultAssetOrigin } from '../shared/timelineTypes';
-import { parseImportRecordingResultAssetInput, parseImportTtsResultAssetInput } from '../shared/timelineValidators';
+import { resultAssetOriginKey, type ImportProjectAssetsResult, type ImportRecordingResultAssetInput, type MediaKind, type ResultAssetOrigin } from '../shared/timelineTypes';
+import { parseImportRecordingResultAssetInput } from '../shared/timelineValidators';
 import { AssetImportValidationError } from './assetImportPolicy';
 import type { AssetLibraryStore } from './assetLibraryStore';
 import { fail, ok } from './ipcResponses';
@@ -18,8 +18,6 @@ export type CompletedResultAssetSource = {
 export type ResultAssetImportDependencies = {
   readonly assets: AssetLibraryStore;
   readonly resolveRecordingSource: (sessionId: string) => CompletedResultAssetSource | null;
-  /** Completed cloud voice/video generation jobs. */
-  readonly resolveAiSource: (jobId: string) => CompletedResultAssetSource | null;
 };
 
 function inputFromSource(projectId: string, source: CompletedResultAssetSource, resultOrigin: ResultAssetOrigin) {
@@ -68,27 +66,12 @@ export class ResultAssetImportService {
     );
   }
 
-  async importAiResult(payload: unknown): Promise<ApiResponse<ImportProjectAssetsResult>> {
-    const input = parseImportTtsResultAssetInput(payload);
-    if (input === null) {
-      return fail('INVALID_INPUT', 'The AI result import payload was not valid.');
-    }
-    return this.importResult(
-      input,
-      { kind: 'ai-generation', resultId: input.jobId },
-      () => this.dependencies.resolveAiSource(input.jobId),
-      'ai-generation',
-      { code: 'TTS_RESULT_UNAVAILABLE', message: 'The completed AI generation result is not available.' },
-      'The completed AI generation result could not be imported.'
-    );
-  }
-
   private importResult(
-    input: ImportRecordingResultAssetInput | ImportTtsResultAssetInput,
+    input: ImportRecordingResultAssetInput,
     resultOrigin: ResultAssetOrigin,
     resolveSource: () => CompletedResultAssetSource | null,
-    resultKind: 'recording' | 'ai-generation',
-    unavailable: { readonly code: 'SESSION_NOT_FOUND' | 'TTS_RESULT_UNAVAILABLE'; readonly message: string },
+    resultKind: 'recording',
+    unavailable: { readonly code: 'SESSION_NOT_FOUND'; readonly message: string },
     failureMessage: string
   ): Promise<ApiResponse<ImportProjectAssetsResult>> {
     const importKey = JSON.stringify([input.projectId, resultAssetOriginKey(resultOrigin)]);
@@ -104,11 +87,11 @@ export class ResultAssetImportService {
   }
 
   private async performImport(
-    input: ImportRecordingResultAssetInput | ImportTtsResultAssetInput,
+    input: ImportRecordingResultAssetInput,
     resultOrigin: ResultAssetOrigin,
     resolveSource: () => CompletedResultAssetSource | null,
-    resultKind: 'recording' | 'ai-generation',
-    unavailable: { readonly code: 'SESSION_NOT_FOUND' | 'TTS_RESULT_UNAVAILABLE'; readonly message: string },
+    resultKind: 'recording',
+    unavailable: { readonly code: 'SESSION_NOT_FOUND'; readonly message: string },
     failureMessage: string
   ): Promise<ApiResponse<ImportProjectAssetsResult>> {
     const requestId = randomUUID().slice(0, 8);

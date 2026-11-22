@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { STILL_DEFAULT_HOLD_MS } from '@openvideo/shared/timelineStills';
+import { FormScreen } from '../components/FormScreen';
+import { CloseIcon } from '../components/Icon';
+import { deliverExport } from '../lib/exportComposition';
 import {
   appendAssetToTimeline,
   assetByteLength,
@@ -9,29 +13,8 @@ import {
   readProject,
   type MobileAsset
 } from '../lib/projectStore';
-import { STILL_DEFAULT_HOLD_MS } from '@openvideo/shared/timelineStills';
-import { deliverExport } from '../lib/exportComposition';
-import { FormScreen } from '../components/FormScreen';
-import { CloseIcon } from '../components/Icon';
 import { theme } from '../lib/theme';
 import { MIN_TAP, press } from '../lib/touch';
-
-/**
- * Everything the project holds, in one place.
- *
- * A generated shot went straight onto the timeline and a generated still went
- * nowhere at all, so there was no answer to "what have I made?" — only the cut,
- * which is a different question. The Media panel in the editing toolbar came
- * closest, but it is a toggle inside the tool that uses it, and it only ever
- * listed what could be placed.
- *
- * Stills and clips sit together because the user made them the same way and
- * thinks of them the same way. What differs is what can be done with each: a
- * clip can go on the timeline, a still cannot, and saying so on the row is
- * clearer than two lists that need explaining.
- */
-
-type Filter = 'all' | 'generated' | 'imported';
 
 function formatBytes(bytes: number | null): string {
   if (bytes === null) return 'missing';
@@ -59,7 +42,6 @@ export function LibraryScreen({
 }) {
   const [assets, setAssets] = useState<readonly MobileAsset[]>([]);
   const [usage, setUsage] = useState<Readonly<Record<string, number>>>({});
-  const [filter, setFilter] = useState<Filter>('all');
   const [note, setNote] = useState<string | null>(null);
 
   const refresh = useCallback((): void => {
@@ -132,34 +114,17 @@ export function LibraryScreen({
       ]
     );
   };
-
-  const shown = assets.filter((asset) => {
-    if (filter === 'all') return true;
-    const generated = asset.origin?.kind === 'generated';
-    return filter === 'generated' ? generated : !generated;
-  });
+  const shown = assets;
 
   return (
     <FormScreen topInset={topInset} keyboardOffset={keyboardOffset} contentStyle={styles.content}>
       <Text style={styles.h1}>Library</Text>
       <Text style={styles.sub}>
-        Everything this project holds — clips you imported, shots and stills the app generated. Deleting is per
+        Media imported into this project. Deleting is per
         project: nothing here touches your phone&apos;s own photo library unless you save it there.
       </Text>
 
-      <View style={styles.row}>
-        {(['all', 'generated', 'imported'] as const).map((option) => (
-          <Pressable
-            key={option}
-            accessibilityRole="button"
-            accessibilityState={{ selected: option === filter }}
-            onPress={() => setFilter(option)}
-            style={press([styles.chip, option === filter && styles.chipOn])}
-          >
-            <Text style={[styles.chipText, option === filter && styles.chipTextOn]}>{option}</Text>
-          </Pressable>
-        ))}
-      </View>
+
 
       {note !== null && (
         <Pressable accessibilityRole="button" onPress={() => setNote(null)} style={press(styles.note)}>
@@ -171,11 +136,7 @@ export function LibraryScreen({
         <Text style={styles.empty}>Open a project to see what it holds.</Text>
       ) : shown.length === 0 ? (
         <Text style={styles.empty}>
-          {filter === 'generated'
-            ? 'Nothing generated yet. Shots come from the Video tab, stills from Image or the assistant.'
-            : filter === 'imported'
-              ? 'Nothing imported yet. Import a clip from the Edit tab.'
-              : 'Nothing here yet. Import a clip, or generate a shot or a still.'}
+          Import a clip from the Edit tab to start your project.
         </Text>
       ) : (
         shown.map((asset) => {
@@ -199,11 +160,7 @@ export function LibraryScreen({
                     {describe(asset, assetByteLength(projectId, asset))} ·{' '}
                     {used === 0 ? 'not on the timeline' : `${used} clip${used === 1 ? '' : 's'}`}
                   </Text>
-                  {asset.origin?.kind === 'generated' && (
-                    <Text style={styles.prompt} numberOfLines={3}>
-                      {asset.origin.prompt.length === 0 ? asset.origin.modelId : `“${asset.origin.prompt}”`}
-                    </Text>
-                  )}
+
                 </View>
                 <Pressable
                   accessibilityRole="button"

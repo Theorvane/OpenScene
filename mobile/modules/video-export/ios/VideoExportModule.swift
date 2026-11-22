@@ -51,6 +51,11 @@ struct TitleInput: Record {
   @Field var positionX: Double = 0
   @Field var positionY: Double = 0
   @Field var fontWeight: String = "regular"
+  @Field var fontFamily: String = "legacy"
+  @Field var shadowColor: String = "#000000"
+  @Field var shadowOpacity: Double = 0
+  @Field var shadowOffsetX: Double = 4
+  @Field var shadowOffsetY: Double = 4
   @Field var outlineColor: String = "#000000"
   @Field var outlineWidthPx: Double = 0
   @Field var backgroundColor: String = "#000000"
@@ -225,6 +230,11 @@ private extension ExportRequest {
           positionX: $0.positionX,
           positionY: $0.positionY,
           bold: $0.fontWeight == "bold",
+          fontFamily: $0.fontFamily,
+          shadowColor: $0.shadowColor,
+          shadowOpacity: $0.shadowOpacity,
+          shadowOffsetX: $0.shadowOffsetX,
+          shadowOffsetY: $0.shadowOffsetY,
           outlineColor: $0.outlineColor,
           outlineWidthPx: $0.outlineWidthPx,
           backgroundColor: $0.backgroundColor,

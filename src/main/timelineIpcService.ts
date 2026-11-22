@@ -1,8 +1,9 @@
-import { extname, basename } from 'node:path';
+import { basename, extname } from 'node:path';
 import { parseProjectType } from '../shared/projectTypes';
 
-import type { ApiResponse } from '../shared/models';
+import { parseSaveAiProjectDocumentInput } from '../shared/aiProjectDomain';
 import { MEDIA_PLAYBACK_SCHEME } from '../shared/mediaPlaybackUrls';
+import type { ApiResponse } from '../shared/models';
 import type {
   CreateProjectInput,
   CreateProjectResult,
@@ -22,18 +23,17 @@ import {
   parseSaveTimelineInput,
   parseUpdateAssetMetadataInput
 } from '../shared/timelineValidators';
+import { assertAssetSelectionCount, AssetImportValidationError, DEFAULT_ASSET_IMPORT_LIMITS } from './assetImportPolicy';
 import {
   AssetLibraryStore,
   type AssetPlaybackSource,
   type ImportAssetFromPathInput,
   type OpenedAssetPlaybackSource
 } from './assetLibraryStore';
-import { AssetImportValidationError, assertAssetSelectionCount, DEFAULT_ASSET_IMPORT_LIMITS } from './assetImportPolicy';
 import { supportedAssetDialogExtensions, supportedAssetFormatForExtension } from './assetLibrarySupport';
 import { fail, ok } from './ipcResponses';
 import { ProjectStore } from './projectStore';
 import { ProjectStoreError } from './projectStoreSupport';
-import { parseSaveAiProjectDocumentInput } from '../shared/aiProjectDomain';
 
 type NativeFileDialogResult = {
   readonly canceled: boolean;
@@ -125,35 +125,6 @@ export class TimelineIpcService {
       return ok({ cancelled: false, created: result.created, project: result.project });
     } catch (error: unknown) {
       return safeProjectError(error, 'UNKNOWN_ERROR', 'The project folder could not be opened.');
-    }
-  }
-
-  /** Copy media only into a new private editing project; never modify the source. */
-  async createEditingCopy(payload: unknown): Promise<ApiResponse<LocalProjectSnapshot>> {
-    const input = parseOpenProjectInput(payload);
-    if (input === null) return fail('INVALID_INPUT', 'Invalid source project.');
-    let destination: LocalProjectSnapshot | null = null;
-    try {
-      const source = await this.dependencies.projects.open(input.projectId);
-      if (source === null) return projectMissing(input.projectId);
-      if (source.projectType === 'editing') return fail('INVALID_INPUT', 'Choose a generation project to send to editing.');
-      if (source.assets.length === 0) return fail('INVALID_INPUT', 'Save media to the project before sending it to editing.');
-      const sources = await Promise.all(source.assets.map(async asset => {
-        const playback = await this.dependencies.assets.getPlaybackSource(source.id, asset.id);
-        if (playback === null) throw new ProjectStoreError('A source asset is missing or unavailable. Nothing was moved.');
-        return { asset, playback };
-      }));
-      destination = await this.dependencies.projects.create({ name: `${source.name.slice(0, 65)} - Edit`, projectType: 'editing' });
-      await this.dependencies.assets.importMany(sources.map(({ asset, playback }) => ({
-        projectId: destination!.id, sourcePath: playback.filePath, displayName: asset.displayName,
-        kind: asset.kind, mimeType: asset.mimeType
-      })));
-      const saved = await this.dependencies.projects.open(destination.id);
-      if (saved === null) throw new ProjectStoreError('The editing copy could not be reopened.');
-      return ok(saved);
-    } catch (error) {
-      if (destination !== null) await this.dependencies.projects.delete(destination.id).catch(() => undefined);
-      return safeProjectError(error, 'FILE_WRITE_FAILED', 'Media could not be copied. The source project is unchanged.');
     }
   }
 

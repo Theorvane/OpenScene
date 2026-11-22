@@ -7,12 +7,6 @@ import {
   removeAssetFromAiProjectDocument,
   type AiProjectDocument
 } from '../src/shared/aiProjectDomain';
-import {
-  addGenerationCandidate,
-  decideGenerationCandidate,
-  setCandidateContinuity,
-  updateGenerationCandidate
-} from '../src/shared/generationReview';
 
 const CREATED = '2026-09-02T06:10:00.000Z';
 
@@ -117,60 +111,6 @@ describe('AI project domain', () => {
     expect(withoutOutput.generations[0]?.outputAssetIds).toEqual([]);
     expect(withoutOutput.provenance[0]?.outputAssetIds).toEqual([]);
     expect(parseAiProjectDocument(withoutOutput, new Set())).toEqual(withoutOutput);
-  });
-
-  it('records, reviews and replaces a single approved candidate per Writer shot', () => {
-    const original = validDocument();
-    const first = {
-      ...original,
-      generations: [{ ...original.generations[0]!, review: {
-        decision: 'approved' as const,
-        continuity: { identity: 'pass' as const, wardrobeProps: 'pass' as const, settingPalette: 'pass' as const, motionDirection: 'pass' as const, boundaryMatch: 'pass' as const },
-        notes: '', reviewedAt: CREATED
-      } }]
-    };
-    const added = addGenerationCandidate(first, {
-      id: 'generation-2', shotId: 'shot-1', providerId: 'gemini_veo', modelId: 'veo-3.1',
-      capability: 'text_to_video', prompt: 'A stronger second take.', createdAt: '2026-09-02T06:12:00.000Z',
-      parentGenerationId: 'generation-1'
-    });
-    expect(added.ok).toBe(true);
-    if (!added.ok) return;
-    expect(added.document.shots[0]?.generationIds).toEqual(['generation-1', 'generation-2']);
-
-    const completed = updateGenerationCandidate(added.document, 'generation-2', {
-      status: 'completed', outputAssetIds: ['asset-output-2'], updatedAt: '2026-09-02T06:13:00.000Z'
-    });
-    expect(completed.ok).toBe(true);
-    if (!completed.ok) return;
-
-    let reviewed = completed.document;
-    for (const field of ['identity', 'wardrobeProps', 'settingPalette', 'motionDirection', 'boundaryMatch'] as const) {
-      const result = setCandidateContinuity(reviewed, 'generation-2', field, 'pass', '');
-      expect(result.ok).toBe(true);
-      if (!result.ok) return;
-      reviewed = result.document;
-    }
-    const approved = decideGenerationCandidate(reviewed, 'generation-2', 'approved', '', '2026-09-02T06:14:00.000Z');
-    expect(approved.ok).toBe(true);
-    if (!approved.ok) return;
-    expect(approved.document.generations.map((entry) => entry.review?.decision)).toEqual(['rejected', 'approved']);
-    expect(parseAiProjectDocument(approved.document, new Set(['asset-character', 'asset-output', 'asset-output-2']))).toEqual(approved.document);
-  });
-
-  it('blocks approval until import and the full human continuity review are complete', () => {
-    const added = addGenerationCandidate(validDocument(), {
-      id: 'generation-2', shotId: 'shot-1', providerId: 'gemini_veo', modelId: 'veo-3.1',
-      capability: 'text_to_video', prompt: 'Another take.', createdAt: '2026-09-02T06:12:00.000Z'
-    });
-    if (!added.ok) throw new Error(added.reason);
-    expect(decideGenerationCandidate(added.document, 'generation-2', 'approved', '', CREATED)).toMatchObject({ ok: false, reason: 'Only a completed candidate can be approved.' });
-    const completed = updateGenerationCandidate(added.document, 'generation-2', { status: 'completed', updatedAt: CREATED });
-    if (!completed.ok) throw new Error(completed.reason);
-    expect(decideGenerationCandidate(completed.document, 'generation-2', 'approved', '', CREATED)).toMatchObject({ ok: false, reason: 'Import the candidate into the project before approving it.' });
-    const imported = updateGenerationCandidate(completed.document, 'generation-2', { outputAssetIds: ['asset-output-2'], updatedAt: CREATED });
-    if (!imported.ok) throw new Error(imported.reason);
-    expect(decideGenerationCandidate(imported.document, 'generation-2', 'approved', '', CREATED)).toMatchObject({ ok: false, reason: 'Review every continuity item before approval.' });
   });
 
   it('invalidates an approved review when its output asset is removed', () => {

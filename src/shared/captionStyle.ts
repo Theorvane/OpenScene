@@ -1,5 +1,6 @@
 import type { TimelineDocument, TimelineTitle, TimelineTitleStyle } from './timelineTypes';
 import { hasAllowedKeys, isPlainRecord } from './timelineValidationPrimitives';
+import { isTitleFontFamily, parseTitleShadow } from './titleTypography';
 
 export const CAPTION_PLACEMENTS = ['free', 'top', 'center', 'bottom'] as const;
 export const CAPTION_FONT_WEIGHTS = ['regular', 'bold'] as const;
@@ -63,8 +64,11 @@ function isHexColor(value: unknown): value is string {
 
 export function parseTimelineTitleStyle(value: unknown): TimelineTitleStyle | null {
   if (!isPlainRecord(value) || !hasAllowedKeys(value, [
-    'fontWeight', 'outlineColor', 'outlineWidthPx', 'backgroundColor', 'backgroundOpacity', 'paddingPx', 'placement'
+    'fontWeight', 'outlineColor', 'outlineWidthPx', 'backgroundColor', 'backgroundOpacity', 'paddingPx', 'placement', 'fontFamily', 'shadow'
   ])) return null;
+  if (value.fontFamily !== undefined && !isTitleFontFamily(value.fontFamily)) return null;
+  const shadow = value.shadow === undefined ? undefined : parseTitleShadow(value.shadow);
+  if (shadow === null) return null;
   if (!(CAPTION_FONT_WEIGHTS as readonly unknown[]).includes(value.fontWeight) ||
     !(CAPTION_PLACEMENTS as readonly unknown[]).includes(value.placement) ||
     !isHexColor(value.outlineColor) || !isHexColor(value.backgroundColor) ||
@@ -75,6 +79,8 @@ export function parseTimelineTitleStyle(value: unknown): TimelineTitleStyle | nu
     typeof value.paddingPx !== 'number' || !Number.isFinite(value.paddingPx) ||
     value.paddingPx < TITLE_STYLE_LIMITS.paddingPx.min || value.paddingPx > TITLE_STYLE_LIMITS.paddingPx.max) return null;
   return {
+    ...(value.fontFamily === undefined ? {} : { fontFamily: value.fontFamily as import('./titleTypography').TitleFontFamily }),
+    ...(shadow === undefined ? {} : { shadow }),
     fontWeight: value.fontWeight as TimelineTitleStyle['fontWeight'],
     outlineColor: value.outlineColor,
     outlineWidthPx: value.outlineWidthPx,
@@ -104,7 +110,11 @@ export function applyCaptionPreset(title: TimelineTitle, presetId: CaptionPreset
     color: preset.color,
     positionX: 0,
     positionY: 0,
-    style: { ...preset.style }
+    style: {
+      ...preset.style,
+      ...(title.style?.fontFamily === undefined ? {} : { fontFamily: title.style.fontFamily }),
+      ...(title.style?.shadow === undefined ? {} : { shadow: { ...title.style.shadow } })
+    }
   };
 }
 

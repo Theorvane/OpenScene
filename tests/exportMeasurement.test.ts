@@ -1,8 +1,16 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import * as childProcess from 'node:child_process';
+vi.mock('node:child_process', () => ({ spawn: vi.fn() }));
 
-import { ffprobeArgs, ffprobePathFor, parseFfprobeOutput } from '../src/main/exportMeasurement';
+import { ffprobeArgs, ffprobePathFor, parseFfprobeOutput, measureExportedFile } from '../src/main/exportMeasurement';
 
 describe('measuring a finished export with the discovered toolchain', () => {
+  it('returns unchecked when Windows refuses to launch the probe synchronously', async () => {
+    const spawn = vi.mocked(childProcess.spawn).mockImplementationOnce(() => { throw new Error('spawn UNKNOWN'); });
+    try {
+      await expect(measureExportedFile({ ffmpegPath: '/tools/ffmpeg.exe', filePath: '/exports/cut.mp4' })).resolves.toBeNull();
+    } finally { spawn.mockReset(); }
+  });
   it('looks for ffprobe beside ffmpeg, keeping the platform naming', () => {
     expect(ffprobePathFor('/usr/local/bin/ffmpeg')).toBe('/usr/local/bin/ffprobe');
     expect(ffprobePathFor('/opt/tools/ffmpeg.exe')).toBe('/opt/tools/ffprobe.exe');

@@ -1,58 +1,19 @@
-# ffmpeg-skill integration
+# FFmpeg workflow integration
 
-OpenScene includes a pinned, unmodified MIT snapshot of
-[kajisho5/ffmpeg-skill](https://github.com/kajisho5/ffmpeg-skill), version 3.13.1,
-commit `3145261a1c19f399b9520fad7fdac741871e1426`.
+OpenScene includes the MIT skill through the pinned `external/ffmpeg-skill` Git submodule, from https://github.com/Theorvane/ffmpeg-skill.git, just like `external/opencut`. Initialize both with `git submodule update --init --recursive`. The discoverable `.agents/skills/ffmpeg-skill/SKILL.md` adapter points to the complete external skill. Its `UPSTREAM.json` records the revision and source-file checksums; tools are not duplicated in the adapter directory.
 
-## Two different execution surfaces
+The organization maintains [Theorvane/ffmpeg-skill](https://github.com/Theorvane/ffmpeg-skill), forked from [kajisho5/ffmpeg-skill](https://github.com/kajisho5/ffmpeg-skill). Use the organization fork for OpenScene-specific fixes and reviewed submodule updates. `UPSTREAM.json.managedFork` identifies that maintenance source; `repository`, `commit`, and checksums retain the pinned source's provenance. This migration preserves reviewed commit `3145261a1c19f399b9520fad7fdac741871e1426` (3.13.1); fork main is not silently adopted. For an upgrade, review the fork diff, run its checks and OpenScene integration tests, then update the gitlink, manifest and pins together.
 
-1. **Repository coding agents** can read `.agents/skills/ffmpeg-skill/SKILL.md`
-   and use the bundled 42 Python tools for authorized local media tasks. The
-   snapshot includes scripts, MCP server source, templates, references and
-   the execution-contract documentation. It is not an npm dependency and no
-   installer/postinstall or server auto-start is configured. Python 3.10+ and
-   FFmpeg/ffprobe 6.1+ must already be available. Some optional features require
-   additional local engines/models; do not install or download them implicitly.
-2. **The in-app editing assistants** receive a compact adapted workflow from
-   `src/shared/ffmpegEditingWorkflow.ts` in desktop and mobile system prompts:
-   inspect real metadata → plan → approved supported edit → check/verify → honest
-   report. Their existing tool lists, path boundaries and approval gates stay
-   unchanged. The desktop app does **not** execute the external Python tools or
-   start their MCP server, and the mobile assistant does not gain timeline or
-   export tools just by reading this workflow. A job ID alone is not proof that
-   an export completed; unavailable output inspection must be disclosed.
+Coding agents use its probe, plan, edit and verification workflow for authorized local media work. The in-app assistant receives the adapted instructions in src/shared/ffmpegEditingWorkflow.ts.
 
-This is a real prompt integration plus a repository skill, not a claim that all
-42 tools are exposed to the application's LLM. A future execution adapter needs
-its own typed inputs, main-process path authorization, cancellation/time limits,
-result imports, capability discovery and tests. Do not add a general shell tool.
+The app exposes typed editing tools. Frame inspection uses local FFmpeg to extract timestamped JPEG images. The conversation carries the actual images for multimodal review. Local whisper.cpp transcribes bounded audio ranges. Saved timeline edits and MP4 export use the existing editing pipeline.
 
-## Developer usage
+The app's editing agent discovers its implemented blocks and batch operations through `getEditingCapabilities` and inspects graphs through `getCanvasWorkflow`. `editProject` applies shared canvas, layout and timeline edits atomically. This does not dynamically expose all bundled Python scripts as chat tools. Mobile uses the same editing rules with native export; desktop frame/speech inspection has no mobile chat equivalent.
 
-From the repository root, inspect the static tool contract (no media access):
+The bundled Python tool collection remains a coding-agent skill. Originals are preserved and output inspection establishes which results can be reported as verified.
 
-```sh
-python3 .agents/skills/ffmpeg-skill/scripts/_contract.py --json --static
-```
+The FFmpeg source file, executable path and command arguments remain in the main process.
 
-For an authorized local file, follow the upstream skill's probe → dry-run → edit
-→ check → verify workflow. Use a separate destination, never overwrite originals,
-and inspect actual output/frames before claiming quality. Dry-run may still
-probe media; optional ASR backends can download models unless explicitly managed.
-Do not feed untrusted remote paths, arbitrary recipes or unreviewed MCP clients
-into the bundled tools. These scripts are not newly security-audited sandboxes.
+Canvas processing is evaluated before export: settings become a timeline only when applied. Desktop FFmpeg compiles the saved sequence, including source ranges, speed, delay, audio mixing, effects and typography. Original files remain intact. Output verification measures the produced MP4; frame and audio inspection provide additional evidence beyond container metadata.
 
-## Provenance and updates
-
-`UPSTREAM.json` records each copied file's SHA-256; integration tests verify
-it and the MIT notice. `SKILL.md`, scripts and references are unmodified. The
-upstream npm installer, assets/demos, CI, tests and plugins are intentionally not
-copied or executed. The upstream package manifest is retained solely for version
-introspection. This directory is not included in the desktop package; only the
-adapted workflow is compiled into the app.
-
-For an update, review the upstream diff first, select an explicit commit, copy
-the same distribution subset, regenerate hashes and run tests. Do not track
-`main` dynamically or replace the snapshot during application startup. Preserve
-LICENSE and THIRD_PARTY_NOTICES. Reverting this PR removes the integration; no
-project schema, settings migration, provider spending or network service is added.
+For a visual request, a silent source or empty transcript still requires images. Read source timecodes and account for clip placement/speed when editing. A successful job launch is not completion. See [agent boundaries](hybrid-ai-editor-direction.md), [canvas workflows](canvas-workflows.md) and [Linux verification setup](media-analysis-environment.md).

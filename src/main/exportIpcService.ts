@@ -1,8 +1,7 @@
 import { spawn } from 'node:child_process';
-import { access } from 'node:fs/promises';
 
 import { audioProbeArgs, probeSaysAudible } from '../shared/audibleAssets';
-import { FILTER_LIST_ARGS, escapeFontPath, fontCandidates, supportsDrawtext } from '../shared/titleFont';
+import { FILTER_LIST_ARGS, escapeFontPath, supportsDrawtext } from '../shared/titleFont';
 import type { ApiResponse } from '../shared/models';
 import { EXPORT_DEFAULTS, type LocalExportJob, type LocalFfmpegRuntimeStatus, type StartExportJobInput } from '../shared/exportTypes';
 import { createDeliveryProvenance } from '../shared/exportProvenance';
@@ -16,6 +15,9 @@ import {
 } from '../shared/metadataPrivacy';
 import { createSubtitleSidecar, DEFAULT_SUBTITLE_DELIVERY, timelineForSubtitleDelivery, type SubtitleDelivery, type SubtitleSidecar } from '../shared/subtitleDelivery';
 import { resolvedTitleStyle } from '../shared/captionStyle';
+import { unsupportedFontCharacters } from '../shared/fontGlyphCoverage';
+import { readTitleFontFile } from './titleFontData';
+import type { TitleFontFamily, TitleFontKey } from '../shared/titleTypography';
 import { parseExportJobActionInput, parseStartExportJobInput } from '../shared/exportValidators';
 import type { LocalProjectSnapshot } from '../shared/timelineTypes';
 import type { OpenedAssetPlaybackSource } from './assetLibraryStore';
@@ -98,6 +100,8 @@ function exportFailureReason(error: unknown): string {
 export class ExportIpcService {
   private readonly completedOutputs = new Map<string, string>();
   private readonly activeExecutions = new Map<string, FfmpegExecution>();
+  private readonly pendingJobs = new Set<string>();
+  private cancellationGeneration = 0;
   private readonly discover: () => Promise<FfmpegDiscoveryResult>;
   private readonly startProcess: (input: StartFfmpegExportProcessInput) => FfmpegExecution;
   private readonly runInBackground: (task: () => Promise<void>) => void;
@@ -121,13 +125,20 @@ export class ExportIpcService {
     if (input === null) {
       return fail('INVALID_INPUT', 'The export job payload was not valid.');
     }
+    const generation = this.cancellationGeneration;
     let createdJob: LocalExportJob | null = null;
     try {
       const ffmpeg = await this.discover();
+      if (generation !== this.cancellationGeneration) {
+        return fail('EXPORT_UNAVAILABLE', 'The export was cancelled.');
+      }
       if (ffmpeg.kind === 'unavailable') {
         return fail('EXPORT_UNAVAILABLE', ffmpeg.reason);
       }
       const project = await this.dependencies.projects.open(input.projectId);
+      if (generation !== this.cancellationGeneration) {
+        return fail('EXPORT_UNAVAILABLE', 'The export was cancelled.');
+      }
       if (project === null) {
         return fail('PROJECT_NOT_FOUND', 'The project to export was not found.');
       }
@@ -157,19 +168,32 @@ export class ExportIpcService {
       }
       const job = this.dependencies.jobs.create(project.id);
       createdJob = job;
+      this.pendingJobs.add(job.id);
       const prepared = await this.prepareExport({
         jobId: job.id,
         request: input,
         project,
         executablePath: ffmpeg.executablePath
       });
-      this.runInBackground(() => this.runExport(job.id, prepared));
+      if (this.dependencies.jobs.get(job.id)?.state.kind !== 'queued') {
+        await Promise.all([removeExportOutput(prepared.outputPath), removeExportStaging(prepared.stagingDirectory)]);
+        this.pendingJobs.delete(job.id);
+        return fail('EXPORT_UNAVAILABLE', 'The export was cancelled.');
+      }
+      this.runInBackground(async () => {
+        try {
+          await this.runExport(job.id, prepared);
+        } finally {
+          this.pendingJobs.delete(job.id);
+        }
+      });
       return ok(job);
     } catch (error: unknown) {
       const reason = error instanceof Error ? exportFailureReason(error) : 'The local FFmpeg export failed.';
       if (createdJob !== null && this.dependencies.jobs.get(createdJob.id)?.state.kind === 'queued') {
         this.dependencies.jobs.markFailed(createdJob.id, reason);
       }
+      if (createdJob !== null) this.pendingJobs.delete(createdJob.id);
       return fail('EXPORT_UNAVAILABLE', reason);
     }
   }
@@ -222,7 +246,10 @@ export class ExportIpcService {
   }
 
   cancelAll(): void {
-    for (const jobId of this.activeExecutions.keys()) {
+    // Invalidate requests still awaiting discovery or project loading, before
+    // they have a job ID. Track later preparation/queued work until cleanup.
+    this.cancellationGeneration += 1;
+    for (const jobId of this.pendingJobs) {
       this.dependencies.jobs.cancel(jobId);
       this.activeExecutions.get(jobId)?.cancel();
     }
@@ -266,7 +293,7 @@ export class ExportIpcService {
    * font where one is expected. Saying which of the two failed is the difference
    * between a fixable message and a mysterious export.
    */
-  private async titleFont(executablePath: string, weight: 'regular' | 'bold' = 'regular'): Promise<string> {
+  private async titleFont(executablePath: string, weight: 'regular' | 'bold' = 'regular', family: TitleFontFamily = 'sans'): Promise<{ readonly path: string; readonly bytes: Uint8Array }> {
     const filters = await new Promise<string>((resolve) => {
       let listing = '';
       const probe = spawn(executablePath, [...FILTER_LIST_ARGS]);
@@ -281,14 +308,8 @@ export class ExportIpcService {
         'This FFmpeg build cannot draw text — it was compiled without libfreetype, so titles cannot be rendered.'
       );
     }
-    for (const candidate of fontCandidates(process.platform, weight)) {
-      try {
-        await access(candidate);
-        return escapeFontPath(candidate);
-      } catch {
-        // Try the next one; a machine without this face is ordinary.
-      }
-    }
+    const file = await readTitleFontFile({ family, weight });
+    if (file) return { path: escapeFontPath(file.path), bytes: file.bytes };
     throw new ExportAssetStagingError(`No ${weight} system font could be found on this machine to draw titles with.`);
   }
 
@@ -297,7 +318,13 @@ export class ExportIpcService {
     const dimensions = this.outputDimensions(input.request, input.project);
     const frameRate = input.request.frameRate ?? EXPORT_DEFAULTS.frameRate;
     let staged: StagedExportAssets | null = null;
+    const assertPreparing = (): void => {
+      if (this.dependencies.jobs.get(input.jobId)?.state.kind !== 'queued') {
+        throw new ExportAssetStagingError('The export was cancelled.');
+      }
+    };
     try {
+      assertPreparing();
       const delivery = input.request.subtitleDelivery ?? DEFAULT_SUBTITLE_DELIVERY;
       const metadataPrivacyMode = input.request.metadataPrivacyMode ?? DEFAULT_METADATA_PRIVACY_MODE;
       const exportTimeline = timelineForSubtitleDelivery(input.project.timeline, delivery);
@@ -310,6 +337,23 @@ export class ExportIpcService {
         exportsRoot: this.dependencies.exportsRoot,
         jobId: input.jobId
       });
+      assertPreparing();
+      const audibleAssetIds = await this.audibleAssets(input.executablePath, staged.assetPaths);
+      assertPreparing();
+      const titleFontPaths = new Map<TitleFontKey, string>();
+      const titleFontBytes = new Map<TitleFontKey, Uint8Array>();
+      for (const title of exportTimeline.titles ?? []) {
+        const style = resolvedTitleStyle(title);
+        const family = style.fontFamily ?? 'sans';
+        const key: TitleFontKey = `${family}:${style.fontWeight}`;
+        if (!titleFontPaths.has(key)) {
+          const file = await this.titleFont(input.executablePath, style.fontWeight, family);
+          assertPreparing();
+          titleFontPaths.set(key, file.path); titleFontBytes.set(key, file.bytes);
+        }
+        const missing = unsupportedFontCharacters(titleFontBytes.get(key)!, title.text);
+        if (missing === null || missing.length) throw new ExportAssetStagingError('The selected font cannot render all title characters. Choose a font that supports this text, such as Korean sans for Hangul.');
+      }
       const compiled = compileFfmpegTimeline({
         timeline: exportTimeline,
         assetPaths: staged.assetPaths,
@@ -326,17 +370,10 @@ export class ExportIpcService {
         // Probed rather than assumed from the kind: a silent recording is an
         // ordinary thing to have on a timeline, and `[i:a:0]` on a source with
         // no audio stream fails the whole graph.
-        audibleAssetIds: await this.audibleAssets(input.executablePath, staged.assetPaths),
+        audibleAssetIds,
         // Only looked for when there is something to draw: an export with no
         // titles must not fail because the machine has an unusual font layout.
-        ...((exportTimeline.titles ?? []).length > 0
-          ? {
-              titleFontPath: await this.titleFont(input.executablePath),
-              ...((exportTimeline.titles ?? []).some((title) => resolvedTitleStyle(title).fontWeight === 'bold')
-                ? { titleBoldFontPath: await this.titleFont(input.executablePath, 'bold') }
-                : {})
-            }
-          : {}),
+        titleFontPaths,
         outputPath,
         ...dimensions,
         frameRate,

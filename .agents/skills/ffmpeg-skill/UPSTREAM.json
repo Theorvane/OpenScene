@@ -1,5 +1,6 @@
 {
   "repository": "https://github.com/kajisho5/ffmpeg-skill",
+  "managedFork": "https://github.com/Theorvane/ffmpeg-skill",
   "commit": "3145261a1c19f399b9520fad7fdac741871e1426",
   "version": "3.13.1",
   "license": "MIT",
@@ -89,5 +90,7 @@
     "templates/x.json": "f8d7936f365aea4a9a63e4b0ad419b1effc4836b47b0d491a82e436fac4379a9",
     "templates/youtube-shorts.json": "abf2c39ce09f5fc100730351b0340498e07f6e21c9d1bf7e3283c07f86b64951",
     "templates/youtube.json": "0221caab867bb9a0b28766af35cb9c9761e3d1dd7d0c080a105ae167daf5506a"
-  }
+  },
+  "integration": "git-submodule",
+  "path": "external/ffmpeg-skill"
 }

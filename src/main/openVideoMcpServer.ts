@@ -1,19 +1,26 @@
-import { randomUUID } from 'node:crypto';
-import { resolve as resolvePath, sep } from 'node:path';
 import { getMcpServerDefinition, McpResource, McpServer, McpTool } from '@theorvane/type-mcp';
+import { randomUUID } from 'node:crypto';
+import { realpath } from 'node:fs/promises';
+import { resolve as resolvePath, sep } from 'node:path';
 import { z } from 'zod';
-import { CLIP_EFFECT_RANGES, DEFAULT_CLIP_EFFECTS, type ClipEffects, type TimelineTrack } from '../shared/timelineTypes';
-import { deleteClip, placeClip, splitClip, updateClipEffects as applyClipEffects } from '../shared/timelineClipLogic';
+import { METADATA_PRIVACY_MODES, type MetadataPrivacyMode } from '../shared/metadataPrivacy';
+import { clipDurationMs, clipTimelineEndMs } from '../shared/timelineClipGeometry';
+import { updateClipEffects as applyClipEffects, deleteClip, placeClip, splitClip } from '../shared/timelineClipLogic';
+import { resolveTimelineTrackForAsset, trackAppendStartMs } from '../shared/timelineClipPlacement';
 import { isValidClipEffects } from '../shared/timelineEffects';
 import { addTitle, removeTitle, updateTitle } from '../shared/timelineTitleLogic';
 import { cutNearest, removeTransitionAtCut, setTransitionAtCut } from '../shared/timelineTransitionLogic';
-import { clipDurationMs, clipTimelineEndMs } from '../shared/timelineClipGeometry';
-import { resolveTimelineTrackForAsset, trackAppendStartMs } from '../shared/timelineClipPlacement';
+import { CLIP_EFFECT_RANGES, DEFAULT_CLIP_EFFECTS, type ClipEffects, type TimelineTrack } from '../shared/timelineTypes';
+import { connectVideoClips } from '../shared/videoCanvas';
+import { applyEditorOperations, editingCapabilities } from '../shared/editorOperations';
+import { CANVAS_BLOCK_CATALOG } from '../shared/canvasBlockCatalog';
+import { EMPTY_CANVAS_GRAPH } from '../shared/videoCanvasGraph';
+import { evaluateCanvasBlock } from '../shared/videoCanvasBlocks';
+import { resolveVideoInspectionRange, sampleVideoInspectionSeconds } from '../shared/videoInspectionRange';
 import type { ExportIpcService } from './exportIpcService';
-import { METADATA_PRIVACY_MODES, type MetadataPrivacyMode } from '../shared/metadataPrivacy';
-import type { ResultAssetImportService } from './resultAssetImportService';
-import type { ProjectStore } from './projectStore';
 import { discoverFfmpeg } from './ffmpegDiscovery';
+import type { ProjectStore } from './projectStore';
+import type { TranscriptionService } from './transcriptionService';
 import {
   extractVideoFrames,
   formatFrameTimestamp,
@@ -21,24 +28,8 @@ import {
   WATCH_FRAME_HARD_CAP,
   type ExtractedFrame
 } from './videoFrameAnalysis';
-import { estimateVideoPlanCost, formatCostEstimate, estimateImageCost, estimateSpeechCost } from '../shared/mediaGenerationPricing';
-import { describeSpend } from '../shared/generationSpend';
-import type { GenerationSpendStore } from './generationSpendStore';
-import { MAX_SUPPORTED_SHOT_SECONDS, planVideoStoryboard, supportedShotSeconds } from '../shared/videoStoryboardPlan';
 // Aliased because the tool below carries the same name: the tool is the seam,
 // the rule is what it calls.
-import { composeShotPrompt as composeShotPromptRule, refineShotPrompt, revisionsOf } from '../shared/shotPrompt';
-import { checkNarrationFit, narrationBudget, detectScriptKind } from '../shared/narrationTiming';
-import { getDomainModel, getDefaultDomainModelId } from '../shared/aiDomainModels';
-import {
-  getGeneratedImageAsReference,
-  createImageGenerationJob,
-  createSpeechGenerationJob,
-  createVideoGenerationJob,
-  getImageGenerationJob,
-  getSpeechGenerationJob,
-  getVideoGenerationJob
-} from './aiJobManager';
 
 /** Clip length used only when an asset has no probed duration yet. */
 const FALLBACK_CLIP_DURATION_MS = 5_000;
@@ -46,18 +37,24 @@ const FALLBACK_CLIP_DURATION_MS = 5_000;
 /** Injectable frame extractor so tests never need a real FFmpeg runtime. */
 export type WatchFrameExtractor = (input: {
   readonly filePath: string;
+  readonly projectDirectory?: string;
   readonly timestampsMs: readonly number[];
 }) => Promise<readonly ExtractedFrame[]>;
 
 async function defaultWatchFrameExtractor(input: {
   readonly filePath: string;
+  readonly projectDirectory?: string;
   readonly timestampsMs: readonly number[];
 }): Promise<readonly ExtractedFrame[]> {
   const ffmpeg = await discoverFfmpeg();
   if (ffmpeg.kind === 'unavailable') {
     throw new Error(`FFmpeg is unavailable: ${ffmpeg.reason}`);
   }
-  return extractVideoFrames({ ffmpegPath: ffmpeg.executablePath, filePath: input.filePath, timestampsMs: input.timestampsMs });
+  const filePath = await realpath(input.filePath);
+  if (input.projectDirectory !== undefined && !filePath.startsWith(`${await realpath(input.projectDirectory)}${sep}`)) {
+    throw new Error('The media file escapes the project directory.');
+  }
+  return extractVideoFrames({ ffmpegPath: ffmpeg.executablePath, filePath, timestampsMs: input.timestampsMs });
 }
 
 @McpServer({ name: 'openvideo-mcp-server', version: '0.1.0' })
@@ -65,8 +62,7 @@ export class OpenVideoMcpServer {
   private projectStore: ProjectStore | undefined;
   private exportIpcService: ExportIpcService | undefined;
   private watchFrameExtractor: WatchFrameExtractor = defaultWatchFrameExtractor;
-  private resultImports: ResultAssetImportService | undefined;
-  private spendStore: GenerationSpendStore | undefined;
+  private transcriptionService: TranscriptionService | undefined;
   private notifyProjectTimelineChanged: ((projectId: string) => void) | undefined;
 
   /**
@@ -88,457 +84,8 @@ export class OpenVideoMcpServer {
     this.watchFrameExtractor = watchFrameExtractor ?? defaultWatchFrameExtractor;
   }
 
-  /**
-   * The spending record, so the agent can see the ceiling it is working under.
-   *
-   * Read-only on purpose: raising the limit is the user's decision, and an
-   * agent that could raise its own does not have one.
-   */
-  public setSpendStore(store: GenerationSpendStore): void {
-    this.spendStore = store;
-  }
-
-  /** Lets the agent finish a generation by importing its result, as the UI does. */
-  public setResultImportService(resultImports: ResultAssetImportService): void {
-    this.resultImports = resultImports;
-  }
-
-  @McpTool({
-    description:
-      'Check a narration script against the seconds it has to fill, before paying for speech. Returns an ' +
-      'estimated duration, a verdict, and a word or character budget. Never estimate narration length ' +
-      'yourself: an over-running script is only discovered after the speech job was billed and placed. ' +
-      'Read-only, spends nothing.',
-    input: z.object({
-      script: z.string().min(1),
-      targetSeconds: z.number().min(0),
-      pace: z.enum(['measured', 'natural', 'brisk']).optional()
-    })
-  })
-  checkNarrationLength(params: { script: string; targetSeconds: number; pace?: 'measured' | 'natural' | 'brisk' }) {
-    const fit = checkNarrationFit({
-      script: params.script,
-      targetSeconds: params.targetSeconds,
-      ...(params.pace === undefined ? {} : { pace: params.pace })
-    });
-    const budget = narrationBudget({
-      targetSeconds: params.targetSeconds,
-      kind: detectScriptKind(params.script),
-      ...(params.pace === undefined ? {} : { pace: params.pace })
-    });
-    return {
-      success: true,
-      verdict: fit.verdict,
-      estimatedSeconds: fit.estimate.estimatedSeconds,
-      targetSeconds: fit.targetSeconds,
-      deltaSeconds: fit.deltaSeconds,
-      countedAs: fit.estimate.kind,
-      units: fit.estimate.units,
-      budgetUnits: budget.units,
-      pace: fit.estimate.pace,
-      message: fit.advice
-    };
-  }
-
-  @McpTool({
-    description:
-      'Split a total video length into shots the provider accepts. Returns legal per-shot durations, start ' +
-      'times, continuity fields to repeat in every shot prompt. Call before writing a scenario. Never compute ' +
-      'shot lengths yourself: an illegal duration is rejected only after the user approved the spend. ' +
-      'Read-only, spends nothing.',
-    input: z.object({
-      totalSeconds: z.number().min(1),
-      modelId: z.string().optional().describe('Video model the shots will be rendered with.')
-    })
-  })
-  planVideoScenario(params: { totalSeconds: number; modelId?: string }) {
-    const modelId = params.modelId ?? getDefaultDomainModelId('video-generation');
-    const model = getDomainModel('video-generation', modelId);
-    if (model === undefined) {
-      return { success: false, error: `Model ${modelId} is not a video-generation model.` };
-    }
-
-    const plan = planVideoStoryboard({ totalSeconds: params.totalSeconds, providerId: model.providerId, modelId: model.id });
-    return {
-      success: true,
-      modelId,
-      providerLabel: model.providerLabel,
-      supportedShotSeconds: supportedShotSeconds(model.id),
-      totalSeconds: plan.totalSeconds,
-      requestedSeconds: plan.requestedSeconds,
-      roundedFrom: plan.roundedFrom,
-      shots: plan.shots,
-      continuityKeys: plan.continuityKeys,
-      message:
-        (plan.roundedFrom === undefined
-          ? `${plan.shots.length} shot(s) totalling ${plan.totalSeconds}s.`
-          : `${plan.shots.length} shot(s) totalling ${plan.totalSeconds}s; ${plan.roundedFrom}s was not reachable from this model's shot lengths. Tell the user the length changed.`) +
-        ' Write one description per shot, repeating every continuity field in each. Then price the whole list with estimateGenerationCost.'
-    };
-  }
-
-  @McpTool({
-    description:
-      'Build the prompt for one shot, or the prompt for its next take after a change. Use this rather than ' +
-      'writing the prompt yourself: the phone and the desktop studio compose the same way, and a shot asked ' +
-      'for differently is a different shot. To refine, pass the previous take\'s exact prompt and a note about ' +
-      'what to change — the previous prompt is kept whole and the change added to it, because rewriting loses ' +
-      'the wardrobe, lens and location nobody mentioned. Read-only, spends nothing.',
-    input: z.object({
-      scenario: z.string().min(1).optional().describe('The whole piece, in the user\'s words. Required unless refining.'),
-      description: z.string().optional().describe('What happens in this shot in particular.'),
-      shotIndex: z.number().int().min(1).optional(),
-      shotCount: z.number().int().min(1).optional(),
-      durationSeconds: z.number().min(1).optional(),
-      continuesFromFrame: z
-        .boolean()
-        .optional()
-        .describe('True when the previous shot\'s last frame is supplied as this one\'s first.'),
-      previousPrompt: z.string().optional().describe('The exact prompt of the take being refined.'),
-      change: z.string().optional().describe('What to change about that take.')
-    })
-  })
-  composeShotPrompt(params: {
-    scenario?: string;
-    description?: string;
-    shotIndex?: number;
-    shotCount?: number;
-    durationSeconds?: number;
-    continuesFromFrame?: boolean;
-    previousPrompt?: string;
-    change?: string;
-  }) {
-    if (params.previousPrompt !== undefined || params.change !== undefined) {
-      if (params.previousPrompt === undefined || params.change === undefined) {
-        return { success: false, error: 'Refining needs both the previous take\'s prompt and what to change about it.' };
-      }
-      const refined = refineShotPrompt(params.previousPrompt, params.change);
-      if (!refined.ok) return { success: false, error: refined.reason };
-      return {
-        success: true,
-        prompt: refined.prompt,
-        revisions: revisionsOf(refined.prompt),
-        message:
-          'Pass this to createVideoJob as the prompt. Show the user the change list before spending, and reuse the ' +
-          'same length, aspect ratio and reference frame the previous take used, or it is a different shot.'
-      };
-    }
-
-    if (params.scenario === undefined || params.scenario.trim().length === 0) {
-      return { success: false, error: 'A shot prompt needs a scenario, or a previous prompt and a change.' };
-    }
-    const count = params.shotCount ?? 1;
-    const prompt = composeShotPromptRule({
-      scenario: params.scenario,
-      index: params.shotIndex ?? 1,
-      count,
-      durationSeconds: params.durationSeconds ?? 5,
-      ...(params.description === undefined ? {} : { description: params.description }),
-      continuity: count === 1 ? 'none' : params.continuesFromFrame === true ? 'from-frame' : 'restate'
-    });
-    return {
-      success: true,
-      prompt,
-      revisions: [],
-      message: 'Pass this to createVideoJob as the prompt. Price it with estimateGenerationCost first.'
-    };
-  }
-
-  @McpTool({
-    description:
-      'Price a generation plan. Call before createVideoJob, createImageJob, createSpeechJob; show result to ' +
-      'user. Read-only, spends nothing. Never state a price you did not get from this tool: recalled figures ' +
-      'are not real prices. Shot comes back unpriced: say so, ask user to confirm unknown charge.',
-    input: z.object({
-      kind: z.enum(['video', 'image', 'speech']),
-      shots: z
-        .array(z.object({ modelId: z.string().min(1), durationSeconds: z.number() }))
-        .optional()
-        .describe('Video only: one entry per shot in the planned scenario.'),
-      modelId: z.string().optional().describe('Image and speech only.'),
-      imageCount: z.number().optional().describe('Image only; defaults to 1.')
-    })
-  })
-  estimateGenerationCost(params: {
-    kind: 'video' | 'image' | 'speech';
-    shots?: readonly { modelId: string; durationSeconds: number }[];
-    modelId?: string;
-    imageCount?: number;
-  }) {
-    if (params.kind === 'video') {
-      const shots = params.shots ?? [];
-      if (shots.length === 0) {
-        return { success: false, error: 'Video estimates need at least one shot with a modelId and durationSeconds.' };
-      }
-      const plan = estimateVideoPlanCost(shots);
-      return {
-        success: true,
-        kind: 'video',
-        shots: plan.shots.map((estimate, index) => ({
-          shot: index + 1,
-          modelId: estimate.modelId,
-          priced: estimate.priced,
-          amountUsd: estimate.amountUsd,
-          summary: formatCostEstimate(estimate)
-        })),
-        totalUsd: plan.totalUsd,
-        fullyPriced: plan.fullyPriced,
-        asOf: plan.asOf,
-        message: plan.fullyPriced
-          ? `Estimated total $${plan.totalUsd?.toFixed(2)} across ${plan.shots.length} shot(s). Show this to the user and wait for approval before generating.`
-          : 'At least one shot could not be priced. Tell the user which, and ask them to confirm they accept an unknown charge before generating.'
-      };
-    }
-
-    if (params.modelId === undefined || params.modelId.length === 0) {
-      return { success: false, error: `${params.kind} estimates need a modelId.` };
-    }
-
-    const estimate =
-      params.kind === 'image'
-        ? estimateImageCost({ modelId: params.modelId, imageCount: params.imageCount ?? 1 })
-        : estimateSpeechCost({ modelId: params.modelId });
-
-    return {
-      success: true,
-      kind: params.kind,
-      modelId: estimate.modelId,
-      priced: estimate.priced,
-      amountUsd: estimate.amountUsd,
-      asOf: estimate.asOf,
-      summary: formatCostEstimate(estimate),
-      message: estimate.priced
-        ? estimate.amountUsd === 0
-          ? 'This model runs locally and creates no provider charge.'
-          : 'Show this to the user and wait for approval before generating.'
-        : 'Cost is unknown. Ask the user to confirm they accept an unknown charge before generating.'
-    };
-  }
-
-  @McpTool({
-    description:
-      'Read what generation has cost this month and the monthly limit, if the user set one. Read this before ' +
-      'proposing a batch of shots: a plan that would be refused halfway through is worse than a smaller plan. ' +
-      'The limit can only be changed by the user in Settings.',
-    input: z.object({})
-  })
-  async getGenerationSpend() {
-    if (!this.spendStore) return { success: false, error: 'The spending record is not available.' };
-    try {
-      const ledger = await this.spendStore.read();
-      const total = await this.spendStore.monthToDate();
-      return {
-        success: true,
-        total,
-        capUsd: ledger.capUsd,
-        summary: describeSpend(total, ledger.capUsd),
-        message:
-          ledger.capUsd === undefined
-            ? 'No monthly limit is set. Still show the user an estimate and wait for approval before generating.'
-            : `Jobs that would take this month past $${ledger.capUsd.toFixed(2)} are refused before they reach a provider.`
-      };
-    } catch (err) {
-      return { success: false, error: err instanceof Error ? err.message : 'Failed to read the spending record' };
-    }
-  }
-
-  @McpTool({
-    description:
-      'Create AI video generation job with the selected video-generation model. Runs against the provider ' +
-      'connected in Settings; none connected fails with an explicit error.',
-    input: z.object({
-      prompt: z.string().min(1, 'Prompt is required'),
-      aspectRatio: z.enum(['16:9', '9:16', '1:1']).default('16:9'),
-      // Derived, not a literal: see MAX_SUPPORTED_SHOT_SECONDS.
-      durationSeconds: z.number().min(1).max(MAX_SUPPORTED_SHOT_SECONDS).optional(),
-      stylePreset: z.string().optional().default('Cinematic'),
-      modelId: z.string().optional(),
-      operation: z.enum(['text_to_video', 'image_to_video', 'reference_to_video', 'start_end', 'motion_control']).optional(),
-      referenceImageJobId: z
-        .string()
-        .optional()
-        .describe('Legacy alias for firstFrameImageJobId.'),
-      firstFrameImageJobId: z.string().optional().describe('Completed createImageJob id used as the first frame.'),
-      lastFrameImageJobId: z.string().optional().describe('Completed createImageJob id used as the ending frame. Requires the first frame.'),
-      referenceImageJobIds: z.array(z.string()).min(1).max(3).optional()
-        .describe('One to three completed createImageJob ids used as Veo asset/character references.'),
-      projectId: z.string().optional().describe('Project containing the driving video for desktop Motion Control.'),
-      drivingVideoAssetId: z.string().optional().describe('Imported project video whose performance drives Motion Control.'),
-      motionMode: z.enum(['move', 'mix']).optional(),
-      apiKey: z.string().optional()
-    })
-  })
-  async createVideoJob(params: {
-    prompt: string;
-    aspectRatio?: '16:9' | '9:16' | '1:1';
-    durationSeconds?: number;
-    stylePreset?: string;
-    modelId?: string;
-    operation?: 'text_to_video' | 'image_to_video' | 'reference_to_video' | 'start_end' | 'motion_control';
-    referenceImageJobId?: string;
-    firstFrameImageJobId?: string;
-    lastFrameImageJobId?: string;
-    referenceImageJobIds?: readonly string[];
-    projectId?: string;
-    drivingVideoAssetId?: string;
-    motionMode?: 'move' | 'mix';
-    apiKey?: string;
-  }) {
-    // The still crosses as inline bytes, exactly as a picked file would, so
-    // image-to-video does not care that this seed was generated.
-    const firstFrameJobId = params.firstFrameImageJobId ?? params.referenceImageJobId;
-    if (params.firstFrameImageJobId !== undefined && params.referenceImageJobId !== undefined) {
-      return { success: false, error: 'Use firstFrameImageJobId or its legacy alias referenceImageJobId, not both.' };
-    }
-    let referenceImage: { displayName: string; mimeType: string; base64: string } | undefined;
-    if (firstFrameJobId !== undefined) {
-      const resolved = getGeneratedImageAsReference(firstFrameJobId);
-      if (resolved === null) {
-        return {
-          success: false,
-          error: `Image job ${firstFrameJobId} has no completed image to use as a first frame.`
-        };
-      }
-      referenceImage = { ...resolved };
-    }
-
-    let lastFrame: { displayName: string; mimeType: string; base64: string } | undefined;
-    if (params.lastFrameImageJobId !== undefined) {
-      const resolved = getGeneratedImageAsReference(params.lastFrameImageJobId);
-      if (resolved === null) return { success: false, error: `Image job ${params.lastFrameImageJobId} has no completed image to use as a last frame.` };
-      lastFrame = { ...resolved };
-    }
-    const referenceImages: { displayName: string; mimeType: string; base64: string }[] = [];
-    for (const jobId of params.referenceImageJobIds ?? []) {
-      const resolved = getGeneratedImageAsReference(jobId);
-      if (resolved === null) return { success: false, error: `Image job ${jobId} has no completed image to use as an asset reference.` };
-      referenceImages.push({ ...resolved });
-    }
-
-    const job = await createVideoGenerationJob({
-      prompt: params.prompt,
-      aspectRatio: params.aspectRatio ?? '16:9',
-      ...(params.durationSeconds === undefined ? {} : { durationSeconds: params.durationSeconds }),
-      stylePreset: params.stylePreset ?? 'Cinematic',
-      ...(params.modelId === undefined ? {} : { modelId: params.modelId }),
-      ...(params.operation === undefined ? {} : { operation: params.operation }),
-      ...(referenceImage === undefined ? {} : { referenceImage }),
-      ...(lastFrame === undefined ? {} : { lastFrame }),
-      ...(referenceImages.length === 0 ? {} : { referenceImages }),
-      ...(params.projectId === undefined ? {} : { projectId: params.projectId }),
-      ...(params.drivingVideoAssetId === undefined ? {} : { drivingVideoAssetId: params.drivingVideoAssetId }),
-      ...(params.motionMode === undefined ? {} : { motionMode: params.motionMode })
-    });
-
-    return {
-      success: true,
-      jobId: job.id,
-      status: job.status,
-      mode: job.mode,
-      provider: job.provider,
-      message: `AI video job created: ${job.id}`
-    };
-  }
-
-  @McpTool({
-    description:
-      'Create AI speech job with the selected voice-generation model. Cloud models use the provider connected ' +
-      'in Settings; Qwen uses a user-configured local wrapper, while VieNeu starts its local server when selected.',
-    input: z.object({
-      script: z.string().min(1, 'Script is required'),
-      voiceId: z.string().default(''),
-      modelId: z.string().optional(),
-      apiKey: z.string().optional(),
-      delivery: z.object({
-        performanceScript: z.string().min(1).max(200_000),
-        stability: z.number().min(0).max(1),
-        similarityBoost: z.number().min(0).max(1),
-        style: z.number().min(0).max(1),
-        speed: z.number().min(0.7).max(1.2),
-        speakerBoost: z.boolean()
-      }).optional()
-    })
-  })
-  async createSpeechJob(params: {
-    script: string;
-    voiceId?: string;
-    modelId?: string;
-    apiKey?: string;
-    delivery?: import('../shared/voiceDelivery').VoiceDeliverySettings;
-  }) {
-    const job = await createSpeechGenerationJob({
-      script: params.script,
-      voiceId: params.voiceId ?? '',
-      ...(params.modelId === undefined ? {} : { modelId: params.modelId }),
-      ...(params.delivery === undefined ? {} : { delivery: params.delivery })
-    });
-
-    return {
-      success: true,
-      jobId: job.id,
-      status: job.status,
-      mode: job.mode,
-      provider: job.provider,
-      message: `AI speech job created: ${job.id}`
-    };
-  }
-
-  @McpTool({
-    description:
-      'Generate a still image from a text prompt using the configured cloud image model. Useful for poster frames, title cards, and as a seed for image-to-video generation.',
-    input: z.object({
-      prompt: z.string().min(1),
-      aspectRatio: z.enum(['1:1', '16:9', '9:16', '4:3', '3:4']).default('1:1'),
-      negativePrompt: z.string().optional(),
-      modelId: z.string().optional()
-    })
-  })
-  async createImageJob(params: {
-    prompt: string;
-    aspectRatio?: '1:1' | '16:9' | '9:16' | '4:3' | '3:4';
-    negativePrompt?: string;
-    modelId?: string;
-  }) {
-    const job = await createImageGenerationJob({
-      prompt: params.prompt,
-      aspectRatio: params.aspectRatio ?? '1:1',
-      ...(params.negativePrompt === undefined ? {} : { negativePrompt: params.negativePrompt }),
-      ...(params.modelId === undefined ? {} : { modelId: params.modelId })
-    });
-
-    return {
-      success: true,
-      jobId: job.id,
-      status: job.status,
-      mode: job.mode,
-      provider: job.provider,
-      message: `AI image job created: ${job.id}`
-    };
-  }
-
-  @McpTool({
-    description: 'Check status of an AI video, speech, or image generation job.',
-    input: z.object({
-      jobId: z.string().min(1),
-      kind: z.enum(['video', 'speech', 'image'])
-    })
-  })
-  async getJobStatus(params: { jobId: string; kind: 'video' | 'speech' | 'image' }) {
-    const job =
-      params.kind === 'video'
-        ? getVideoGenerationJob(params.jobId)
-        : params.kind === 'image'
-          ? getImageGenerationJob(params.jobId)
-          : getSpeechGenerationJob(params.jobId);
-    if (!job) {
-      return { success: false, error: `Job ${params.jobId} not found.` };
-    }
-    return {
-      success: true,
-      jobId: job.id,
-      status: job.status,
-      error: job.error
-    };
+  public setTranscriptionService(service: TranscriptionService): void {
+    this.transcriptionService = service;
   }
 
   @McpTool({
@@ -574,6 +121,8 @@ export class OpenVideoMcpServer {
             tracks: project.timeline.tracks.map((track) => ({
               id: track.id,
               kind: track.kind,
+              name: track.name,
+              ...(track.kind === 'audio' ? { mix: track.mix } : {}),
               clips: track.clips.map((clip) => ({
                 id: clip.id,
                 assetId: clip.assetId,
@@ -587,13 +136,15 @@ export class OpenVideoMcpServer {
                   it already is.
                 */
                 timelineEndMs: clipTimelineEndMs(clip),
-                effects: clip.effects ?? DEFAULT_CLIP_EFFECTS
+                effects: clip.effects ?? DEFAULT_CLIP_EFFECTS,
+                keyframes: clip.keyframes
               }))
             })),
             // Both were invisible: an agent asked about a caption could not tell
             // one existed, let alone edit it.
             titles: project.timeline.titles ?? [],
-            transitions: project.timeline.transitions
+            transitions: project.timeline.transitions,
+            canvas: project.timeline.canvas ?? EMPTY_CANVAS_GRAPH
           }
         }
       };
@@ -609,13 +160,15 @@ export class OpenVideoMcpServer {
     description:
       'Watch a project video asset: samples a small set of frames across the video (or a focused startMs–endMs section) ' +
       'so the model can see what is on screen. Read-only. The frames are attached to the conversation as images with ' +
-      'timestamps — describe or reason about them after they arrive. Use a vision-capable model to actually see them.',
+      'timestamps. Set perSecond with startMs/endMs for one frame per second in a window of up to 20 seconds. ' +
+      'Read visible text from the images when relevant. Use a vision-capable model.',
     input: z.object({
       projectId: z.string().min(1),
       assetId: z.string().min(1),
       startMs: z.number().finite().min(0).optional(),
       endMs: z.number().finite().min(0).optional(),
-      maxFrames: z.number().int().min(1).max(WATCH_FRAME_HARD_CAP).optional()
+      maxFrames: z.number().int().min(1).max(WATCH_FRAME_HARD_CAP).optional(),
+      perSecond: z.boolean().optional()
     })
   })
   async watchProjectVideo(params: {
@@ -624,6 +177,7 @@ export class OpenVideoMcpServer {
     startMs?: number;
     endMs?: number;
     maxFrames?: number;
+    perSecond?: boolean;
   }) {
     if (!this.projectStore) {
       return { success: false as const, error: 'ProjectStore service is not available.' };
@@ -646,7 +200,12 @@ export class OpenVideoMcpServer {
         return { success: false as const, error: 'The asset has no duration metadata yet; open it in the editor to probe it first.' };
       }
 
-      const timestampsMs = planFrameTimestamps({
+      const startMs = params.startMs ?? 0;
+      const endMs = params.maxFrames === undefined
+        ? params.endMs
+        : Math.min(params.endMs ?? durationMs, startMs + params.maxFrames * 1000);
+      const range = params.perSecond ? resolveVideoInspectionRange(durationMs, startMs, endMs) : null;
+      const timestampsMs = params.perSecond ? (range === null ? [] : sampleVideoInspectionSeconds(range)) : planFrameTimestamps({
         durationMs,
         startMs: params.startMs,
         endMs: params.endMs,
@@ -665,7 +224,7 @@ export class OpenVideoMcpServer {
 
       let frames: readonly ExtractedFrame[];
       try {
-        frames = await this.watchFrameExtractor({ filePath, timestampsMs });
+        frames = await this.watchFrameExtractor({ filePath, timestampsMs, projectDirectory });
       } catch {
         // Extraction errors can carry filesystem paths in FFmpeg stderr; keep the tool result path-free.
         return { success: false as const, error: 'FFmpeg could not extract frames from this asset. Check FFmpeg readiness in Settings → Local Tools.' };
@@ -680,11 +239,13 @@ export class OpenVideoMcpServer {
         assetId: asset.id,
         displayName: asset.displayName,
         durationMs,
+        ...(range === null ? {} : range),
         frameCount: frames.length,
         summary:
           `Sampled ${frames.length} frames from "${asset.displayName}" at ` +
           `${frames.map((frame) => formatFrameTimestamp(frame.timeMs)).join(', ')}. ` +
-          'The frames are attached to the conversation as images in chronological order.',
+          'The frames are attached to the conversation as images in chronological order.' +
+          (range === null ? '' : ` Inspected ${range.startMs}–${range.endMs} ms of ${durationMs} ms.`),
         frames: frames.map((frame) => ({
           timeMs: frame.timeMs,
           timestamp: formatFrameTimestamp(frame.timeMs),
@@ -696,6 +257,42 @@ export class OpenVideoMcpServer {
         success: false as const,
         error: err instanceof Error ? err.message : `Failed to watch asset ${params.assetId}.`
       };
+    }
+  }
+
+  @McpTool({
+    description: 'Extract spoken words with source timecodes from a project video window of up to 20 seconds. ' +
+      'Uses local FFmpeg and whisper.cpp. The transcript is sent to the selected chat model after user approval.',
+    input: z.object({
+      projectId: z.string().min(1),
+      assetId: z.string().min(1),
+      startMs: z.number().int().min(0),
+      endMs: z.number().int().min(0).optional()
+    })
+  })
+  async transcribeProjectVideoRange(params: { projectId: string; assetId: string; startMs: number; endMs?: number }) {
+    if (this.transcriptionService === undefined) {
+      return { success: false, error: 'Local speech inspection is unavailable.' };
+    }
+    return this.transcriptionService.inspectVideoSpeech(params);
+  }
+
+  @McpTool({
+    description: 'Connect two clips on the same video track in canvas playback order. Moves the target directly after the source, closes gaps on that track and saves the sequence. Requires user approval.',
+    input: z.object({ projectId: z.string().min(1), fromClipId: z.string().min(1), toClipId: z.string().min(1) })
+  })
+  async connectTimelineClips(params: { projectId: string; fromClipId: string; toClipId: string }) {
+    if (this.projectStore === undefined) return { success: false, error: 'Project service is unavailable.' };
+    try {
+      const project = await this.projectStore.open(params.projectId);
+      if (project === null) return { success: false, error: 'Project was not found.' };
+      const timeline = connectVideoClips(project.timeline, params.fromClipId, params.toClipId);
+      if (timeline === null) return { success: false, error: 'Choose two different clips on the same video track.' };
+      await this.projectStore.saveTimeline(params.projectId, timeline);
+      this.notifyProjectTimelineChanged?.(params.projectId);
+      return { success: true, projectId: params.projectId, fromClipId: params.fromClipId, toClipId: params.toClipId };
+    } catch {
+      return { success: false, error: 'The clip connection could not be saved.' };
     }
   }
 
@@ -1136,44 +733,6 @@ export class OpenVideoMcpServer {
   }
 
   @McpTool({
-    description:
-      'Import a completed voice or video generation job into the project as an asset. ' +
-      'Call this after getJobStatus reports the job completed; the returned assetId can then ' +
-      'be placed with addClipToTimeline.',
-    input: z.object({
-      projectId: z.string().min(1),
-      jobId: z.string().min(1)
-    })
-  })
-  async importGeneratedResult(params: { projectId: string; jobId: string }) {
-    if (!this.resultImports) {
-      return { success: false as const, error: 'Result import service is not available.' };
-    }
-
-    const response = await this.resultImports.importAiResult({ projectId: params.projectId, jobId: params.jobId });
-    if (!response.ok) {
-      return { success: false as const, error: response.error.message };
-    }
-
-    const assets = response.value.assets.map((asset) => ({
-      id: asset.id,
-      displayName: asset.displayName,
-      kind: asset.kind,
-      durationMs: asset.metadata?.durationMs
-    }));
-    // The project gained an asset, so an open editor must reload to see it.
-    this.notifyProjectTimelineChanged?.(params.projectId);
-
-    return {
-      success: true as const,
-      projectId: params.projectId,
-      jobId: params.jobId,
-      assets,
-      message: `Imported ${assets.length} generated asset(s) into project ${params.projectId}.`
-    };
-  }
-
-  @McpTool({
     // No quality parameter: the export pipeline has no preset concept
     // (StartExportJobInput carries size, frame rate and delivery policy), and the tool used
     // to accept one, drop it, and echo it back as if it had applied.
@@ -1237,6 +796,41 @@ export class OpenVideoMcpServer {
       // metadata for, which for this one would mean the decorators did not run.
       tools: (getOpenVideoMcpDefinition()?.tools ?? []).map((tool) => tool.name)
     };
+  }
+
+  @McpTool({ description: 'Discover every supported editing operation, canvas block, parameter and quick-start workflow. Read this before constructing an editProject batch. Read-only; never returns paths.', input: z.object({}) })
+  async getEditingCapabilities() {
+    return { success: true, ...editingCapabilities(), blocks: CANVAS_BLOCK_CATALOG };
+  }
+
+  @McpTool({ description: 'Inspect saved canvas connections, parameters, stable source ranges and per-block readiness/duration. Read-only. Use clip IDs from getProjectTimeline as sources.', input: z.object({ projectId: z.string().min(1) }) })
+  async getCanvasWorkflow(params: { projectId: string }) {
+    if (!this.projectStore) return { success: false, error: 'ProjectStore service is not available.' };
+    try {
+      const project = await this.projectStore.open(params.projectId);
+      if (!project) return { success: false, error: 'Project not found.' };
+      const graph = project.timeline.canvas ?? EMPTY_CANVAS_GRAPH;
+      return { success: true, projectId: project.id, graph, outputs: graph.blocks.map(block => {
+        const result = evaluateCanvasBlock(project.timeline, graph, block.id);
+        return result.success ? { blockId: block.id, ready: true, type: result.output.type, durationMs: result.output.durationMs }
+          : { blockId: block.id, ready: false, error: result.error };
+      }) };
+    } catch (error: unknown) { return { success: false, error: error instanceof Error ? error.message : 'Cannot read workflow.' }; }
+  }
+
+  @McpTool({ description: 'Apply 1–64 editing operations atomically, then save and refresh the editor. Supports all canvas blocks/templates/connections, clip placement/move/duplicate/trim/split/effects, track mix/order and titles including font/shadow/caption styles. Call getEditingCapabilities for field names and examples. Times are milliseconds. Unknown fields, invalid ports, cycles and invalid timeline edits are refused without partial writes. Requires user approval.',
+    input: z.object({ projectId: z.string().min(1), operations: z.array(z.record(z.string(), z.unknown())).min(1).max(64) }) })
+  async editProject(params: { projectId: string; operations: readonly unknown[] }) {
+    if (!this.projectStore) return { success: false, error: 'ProjectStore service is not available.' };
+    try {
+      const project = await this.projectStore.open(params.projectId);
+      if (!project) return { success: false, error: 'Project not found.' };
+      const result = applyEditorOperations(project.timeline, params.operations, project.assets);
+      if (!result.success) return result;
+      await this.projectStore.saveTimeline(project.id, result.timeline);
+      this.notifyProjectTimelineChanged?.(project.id);
+      return { success: true, projectId: project.id, appliedOperations: params.operations.length, outputIds: result.outputIds };
+    } catch (error: unknown) { return { success: false, error: error instanceof Error ? error.message : 'The edit could not be saved.' }; }
   }
 }
 

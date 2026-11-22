@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, open, readFile, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, open, readFile, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 
@@ -115,6 +115,8 @@ describe('export IPC service', () => {
     await Promise.all(backgroundTasks);
 
     const completed = await service.getExportJob({ jobId: 'export_01' });
+    service.cancelAll();
+    await expect(service.getExportJob({ jobId: 'export_01' })).resolves.toEqual(completed);
     expect(completed).toMatchObject({ ok: true, value: { state: {
       kind: 'completed', fileName: 'export_01.mp4', provenanceFileName: 'export_01.provenance.json'
     } } });
@@ -346,7 +348,7 @@ describe('export IPC service', () => {
     expect(await readFile(join(exportsRoot, 'export_provenance_collision.provenance.json'), 'utf8')).toBe('keep me');
   });
 
-  it('cancels a running job and removes its partial output', async () => {
+  it.each(['individual', 'all'] as const)('cancels a running job via %s and removes its partial output', async (mode) => {
     const root = await mkdtemp(join(tmpdir(), 'export-service-'));
     const sourcePath = join(root, 'source.webm');
     await writeFile(sourcePath, 'clip');
@@ -372,10 +374,17 @@ describe('export IPC service', () => {
     });
 
     await service.startExportJob({ projectId: 'project_01' });
-    await expect(service.cancelExportJob({ jobId: 'export_01' })).resolves.toEqual({ ok: true, value: { cancelled: true } });
+    await writeFile(join(root, 'exports', 'export_01.mp4'), 'partial');
+    if (mode === 'all') {
+      service.cancelAll();
+    } else {
+      await expect(service.cancelExportJob({ jobId: 'export_01' })).resolves.toEqual({ ok: true, value: { cancelled: true } });
+    }
     await Promise.all(backgroundTasks);
 
     expect(cancelled).toBe(true);
+    await expect(access(join(root, 'exports', 'export_01.mp4'))).rejects.toThrow();
+    expect((await readdir(join(root, 'exports'))).filter((name) => name.startsWith('.stage-'))).toEqual([]);
     await expect(service.getExportJob({ jobId: 'export_01' })).resolves.toMatchObject({
       ok: true,
       value: { state: { kind: 'cancelled' } }
@@ -406,5 +415,109 @@ describe('export IPC service', () => {
       ok: true,
       value: { state: { kind: 'failed', reason: 'The local FFmpeg export failed.' } }
     });
+  });
+});
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((complete) => { resolve = complete; });
+  return { promise, resolve };
+}
+
+describe('export shutdown cancellation', () => {
+  it.each(['discovery', 'project', 'staging', 'queued'] as const)(
+    'does not start an export cancelled during %s, and permits a later request',
+    async (phase) => {
+      const root = await mkdtemp(join(tmpdir(), 'export-cancel-'));
+      const sourcePath = join(root, 'source.webm');
+      const exportsRoot = join(root, 'exports');
+      await writeFile(sourcePath, 'clip');
+      const reached = deferred<void>();
+      const release = deferred<void>();
+      let pause = true;
+      const waitAt = async (candidate: typeof phase) => {
+        if (pause && phase === candidate) {
+          reached.resolve();
+          await release.promise;
+        }
+      };
+      let nextId = 0;
+      const jobs = new ExportJobStore({ createId: () => `export_cancel_${++nextId}` });
+      const tasks: (() => Promise<void>)[] = [];
+      let starts = 0;
+      const service = new ExportIpcService({
+        projects: { open: async () => { await waitAt('project'); return SNAPSHOT; } },
+        assets: { openPlaybackSource: async () => { await waitAt('staging'); return openSource(sourcePath); } },
+        jobs,
+        exportsRoot,
+        discoverFfmpeg: async () => {
+          await waitAt('discovery');
+          return { kind: 'system', executablePath: process.execPath };
+        },
+        startProcess: (input) => {
+          starts += 1;
+          return { completion: writeFile(input.args.at(-1)!, 'mp4'), cancel: () => undefined };
+        },
+        runInBackground: (task) => tasks.push(task)
+      });
+      const request = service.startExportJob({ projectId: SNAPSHOT.id });
+      if (phase === 'queued') {
+        expect((await request).ok).toBe(true);
+      } else {
+        await reached.promise;
+      }
+      service.cancelAll();
+      service.cancelAll(); // Repeated shutdown requests must be harmless.
+      pause = false;
+      release.resolve();
+      const result = await request;
+      if (phase !== 'queued') {
+        expect(result).toEqual({ ok: false, error: {
+          code: 'EXPORT_UNAVAILABLE', message: 'The export was cancelled.'
+        } });
+      }
+      for (const task of tasks.splice(0)) await task();
+      expect(starts).toBe(0);
+      expect(jobs.get('export_cancel_1')?.state.kind).toBe(
+        phase === 'discovery' || phase === 'project' ? undefined : 'cancelled'
+      );
+      // The staging directory and partial MP4 must not survive cancellation.
+      expect((await readdir(exportsRoot).catch(() => [])).filter((name) => name.startsWith('.stage-'))).toEqual([]);
+      await expect(access(join(exportsRoot, 'export_cancel_1.mp4'))).rejects.toThrow();
+
+      // cancelAll is a boundary for existing requests, not a permanent disable.
+      const later = await service.startExportJob({ projectId: SNAPSHOT.id });
+      expect(later.ok).toBe(true);
+      for (const task of tasks.splice(0)) await task();
+      expect(starts).toBe(1);
+      if (!later.ok) throw new Error('Expected a later export');
+      expect(jobs.get(later.value.id)?.state.kind).toBe('completed');
+    }
+  );
+
+  it('keeps a preparation failure cancelled rather than changing it to failed', async () => {
+    const reached = deferred<void>();
+    const release = deferred<void>();
+    const root = await mkdtemp(join(tmpdir(), 'export-cancel-failure-'));
+    const jobs = new ExportJobStore({ createId: () => 'cancelled_preparation' });
+    const service = new ExportIpcService({
+      projects: { open: async () => SNAPSHOT },
+      assets: { openPlaybackSource: async () => {
+        reached.resolve();
+        await release.promise;
+        throw new Error('Injected source read failure');
+      } },
+      jobs,
+      exportsRoot: join(root, 'exports'),
+      discoverFfmpeg: async () => ({ kind: 'system', executablePath: process.execPath }),
+      startProcess: () => { throw new Error('Must not spawn after cancellation'); }
+    });
+    const request = service.startExportJob({ projectId: SNAPSHOT.id });
+    await reached.promise;
+    service.cancelAll();
+    release.resolve();
+    expect((await request).ok).toBe(false);
+    expect(jobs.get('cancelled_preparation')?.state.kind).toBe('cancelled');
+    expect((await readdir(join(root, 'exports'))).filter((name) => name.startsWith('.stage-'))).toEqual([]);
   });
 });

@@ -55,33 +55,16 @@ For distribution, choose and document one of these paths:
 2. ship a separately reviewed LGPL-compatible build with only the required codecs; or
 3. accept the applicable GPL obligations for a bundled GPL build.
 
-## Planned external services and model runtimes
+## Local transcription runtime
 
-| Component | Intended boundary | License action required before release |
-|---|---|---|
-| Gemini/Grok browser session | Connected service, per-operation approval | Review service terms and UI automation behavior; never redistribute session credentials |
-| Gemini/xAI APIs | Connected service, per-operation approval | Record API terms, retention and pricing disclosure |
-| ComfyUI | Separate worker process | Review GPL service/bundling boundary |
-| Wan 2.2 and related weights | Worker model | Record code license, exact weight license and checksum separately |
-| whisper.cpp | Installer-fetched ASR executable, MIT, pinned in `UPSTREAM_PINS.md` | The setup script downloads it to ignored local storage and verifies the official release digest; preserve its MIT notice in any redistributed installer/bundle |
-| ggml-small.bin | Installer-fetched multilingual ASR model, MIT metadata, pinned in `UPSTREAM_PINS.md` | The setup script downloads it to ignored local storage and verifies the exact SHA-256; review redistribution terms again before bundling |
-| VieNeu-TTS v3 Turbo | Separate Apache-2.0 checkout and local process | OpenScene does not copy its source or weights; its included voice notice says non-commercial use only and requires attribution, so do not redistribute or enable commercial use without a separate rights review |
-
-## Dependency security snapshot
-
-`npm ci` reported the following on 2026-09-02:
-
-- root workspace: 7 advisories (1 moderate, 6 high);
-- mobile workspace: 18 advisories (11 moderate, 7 high).
-
-No automatic `npm audit fix` was run. Each advisory must be triaged on an issue-scoped branch because forced upgrades may change Electron, Expo or native SDK behavior.
+The optional setup script downloads pinned whisper.cpp binaries and model files into ignored local storage. Runtime and model provenance are recorded by scripts/install-transcription-runtime.ps1.
 
 ## ffmpeg-skill repository tools and workflow
 
 - Upstream: https://github.com/kajisho5/ffmpeg-skill
 - Version: 3.13.1; commit: 3145261a1c19f399b9520fad7fdac741871e1426
 - Copyright: 2026 kajisho5
-- License: MIT; complete notice: `.agents/skills/ffmpeg-skill/LICENSE`
+- License: MIT; complete notice: `external/ffmpeg-skill/LICENSE`
 - Snapshot provenance and file hashes: `.agents/skills/ffmpeg-skill/UPSTREAM.json`
 
 The repository includes the Python tools and documentation for coding-agent use. The packaged app uses only a compact adapted editing workflow, not the upstream scripts or MCP server. See `docs/ffmpeg-skill-integration.md`.

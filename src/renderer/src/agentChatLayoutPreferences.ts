@@ -23,7 +23,7 @@ export type AgentChatPanelResizeKeyInput = {
 export const AGENT_CHAT_LAYOUT_DEFAULT_PREFERENCE: AgentChatLayoutPreference = {
   schemaVersion: AGENT_CHAT_LAYOUT_SCHEMA_VERSION,
   chatPanelWidth: AGENT_CHAT_LAYOUT_DEFAULT_WIDTH,
-  chatPanelCollapsed: false
+  chatPanelCollapsed: true
 };
 
 function isStoredPreferenceRecord(value: unknown): value is { readonly schemaVersion?: unknown; readonly chatPanel?: unknown } {
