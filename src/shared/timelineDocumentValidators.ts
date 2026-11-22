@@ -1,4 +1,5 @@
 import { clipTimelineEndMs } from './timelineClipGeometry';
+import { parseVideoCanvasGraph } from './videoCanvasGraph';
 import { parseTimelineClip, parseTimelineClipV1, parseTimelineClipV2 } from './timelineClipValidators';
 import { parseAudioTrackMix, parseTitles, parseTransitions } from './timelineMetadataValidators';
 import type { MediaKind, PersistedTimelineClip, TimelineDocument, TimelineTrack } from './timelineTypes';
@@ -90,7 +91,7 @@ function parseDocument(
 ): TimelineDocument | null {
   const allowedKeys =
     schemaVersion === TIMELINE_SCHEMA_VERSION
-      ? ['schemaVersion', 'tracks', 'transitions', 'titles']
+      ? ['schemaVersion', 'tracks', 'transitions', 'titles', 'canvas']
       : ['schemaVersion', 'tracks'];
   if (!isPlainRecord(value) || !hasAllowedKeys(value, allowedKeys) || value.schemaVersion !== schemaVersion) return null;
   const rawTracks = value.tracks;
@@ -117,13 +118,18 @@ function parseDocument(
   // no such key, and must still open rather than be reported as corrupt.
   const titles = schemaVersion === TIMELINE_SCHEMA_VERSION ? parseTitles(value.titles) : [];
   if (titles === null) return null;
+  const canvas = value.canvas === undefined ? undefined : parseVideoCanvasGraph(value.canvas);
+  if (canvas === null) return null;
+  if (canvas?.blocks.some(block => clipIds.has(block.id))) return null;
   // The key is left off when there is nothing in it, so a document that had no
   // titles is written back exactly as it came: absent and empty already mean the
   // same thing to every reader, and inventing the key would rewrite files that
   // did not change.
-  return titles.length === 0
-    ? { schemaVersion: TIMELINE_SCHEMA_VERSION, tracks, transitions }
-    : { schemaVersion: TIMELINE_SCHEMA_VERSION, tracks, transitions, titles };
+  return {
+    schemaVersion: TIMELINE_SCHEMA_VERSION, tracks, transitions,
+    ...(titles.length === 0 ? {} : { titles }),
+    ...(canvas === undefined ? {} : { canvas })
+  };
 }
 
 export function parseTimelineDocument(value: unknown): TimelineDocument | null {

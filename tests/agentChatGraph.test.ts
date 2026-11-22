@@ -5,7 +5,6 @@ import { AIMessage } from '@langchain/core/messages';
 import {
   buildAgentChatGraph,
   EXISTING_FOOTAGE_EDIT_POLICY,
-  GENERATION_COST_POLICY,
   type AgentChatModelFactory
 } from '../src/main/agentChatGraph';
 import { AgentChatSessionManager } from '../src/main/agentChatSession';
@@ -66,12 +65,6 @@ function buildFailingSession(firstReply: AIMessage, failure: Error): AgentChatSe
 }
 
 describe('agent chat graph', () => {
-  it('routes existing-footage montage requests to local timeline tools', () => {
-    expect(EXISTING_FOOTAGE_EDIT_POLICY).toContain('prefer those assets');
-    expect(EXISTING_FOOTAGE_EDIT_POLICY).toContain('use project/timeline tools to place and trim existing asset IDs');
-    expect(EXISTING_FOOTAGE_EDIT_POLICY).toContain('Do not call planVideoScenario');
-    expect(GENERATION_COST_POLICY).toContain('newly AI-generated media only');
-  });
 
   it('keeps the conversation visible when a turn fails instead of blanking it', async () => {
     const session = buildFailingSession(new AIMessage('Sure thing.'), new Error('400 status code (no body)'));
@@ -319,7 +312,7 @@ describe('agent chat graph', () => {
     expect(seenSystemPrompts[0]).not.toContain('active project scope');
   });
 
-  it('turns watchProjectVideo frame output into a summary tool message plus a multimodal image message, never base64 text', async () => {
+  it('delivers timestamped video frames to the model even when speech inspection returns no cues', async () => {
     const jpegBase64 = 'ZmFrZS1qcGVnLWJ5dGVz';
     const watchTool = tool(
       async () =>
@@ -341,7 +334,11 @@ describe('agent chat graph', () => {
 
     const seenMessageContents: unknown[][] = [];
     const bundle = buildAgentChatGraph({
-      tools: [watchTool],
+      tools: [watchTool, tool(async () => JSON.stringify({ success: true, cues: [] }), {
+        name: 'transcribeProjectVideoRange',
+        description: 'Inspect speech in a source range.',
+        schema: z.object({})
+      })],
       mutatingToolNames: new Set(),
       createModel: (() => {
         let call = 0;
@@ -350,7 +347,10 @@ describe('agent chat graph', () => {
             seenMessageContents.push(messages.map((message) => message.content as unknown));
             call += 1;
             return call === 1
-              ? new AIMessage({ content: '', tool_calls: [{ id: 'call-w', name: 'watchProjectVideo', args: { projectId: 'p', assetId: 'a' } }] })
+              ? new AIMessage({ content: '', tool_calls: [
+                { id: 'call-w', name: 'watchProjectVideo', args: { projectId: 'p', assetId: 'a' } },
+                { id: 'call-speech', name: 'transcribeProjectVideoRange', args: {} }
+              ] })
               : new AIMessage('The clip opens on a city skyline.');
           }
         });
@@ -358,7 +358,7 @@ describe('agent chat graph', () => {
     });
     const session = new AgentChatSessionManager(bundle);
 
-    const result = await session.sendMessage({ conversationId: 'cw', text: 'what is in take.mp4?', modelId: 'qwen2.5-coder' });
+    const result = await session.sendMessage({ conversationId: 'cw', text: 'what is in take.mp4?', modelId: 'openai/gpt-4o-mini' });
 
     // The transcript shown to the user never contains raw base64 frames.
     expect(JSON.stringify(result.messages)).not.toContain(jpegBase64);
@@ -368,10 +368,13 @@ describe('agent chat graph', () => {
 
     // The model's second invocation sees the frames as image_url content blocks.
     const secondInvocation = seenMessageContents[1]!;
+    const speechIndex = secondInvocation.findIndex((content) => typeof content === 'string' && content.includes('"cues":[]'));
     const multimodal = secondInvocation.find(
       (content) => Array.isArray(content) && content.some((part) => (part as { type?: string }).type === 'image_url')
     ) as readonly { type: string; image_url?: { url: string } }[] | undefined;
     expect(multimodal).toBeDefined();
+    expect(speechIndex).toBeGreaterThan(-1);
+    expect(secondInvocation.indexOf(multimodal)).toBeGreaterThan(speechIndex);
     const imageParts = multimodal!.filter((part) => part.type === 'image_url');
     expect(imageParts).toHaveLength(2);
     expect(imageParts[0]!.image_url?.url).toBe(`data:image/jpeg;base64,${jpegBase64}`);

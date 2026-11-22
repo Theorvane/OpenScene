@@ -19,8 +19,8 @@ describe('app page shell source contract', () => {
     expect(app).toContain('const workspaceIsVisible = isWorkspacePageId(activePageId);');
     // The studio keeps creation tools inside one shared workspace frame.
     expect(app).not.toContain('<HomePage');
-    expect(app).toContain('<CreationStageNav');
-    expect(app).toContain('aria-label="Production studio"');
+    expect(app).toContain('<TimelineEditor editor={editor}');
+    expect(app).toContain('aria-label="Editing workspace"');
     expect(app).toContain('<SettingsWorkspace onReplayFirstRunOnboarding={replayFirstRunOnboarding} />');
     expect(app).toContain('hidden={!workspaceIsVisible}');
   });
@@ -44,7 +44,7 @@ describe('app page shell source contract', () => {
     expect(app).toContain('if (isProjectRequiredPageId(pageId) && !hasActiveProject) {');
     expect(app).toContain("navigateToPage('projects');");
     expect(app).toContain('if (hasActiveProject || !isProjectRequiredPageId(activePageId)) return;');
-    expect(app).toContain('const opened = await editor.openProjectFolder(projectTypeForMode(mode));');
+    expect(app).toContain("const opened = await editor.openProjectFolder('editing');");
     expect(app).toContain('const opened = await editor.openProject(projectId);');
     expect(app).toContain("if (opened) navigateToPage('edit');");
     expect(app).toContain('hasActiveProject={hasActiveProject}');
@@ -67,10 +67,8 @@ describe('app page shell source contract', () => {
   it('keeps mounted workspace panels directly labeled after removing the sidebar', async () => {
     const app = await readSource(APP_SOURCE_URL);
 
-    expect(app).toContain('className="app-workspace-panel-stack"');
-    expect(app).toContain('className="visually-hidden"');
-    expect(app).toContain('id={EDIT_WORKSPACE.navId}');
-    expect(app).toContain('{EDIT_WORKSPACE.label}');
+    expect(app).toContain('aria-label="Editing workspace"');
+    expect(app).toContain('id={EDIT_WORKSPACE.panelId}');
     // Voice and video generation are dock tabs inside the editor, not pages.
     expect(app).not.toContain('VOICE_GENERATION_WORKSPACE');
     expect(app).not.toContain('VIDEO_GENERATION_WORKSPACE');
@@ -80,9 +78,9 @@ describe('app page shell source contract', () => {
   it('documents the workspace tab strip as the only workspace entry surface', async () => {
     const design = await readSource(DESIGN_SOURCE_URL);
 
-    expect(design).toContain('do not reintroduce a left workspace sidebar');
-    expect(design).toContain('There is no menu page: the workspace tab strip switches between Editing, Voice Generation, and Video Generation');
-    expect(design).toContain('voice and video generation are tabs within it');
+    expect(design).toContain('Timeline mode');
+    expect(design).toContain('Canvas mode');
+    expect(design).toContain('two views of the same saved timeline');
     expect(design).not.toContain('a left sidebar for workspace navigation');
     expect(design).not.toContain('Application workspace switching belongs to `AppWorkspaceNavigation`');
   });

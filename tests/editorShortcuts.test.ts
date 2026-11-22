@@ -23,6 +23,12 @@ import {
 } from '../src/renderer/src/editor/editorShortcuts';
 
 describe('editor shortcuts', () => {
+  it('uses Control for Windows defaults and preserves explicit custom bindings', () => {
+    const defaults = getEditorShortcutBindings(EDITOR_SHORTCUT_DEFAULT_PREFERENCES, 'Ctrl');
+    expect(defaults.find(binding => binding.actionId === 'undo')?.chord?.modifiers).toEqual(['Ctrl']);
+    const custom = getEditorShortcutBindings({ ...EDITOR_SHORTCUT_DEFAULT_PREFERENCES, overrides: { undo: { key: 'U', modifiers: ['Meta'] } } }, 'Ctrl');
+    expect(custom.find(binding => binding.actionId === 'undo')?.chord).toEqual({ key: 'U', modifiers: ['Meta'] });
+  });
   it('Given a Mac delete key, When pressed, Then the default Delete binding still fires', () => {
     const bindings = getEditorShortcutBindings(EDITOR_SHORTCUT_DEFAULT_PREFERENCES);
     const deleteBinding = bindings.find((binding) => binding.actionId === 'deleteSelection')!;

@@ -5,6 +5,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Typeface
+import android.text.style.TypefaceSpan
 import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
@@ -290,6 +291,11 @@ class VideoExportModule : Module() {
     val offsetX: Float,
     val offsetY: Float,
     val bold: Boolean,
+    val fontFamily: String,
+    val shadowColor: Int,
+    val shadowOpacity: Float,
+    val shadowOffsetX: Float,
+    val shadowOffsetY: Float,
     val outlineColor: Int,
     val outlineWidthPx: Float,
     val backgroundColor: Int,
@@ -339,6 +345,11 @@ class VideoExportModule : Module() {
           offsetX = num(it["positionX"], 0f),
           offsetY = num(it["positionY"], 0f),
           bold = it["fontWeight"] == "bold",
+          fontFamily = when (it["fontFamily"]) { "serif" -> "serif"; "mono" -> "monospace"; else -> "sans-serif" },
+          shadowColor = runCatching { Color.parseColor(it["shadowColor"] as? String ?: "#000000") }.getOrDefault(Color.BLACK),
+          shadowOpacity = num(it["shadowOpacity"], 0f).coerceIn(0f, 1f),
+          shadowOffsetX = num(it["shadowOffsetX"], 4f).coerceIn(-100f, 100f),
+          shadowOffsetY = num(it["shadowOffsetY"], 4f).coerceIn(-100f, 100f),
           outlineColor = runCatching { Color.parseColor(it["outlineColor"] as? String ?: "#000000") }.getOrDefault(Color.BLACK),
           outlineWidthPx = num(it["outlineWidthPx"], 0f).coerceIn(0f, 24f),
           backgroundColor = runCatching { Color.parseColor(it["backgroundColor"] as? String ?: "#000000") }.getOrDefault(Color.BLACK),
@@ -368,6 +379,7 @@ class VideoExportModule : Module() {
     val span = SpannableString(title.text)
     span.setSpan(ForegroundColorSpan(title.color), 0, span.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
     span.setSpan(AbsoluteSizeSpan(title.sizePx), 0, span.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+    span.setSpan(TypefaceSpan(title.fontFamily), 0, span.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
     if (title.bold) span.setSpan(StyleSpan(Typeface.BOLD), 0, span.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
     if (title.outlineWidthPx > 0f) span.setSpan(OutlineShadowSpan(title.outlineColor, title.outlineWidthPx), 0, span.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
     if (title.backgroundOpacity > 0f) span.setSpan(
@@ -648,7 +660,16 @@ class VideoExportModule : Module() {
     val dipOverlays = if (dips.isEmpty()) emptyList() else blackFrame(width, height).let { black -> dips.map { dipOverlay(it, black) } }
     // Titles are composition effects, not item effects: a caption belongs over
     // the finished picture rather than inside one clip of it.
-    val overlays = titlesOf(request).map { overlayFor(it, width, height) }
+    val overlays = titlesOf(request).flatMap { title ->
+      if (title.shadowOpacity <= 0f) listOf(overlayFor(title, width, height)) else buildList {
+        // Separate plate, shadow glyphs and foreground so a plate never hides its text shadow.
+        if (title.backgroundOpacity > 0f) add(overlayFor(title.copy(color = Color.TRANSPARENT, outlineWidthPx = 0f), width, height))
+        add(overlayFor(title.copy(color = colorWithOpacity(title.shadowColor, title.shadowOpacity),
+          offsetX = title.offsetX + title.shadowOffsetX, offsetY = title.offsetY + title.shadowOffsetY,
+          outlineWidthPx = 0f, backgroundOpacity = 0f), width, height))
+        add(overlayFor(title.copy(backgroundOpacity = 0f), width, height))
+      }
+    }
     val compositionEffects = buildList {
       // The plan's width and height are the frame the whole cut is rendered
       // into, so it belongs on the composition rather than on any one item.

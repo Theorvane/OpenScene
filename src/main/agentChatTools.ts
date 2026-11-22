@@ -24,12 +24,10 @@ import { OpenVideoMcpServer } from './openVideoMcpServer';
  * (See docs/hybrid-ai-editor-direction.md §2.2/§4.3.)
  */
 export const AGENT_CHAT_READ_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set([
-  'planVideoScenario',
-  'checkNarrationLength',
-  'estimateGenerationCost',
-  'getJobStatus',
   'getProjectTimeline',
-  'watchProjectVideo'
+  'watchProjectVideo',
+  'getEditingCapabilities',
+  'getCanvasWorkflow'
 ]);
 
 /**
@@ -53,8 +51,4 @@ export async function createAgentChatTools(instance: OpenVideoMcpServer): Promis
  * reasonable answer to "may I trim this clip again", and an unreasonable one to
  * "may I charge your card whenever I like". Every charge stays visible.
  */
-export const AGENT_CHAT_SPEND_TOOL_NAMES: ReadonlySet<string> = new Set([
-  'createVideoJob',
-  'createSpeechJob',
-  'createImageJob'
-]);
+export const AGENT_CHAT_SPEND_TOOL_NAMES: ReadonlySet<string> = new Set();

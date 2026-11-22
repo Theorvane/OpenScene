@@ -2,11 +2,15 @@
 
 ## Architecture
 
-OpenScene is an Electron, React, TypeScript, and Vite desktop app. The app is split into three strict surfaces:
+OpenScene has an Electron, React, TypeScript and Vite desktop app and a mobile front end over shared editing rules.
 
-- `src/main/`: Electron main process. Owns desktop capture selection, OS permissions, local file access, project storage, FFmpeg export jobs, local TTS jobs, app menu wiring, and shell open or reveal actions.
+The product edits supplied media through Timeline, a node Canvas and an editing agent over one saved project. Canvas workflows are applied to timeline tracks before review/export. Media generation, production boards and voice synthesis are not active product surfaces.
+
+The desktop process boundary and shared core are organized as follows:
+
+- `src/main/`: Electron main process. Owns desktop capture selection, OS permissions, local file access, project storage, FFmpeg export jobs, local transcription jobs, app menu wiring, and shell open or reveal actions.
 - `src/preload/`: typed bridge. Exposes the narrow `window.videoTool` API and never exposes raw `ipcRenderer`.
-- `src/renderer/`: React UI. Owns capture controls, project timeline editing, Program Monitor preview, narration UI, and editor state.
+- `src/renderer/`: React UI. Owns capture controls, project timeline editing, Program Monitor preview, canvas UI, and editor state.
 - `src/shared/`: IPC names, validators, timeline models, export types, and provider seam types shared across main, preload, renderer, and tests.
 
 ## Commands
@@ -27,25 +31,24 @@ npm run build
 - Main process tests usually cover stores, validators, job logic, FFmpeg argument boundaries, and IPC services without launching Electron.
 - Renderer behavior lives under `src/renderer/src/`, with timeline editor logic split across hooks, model helpers, and components.
 - Shared timeline logic and validators should stay in `src/shared/` when both renderer and main process need the contract.
+- Canvas catalog, templates, source snapshots, layout and evaluation are shared rules. New editing features must be reachable through the shared batch operations and agent capability discovery as well as their UI.
+- Preserve atomic edits: validate the whole batch before one save, then refresh the open editor. Node layout changes must not change media timing or connections.
 
 ## Local-First And Security Constraints
 
 - Keep `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`, `webSecurity: true`, and blocked window navigation.
-- File paths, FFmpeg executable paths, FFmpeg argv, voice sample paths, and generated output paths stay in the main process. The renderer gets typed job status and open or reveal actions.
-- OpenScene stores recordings, projects, imported assets, voice profiles, TTS output, and exports locally under Electron `userData` unless an explicit local override exists.
-- No cloud upload, analytics, account system, crash reporting, or auto-update is
-  implemented on the desktop. `mobile/` has three deliberate exceptions, none of
-  which exists on the desktop: it calls providers directly — generation runs
-  against the user's own accounts, per operation and behind the spend prompt —
-  and it reports anonymous usage counts to the publisher's own OpenPanel instance.
-- Each is an exception to that line rather than a widening of it. Usage reporting
-  in particular is bounded by `mobile/src/lib/analytics.ts`: a closed list of
+- File paths, FFmpeg executable paths, FFmpeg argv, transcription input paths, and export paths stay in the main process. The renderer gets typed job status and open or reveal actions.
+- OpenScene stores recordings, projects, imported assets, transcripts and exports locally under Electron `userData` unless an explicit local override exists.
+- Local storage/export does not imply all agent requests are local. Desktop and mobile can call the selected model provider with authorized context; desktop multimodal requests can include sampled frames and transcripts. Preserve existing approval gates and credential boundaries.
+- Desktop has no analytics or general cloud-media storage service. Packaged desktop builds have explicit update checks/download/install controls; do not describe that as background automatic installation.
+- Mobile reports anonymous usage counts to the publisher's own OpenPanel instance.
+  Usage reporting is bounded by `mobile/src/lib/analytics.ts`: a closed list of
   event names, property values restricted to numbers, booleans and null, and no
   profile ever identified. A prompt, a file name, a path or a key is not a thing
   that list can express. Adding an event means adding it there and deciding
   whether it belongs, and the switch is in Settings, on by default and stated in
   the app rather than only in a policy.
-- Future hybrid AI support must follow [`docs/hybrid-ai-editor-direction.md`](docs/hybrid-ai-editor-direction.md): local models are user-configured, connected services are selected and authorized per operation, and provider adapters remain behind typed seams until a separately reviewed implementation adds them.
+- Agent support follows [capabilities and boundaries](docs/hybrid-ai-editor-direction.md): local models are user-configured and connected providers use the app's authorization flow.
 
 ## Compatibility Identifiers
 
@@ -78,8 +81,6 @@ migrate what is stored under it, it orphans it:
 
 - Prefer typed shared contracts over ad hoc IPC payloads.
 - Treat Program Monitor as best-effort preview. FFmpeg MP4 export is the supported final output for saved local timelines.
-- Keep local Qwen TTS as a user-configured local wrapper. The app must not download models or promise model compatibility.
-- Preserve consent boundaries for voice samples. Samples must be user-owned or authorized, stored locally, and deletable from the app store.
 - When editing docs, use `OpenScene` for the product name and keep compatibility identifiers exactly as written above.
 
 ## Two Surfaces, One Core
@@ -100,8 +101,7 @@ A feature is not finished on one of them.
   and image adapters returning a Node `Buffer` — each caught by the mobile
   typecheck and by nothing else.
 - **Say so when a surface genuinely cannot have it.** Some things are honestly
-  platform-bound: window capture has no phone equivalent, and Android export is
-  not written yet. Those stay visible and disabled with the reason, in the UI and
+  platform-bound: window capture, free-position canvas cards and chat-based frame/speech inspection are desktop capabilities. Native export requires a mobile development build and cannot run in Expo Go. Unsupported capabilities stay visible with the reason, in the UI and
   in the pull request. Silence reads as an oversight; a stated limit reads as a
   decision.
 - **Verify on both.** `npm run typecheck && npm test && npm run build` at the
@@ -115,7 +115,8 @@ A feature is not finished on one of them.
 ## Agent Skills & TypeMCP Integration
 
 - **Agent Skills Location**: `.agents/skills/api-to-typemcp/SKILL.md` (Integrates `api-to-typemcp` skill for converting OpenAPI/Swagger specifications or API docs into TypeMCP MCP projects).
-- **TypeMCP Server & Tools**: OpenScene internal process capabilities (AI video generation, TTS speech synthesis, job status tracking) are declared as standard TypeMCP tools (`@theorvane/type-mcp`) in `src/main/openVideoMcpServer.ts` and exposed over IPC (`window.videoTool.mcpGetTools` / `mcpExecuteTool`).
+- **TypeMCP Server & Tools**: OpenScene editing capabilities (frame inspection, transcription, timeline editing and export) are declared as standard TypeMCP tools (`@theorvane/type-mcp`) in `src/main/openVideoMcpServer.ts` and exposed over IPC (`window.videoTool.mcpGetTools` / `mcpExecuteTool`).
+- `getEditingCapabilities`, `getCanvasWorkflow` and atomic `editProject` expose shared block, layout and timeline operations. Keep the advertised catalog derived from implementation and dispatch only registered, schema-validated tools. Mobile uses the same editing core with its own approved tool adapter.
 
 ## Required Issue, Branch, And PR Workflow
 
@@ -131,3 +132,7 @@ Every change after the initial repository bootstrap follows this sequence. Never
 8. Promote vetted `dev` to release-only `main` through a separate reviewed release pull request. Verify `main` contains the release commit before publication.
 9. Store listings are filled in from `store/`, not written into the consoles from memory. One file per store per language — `store/app-store/whats-new.<locale>.txt`, `store/google-play/release-notes.<locale>.txt` — and both stores carry the same set of languages. The App Store text may not name another platform — App Review refuses it under Guideline 2.3.10, and `tests/storeReleaseNotes.test.ts` refuses it first.
 10. The version in `package.json` is the release decision. Bump it on `dev` before promoting: the push to `main` tags `v<version>`, creates a `release/v<version>` branch, packages macOS, Windows, and Linux on their own runners, and publishes the release with every artifact attached. Promoting without a bump republishes nothing, by design.
+
+## Local FFmpeg editing skill
+
+For authorized repository-side video/audio work, read `.agents/skills/ffmpeg-skill/SKILL.md` and `docs/ffmpeg-skill-integration.md`. The pinned upstream tools are for coding agents, not automatically registered in-app tools. Preserve originals, plan from measured metadata and verify outputs; do not install dependencies, download models or start MCP servers implicitly. The in-app workflow is adapted in `src/shared/ffmpegEditingWorkflow.ts` and respects each surface's existing tool/approval boundaries.

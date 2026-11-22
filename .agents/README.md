@@ -10,3 +10,9 @@ Files:
 - `docs.md`: documentation style and scope notes.
 
 Keep these files short. They are guidance, not a second README.
+
+Current product: Timeline + node Canvas + editing agent over imported media. Use `docs/README.md` to find shared-core, workflow and verification guides; legacy generation fields exist for compatibility only.
+
+- `skills/ffmpeg-skill/SKILL.md`: pinned upstream local FFmpeg editing skill; integration/capability boundaries in `docs/ffmpeg-skill-integration.md`.
+
+The FFmpeg skill adapter points to the pinned `external/ffmpeg-skill` submodule. Initialize it along with OpenCut using `git submodule update --init --recursive`; run its Python tools from that external root, not the adapter directory.

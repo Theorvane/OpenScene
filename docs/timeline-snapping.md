@@ -1,5 +1,7 @@
 # Precise clip manipulation
 
+Snapping refines clip timing in Timeline/Edit after manual placement or Canvas application. Node alignment and spacing affect only graph coordinates; their controls are described in [canvas workflows](canvas-workflows.md).
+
 Desktop and mobile use the same magnetic snapping rule for clip moves and
 edge trims. Snap targets are the playhead, timeline zero and other clips'
 starts/ends across tracks. Moving aligns either end of the clip; trimming

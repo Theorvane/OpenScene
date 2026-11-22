@@ -319,11 +319,17 @@ export function isReservedEditorShortcutChord(chord: EditorShortcutChord): boole
   return RESERVED_EDITOR_SHORTCUT_CHORDS.has(serializeEditorShortcutChord(chord));
 }
 
-export function getEditorShortcutBindings(preferences: EditorShortcutPreferences): readonly EditorShortcutBinding[] {
+export function getEditorShortcutBindings(
+  preferences: EditorShortcutPreferences,
+  primaryModifier: 'Ctrl' | 'Meta' = typeof document !== 'undefined' && document.documentElement.dataset.platform !== 'darwin' ? 'Ctrl' : 'Meta'
+): readonly EditorShortcutBinding[] {
   return EDITOR_SHORTCUT_DEFINITIONS.map((definition) => {
     const hasOverride = Object.prototype.hasOwnProperty.call(preferences.overrides, definition.actionId);
     const override = preferences.overrides[definition.actionId];
-    const chord = hasOverride ? (override ?? null) : definition.defaultChord;
+    const chord = hasOverride ? (override ?? null) : {
+      ...definition.defaultChord,
+      modifiers: definition.defaultChord.modifiers.map(modifier => modifier === 'Meta' ? primaryModifier : modifier)
+    };
 
     return {
       ...definition,

@@ -144,9 +144,9 @@ export async function resolveWhisperCppRuntime(options: {
   const modelConfig = explicitModel || join(managedRoot, 'models', 'ggml-small.bin');
   const executablePaths = (await Promise.all(executableConfigs.map((path) => configuredRegularFile(path, true)))).filter((path): path is string => path !== null);
   const executablePath = executablePaths[0];
-  if (executablePath === undefined) return { status: { ready: false, checksumVerified: false, reason: managed ? 'The managed whisper.cpp runtime is not installed. Run "npm run setup:local-ai", then restart OpenScene.' : 'The configured whisper.cpp executable is not a regular accessible file.' } };
+  if (executablePath === undefined) return { status: { ready: false, checksumVerified: false, reason: managed ? 'The managed whisper.cpp runtime is not installed. Run "npm run setup:transcription", then restart OpenScene.' : 'The configured whisper.cpp executable is not a regular accessible file.' } };
   const modelPath = await configuredRegularFile(modelConfig, false);
-  if (modelPath === null) return { status: { ready: false, checksumVerified: false, executableName: basename(executablePath), reason: managed ? 'The managed Whisper model is not installed. Run "npm run setup:local-ai", then restart OpenScene.' : 'The configured whisper.cpp model is not a regular readable file.' } };
+  if (modelPath === null) return { status: { ready: false, checksumVerified: false, executableName: basename(executablePath), reason: managed ? 'The managed Whisper model is not installed. Run "npm run setup:transcription", then restart OpenScene.' : 'The configured whisper.cpp model is not a regular readable file.' } };
 
   const checksumConfig = environment.OPENSCENE_WHISPER_MODEL_SHA256?.trim().toLowerCase() ?? '';
   const expectedChecksum = checksumConfig || (managed ? MANAGED_WHISPER_MODEL_SHA256 : undefined);
@@ -213,6 +213,7 @@ export async function transcribeOpenedAsset(input: {
   readonly language: string;
   readonly signal: AbortSignal;
   readonly temporaryRoot?: string;
+  readonly range?: { readonly startMs: number; readonly endMs: number };
   readonly spawnProcess?: SpawnWhisperProcess;
   readonly onStage: (stage: 'normalizing' | 'transcribing') => void;
   readonly onProgress: (percent: number) => void;
@@ -222,12 +223,20 @@ export async function transcribeOpenedAsset(input: {
   const normalizedPath = join(temporaryDirectory, 'normalized.wav');
   const outputPrefix = join(temporaryDirectory, 'transcript');
   try {
-    await pipeline(input.source.file.createReadStream({ autoClose: false }), createWriteStream(sourcePath, { flags: 'wx', mode: 0o600 }));
+    input.signal.throwIfAborted();
+    await pipeline(input.source.file.createReadStream({ autoClose: false }), createWriteStream(sourcePath, { flags: 'wx', mode: 0o600 }), { signal: input.signal });
+    input.signal.throwIfAborted();
     await input.source.file.close();
     input.onStage('normalizing');
     await runProcess({
       executablePath: input.ffmpegPath,
-      args: ['-nostdin', '-hide_banner', '-loglevel', 'error', '-y', '-i', sourcePath, '-map', '0:a:0', '-vn', '-c:a', 'pcm_s16le', '-ar', '16000', '-ac', '1', normalizedPath],
+      args: [
+        '-nostdin', '-hide_banner', '-loglevel', 'error', '-y',
+        ...(input.range === undefined ? [] : ['-ss', (input.range.startMs / 1000).toFixed(3)]),
+        '-i', sourcePath,
+        ...(input.range === undefined ? [] : ['-t', ((input.range.endMs - input.range.startMs) / 1000).toFixed(3)]),
+        '-map', '0:a:0', '-vn', '-c:a', 'pcm_s16le', '-ar', '16000', '-ac', '1', normalizedPath
+      ],
       timeoutMs: NORMALIZE_TIMEOUT_MS,
       signal: input.signal,
       ...(input.spawnProcess === undefined ? {} : { spawnProcess: input.spawnProcess })

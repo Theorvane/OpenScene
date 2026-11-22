@@ -21,7 +21,7 @@ describe('first-run onboarding source contract', () => {
     expect(onboarding).toContain('Start using OpenScene');
     expect(onboarding).toContain('Welcome to OpenScene');
     expect(onboarding).toContain('Local readiness');
-    expect(onboarding).toContain('Voice setup');
+    expect(onboarding).toContain('Video analysis');
     expect(onboarding).toContain('Edit Agent');
     expect(onboarding).toContain('Privacy boundary');
     expect(onboarding).toContain('Start local editing');
@@ -33,7 +33,7 @@ describe('first-run onboarding source contract', () => {
     expect(app).toContain('FirstRunOnboarding');
     expect(app).toContain('readFirstRunOnboardingCompletion(window.localStorage)');
     expect(app).toContain('writeFirstRunOnboardingCompletion(window.localStorage)');
-    expect(app).toContain('<CreationStageNav');
+    expect(app).toContain('<TimelineEditor editor={editor}');
     expect(app).toContain('activePage={activePage}');
     expect(app).toContain('hasActiveProject={hasActiveProject}');
     expect(app).toContain('onPageChange={setActivePage}');

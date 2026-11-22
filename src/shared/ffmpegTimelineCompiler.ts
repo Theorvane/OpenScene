@@ -15,6 +15,7 @@ import type {
   TransitionDescriptor
 } from './timelineTypes';
 import { resolvedTitleStyle, titleOutputPosition } from './captionStyle';
+import type { TitleFontKey } from './titleTypography';
 import { DEFAULT_METADATA_PRIVACY_MODE, ffmpegMetadataPrivacyArgs, type MetadataPrivacyMode } from './metadataPrivacy';
 
 export type CompileFfmpegTimelineInput = {
@@ -52,6 +53,7 @@ export type CompileFfmpegTimelineInput = {
   readonly titleFontPath?: string;
   /** Required when at least one styled title requests bold. */
   readonly titleBoldFontPath?: string;
+  readonly titleFontPaths?: ReadonlyMap<TitleFontKey, string>;
   readonly outputPath: string;
   readonly width: number;
   readonly height: number;
@@ -186,6 +188,9 @@ function videoAudioFilter(clip: PersistedTimelineClip, inputIndex: number, outpu
     // Sound follows the picture. A clip at 2× whose audio still runs at 1× is a
     // sync bug that reads as a broken export.
     ...tempoFilters(clipSpeed(clip)),
+    // Some decoders/tempo filters emit missing or non-monotonic timestamps.
+    // Rebuild from the output sample count before adding timeline silence.
+    'asetpts=N/SR/TB',
     `volume=${clipOnlyGain(clip)}`,
     'aformat=channel_layouts=stereo',
     `adelay=${clip.timelineStartMs}:all=1[${outputLabel}]`
@@ -295,6 +300,11 @@ function titleFilter(
     `text='${escapeDrawtext(title.text)}'`,
     `fontsize=${Math.round(title.sizePx)}`,
     `fontcolor=${title.color}`,
+    ...(style.shadow && style.shadow.opacity > 0 ? [
+      `shadowcolor=${style.shadow.color}@${style.shadow.opacity}`,
+      `shadowx=${Math.round(style.shadow.offsetX)}`,
+      `shadowy=${Math.round(style.shadow.offsetY)}`
+    ] : []),
     `borderw=${Math.round(style.outlineWidthPx)}`,
     `bordercolor=${style.outlineColor}`,
     `box=${style.backgroundOpacity > 0 ? 1 : 0}`,
@@ -321,6 +331,7 @@ function audioFilter(track: AudioTimelineTrack, clip: PersistedTimelineClip, inp
     `[${inputIndex}:a:0]atrim=start=${seconds(clip.sourceStartMs)}:end=${seconds(clip.sourceEndMs)}`,
     'asetpts=PTS-STARTPTS',
     ...tempoFilters(clipSpeed(clip)),
+    'asetpts=N/SR/TB',
     `volume=${trackGain(track, clip)}`,
     'aformat=channel_layouts=stereo',
     `pan=stereo|c0=${left}*c0|c1=${right}*c1`,
@@ -419,14 +430,19 @@ export function compileFfmpegTimeline(input: CompileFfmpegTimelineInput): Compil
   */
   const titles = input.timeline.titles ?? [];
   if (titles.length > 0) {
-    if (input.titleFontPath === undefined || input.titleFontPath.length === 0) {
+    if (!input.titleFontPath && !input.titleFontPaths?.size) {
       throw new FfmpegTimelineError(
         'This timeline has titles, and no font was supplied to draw them with.'
       );
     }
     titles.forEach((title, index) => {
       const next = `title-${index}`;
-      filters.push(titleFilter(title, input.titleFontPath as string, input.titleBoldFontPath, { width: input.width, height: input.height }, currentVideoLabel, next));
+      const style = resolvedTitleStyle(title);
+      const family = style.fontFamily ?? 'sans';
+      const font = input.titleFontPaths?.get(`${family}:${style.fontWeight}`)
+        ?? (family === 'sans' ? (style.fontWeight === 'bold' ? input.titleBoldFontPath ?? input.titleFontPath : input.titleFontPath) : undefined);
+      if (!font) throw new FfmpegTimelineError(`The selected ${family} ${style.fontWeight} title font is unavailable.`);
+      filters.push(titleFilter(title, font, undefined, { width: input.width, height: input.height }, currentVideoLabel, next));
       currentVideoLabel = next;
     });
   }
@@ -445,7 +461,7 @@ export function compileFfmpegTimeline(input: CompileFfmpegTimelineInput): Compil
     audioLabels.push(`[${label}]`);
   });
   if (audioLabels.length > 0) {
-    filters.push(`${audioLabels.join('')}amix=inputs=${audioLabels.length}:duration=longest:normalize=0[audio-out]`);
+    filters.push(`${audioLabels.join('')}amix=inputs=${audioLabels.length}:duration=longest:normalize=0,asetpts=N/SR/TB[audio-out]`);
   }
 
   args.push('-filter_complex', filters.join(';'), '-map', '[video-out]');

@@ -206,6 +206,8 @@ export type TimelineTitle = {
 };
 
 export type TimelineTitleStyle = {
+  readonly fontFamily?: import('./titleTypography').TitleFontFamily;
+  readonly shadow?: import('./titleTypography').TitleShadow;
   readonly fontWeight: 'regular' | 'bold';
   readonly outlineColor: string;
   readonly outlineWidthPx: number;
@@ -233,6 +235,7 @@ export type TimelineDocument = {
    * must still open. Absent and empty mean the same thing.
    */
   readonly titles?: readonly TimelineTitle[];
+  readonly canvas?: import('./videoCanvasGraph').VideoCanvasGraph;
 };
 
 export type LocalProjectSnapshot = {

@@ -1,7 +1,9 @@
+import { once } from 'node:events';
 import { createWriteStream } from 'node:fs';
 import { mkdir, rm, stat } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { finished } from 'node:stream/promises';
 import type { WriteStream } from 'node:fs';
 
 import type { ChunkAck, RecordingResult, RecordingSession } from '../shared/models';
@@ -12,6 +14,10 @@ interface ActiveRecording {
   stream: WriteStream;
   nextSequence: number;
   totalBytes: number;
+  acceptingChunks: boolean;
+  aborted: boolean;
+  error?: Error;
+  work: Promise<void>;
 }
 
 export interface BeginRecordingInput {
@@ -36,19 +42,26 @@ export function createRecordingFileName(sourceName: string, now: Date): string {
   return `${timestamp}-${sanitizeFileSegment(sourceName)}.webm`;
 }
 
-function streamFinished(stream: WriteStream): Promise<void> {
-  return new Promise((resolveFinished, rejectFinished) => {
-    stream.once('finish', resolveFinished);
-    stream.once('error', rejectFinished);
-    stream.end();
-  });
+async function streamFinished(stream: WriteStream): Promise<void> {
+  const completion = finished(stream, { cleanup: true });
+  stream.end();
+  await completion;
 }
 
-function waitForDrain(stream: WriteStream): Promise<void> {
-  return new Promise((resolveDrain, rejectDrain) => {
-    stream.once('drain', resolveDrain);
-    stream.once('error', rejectDrain);
-  });
+function assertNotAborted(recording: ActiveRecording): void {
+  if (recording.aborted) throw new Error('Recording session was aborted.');
+}
+
+function assertWritable(recording: ActiveRecording): void {
+  assertNotAborted(recording);
+  if (recording.error) throw recording.error;
+  if (recording.stream.destroyed) throw new Error('Recording stream is closed.');
+}
+
+function enqueue<T>(recording: ActiveRecording, operation: () => Promise<T>): Promise<T> {
+  const result = recording.work.then(operation);
+  recording.work = result.then(() => undefined, () => undefined);
+  return result;
 }
 
 function destroyStream(stream: WriteStream): Promise<void> {
@@ -91,65 +104,92 @@ export class RecordingFileStore {
       startedAt: now.toISOString(),
       outputPath
     };
-
-    this.activeRecordings.set(sessionId, {
-      session,
-      stream,
-      nextSequence: 0,
-      totalBytes: 0
-    });
-
+    const active: ActiveRecording = {
+      session, stream, nextSequence: 0, totalBytes: 0,
+      acceptingChunks: true, aborted: false, work: Promise.resolve()
+    };
+    // Observe errors even between operations, not only while awaiting an event.
+    stream.on('error', (error: Error) => { active.error ??= error; });
+    try {
+      await once(stream, 'open');
+    } catch (error) {
+      await destroyStream(stream);
+      throw error;
+    }
+    this.activeRecordings.set(sessionId, active);
     return session;
   }
 
   async appendChunk(sessionId: string, sequence: number, chunk: ArrayBuffer): Promise<ChunkAck> {
     const activeRecording = this.activeRecordings.get(sessionId);
-    if (activeRecording === undefined) {
+    if (activeRecording === undefined || !activeRecording.acceptingChunks) {
       throw new Error('Recording session is not active.');
     }
 
-    if (sequence !== activeRecording.nextSequence) {
-      throw new Error(`Unexpected recording chunk sequence ${sequence}; expected ${activeRecording.nextSequence}.`);
-    }
+    return enqueue(activeRecording, async () => {
+      assertWritable(activeRecording);
+      if (sequence !== activeRecording.nextSequence) {
+        throw new Error(`Unexpected recording chunk sequence ${sequence}; expected ${activeRecording.nextSequence}.`);
+      }
 
-    const bytes = Buffer.from(new Uint8Array(chunk));
-    if (bytes.byteLength === 0) {
+      const bytes = Buffer.from(new Uint8Array(chunk));
+      if (bytes.byteLength > 0) {
+        // A true write() return only means buffered, not successfully written.
+        await new Promise<void>((resolveWritten, rejectWritten) => {
+          activeRecording.stream.write(bytes, (error) => {
+            if (error) {
+              activeRecording.error ??= error;
+              rejectWritten(error);
+            } else {
+              resolveWritten();
+            }
+          });
+        });
+      }
+      assertWritable(activeRecording);
       activeRecording.nextSequence += 1;
+      activeRecording.totalBytes += bytes.byteLength;
       return { sequence, totalBytes: activeRecording.totalBytes };
-    }
-
-    const canContinue = activeRecording.stream.write(bytes);
-    if (!canContinue) {
-      await waitForDrain(activeRecording.stream);
-    }
-
-    activeRecording.nextSequence += 1;
-    activeRecording.totalBytes += bytes.byteLength;
-    return { sequence, totalBytes: activeRecording.totalBytes };
+    });
   }
 
   async finalize(sessionId: string, durationMs: number, now = new Date()): Promise<RecordingResult> {
     const activeRecording = this.activeRecordings.get(sessionId);
-    if (activeRecording === undefined) {
+    if (activeRecording === undefined || !activeRecording.acceptingChunks) {
       throw new Error('Recording session is not active.');
     }
 
-    this.activeRecordings.delete(sessionId);
-    await streamFinished(activeRecording.stream);
+    // Stop accepting new work, but retain ownership so abort can still discard
+    // the recording while queued writes, flush, or metadata reads are pending.
+    activeRecording.acceptingChunks = false;
+    return enqueue(activeRecording, async () => {
+      try {
+        assertWritable(activeRecording);
+        await streamFinished(activeRecording.stream);
+        assertNotAborted(activeRecording);
 
-    const fileStats = await stat(activeRecording.session.outputPath);
-    const result: RecordingResult = {
-      sessionId,
-      outputPath: activeRecording.session.outputPath,
-      fileName: basename(activeRecording.session.outputPath),
-      directory: dirname(activeRecording.session.outputPath),
-      fileSizeBytes: fileStats.size,
-      durationMs,
-      createdAt: now.toISOString()
-    };
+        const fileStats = await stat(activeRecording.session.outputPath);
+        assertNotAborted(activeRecording);
+        const result: RecordingResult = {
+          sessionId,
+          outputPath: activeRecording.session.outputPath,
+          fileName: basename(activeRecording.session.outputPath),
+          directory: dirname(activeRecording.session.outputPath),
+          fileSizeBytes: fileStats.size,
+          durationMs,
+          createdAt: now.toISOString()
+        };
 
-    this.completedRecordings.set(sessionId, result);
-    return result;
+        this.activeRecordings.delete(sessionId);
+        this.completedRecordings.set(sessionId, result);
+        return result;
+      } catch (error) {
+        // Preserve potentially recoverable bytes on failure. Only explicit
+        // abort removes the file; it must still find this session afterward.
+        await destroyStream(activeRecording.stream);
+        throw error;
+      }
+    });
   }
 
   async abort(sessionId: string): Promise<void> {
@@ -158,12 +198,15 @@ export class RecordingFileStore {
       return;
     }
 
-    this.activeRecordings.delete(sessionId);
+    activeRecording.acceptingChunks = false;
+    activeRecording.aborted = true;
     // A WriteStream can still be opening when the user cancels. Removing its
     // path before the handle closes races with that pending open on Windows:
     // the remove succeeds, then the stream creates an empty file afterward.
     await destroyStream(activeRecording.stream);
     await rm(activeRecording.session.outputPath, { force: true });
+    // Keep ownership if removal fails so a later abort can retry cleanup.
+    this.activeRecordings.delete(sessionId);
   }
 
   getResult(sessionId: string): RecordingResult | null {
@@ -171,6 +214,7 @@ export class RecordingFileStore {
   }
 
   getActiveSession(sessionId: string): RecordingSession | null {
-    return this.activeRecordings.get(sessionId)?.session ?? null;
+    const activeRecording = this.activeRecordings.get(sessionId);
+    return activeRecording?.acceptingChunks ? activeRecording.session : null;
   }
 }

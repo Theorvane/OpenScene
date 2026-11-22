@@ -8,7 +8,7 @@ describe('Settings workspace source contract', () => {
   it('organizes settings into the requested local-first sections and reads only safe FFmpeg readiness', async () => {
     const source = await readFile(SETTINGS_SOURCE_URL, 'utf8');
 
-    for (const heading of ['Appearance', 'Local Tools', 'Voice', 'Video', 'Providers', 'Models', 'Edit Agent', 'Data & Privacy']) {
+    for (const heading of ['Appearance', 'Local Tools', 'Providers', 'Models', 'Edit Agent', 'Data & Privacy']) {
       expect(source).toContain(`title: '${heading}'`);
     }
     expect(source).toContain('window.videoTool.getFfmpegRuntimeStatus');
@@ -16,9 +16,9 @@ describe('Settings workspace source contract', () => {
     // Settings keeps only the chat-model surfaces.
     expect(source).not.toContain('AiDomainModelSelector domain="voice-generation"');
     expect(source).not.toContain('AiDomainModelSelector domain="video-generation"');
-    expect(source).toContain('AiDomainModelSelector domain="edit-agent"');
-    expect(source).toContain('managed inside the Voice Generation workspace');
-    expect(source).toContain('managed inside the Video Generation workspace');
+    expect(source).toContain('Primary LLM model');
+    expect(source).toContain('Whisper.cpp');
+    expect(source).not.toContain("title: 'Video'");
     expect(source).not.toMatch(/executablePath|argv|args:/);
   });
 
@@ -49,8 +49,8 @@ describe('Settings workspace source contract', () => {
     expect(source).toContain('ProviderConnectDialog');
     expect(source).toContain('+ Connect');
     expect(source).toContain('id="ollama-base-url"');
-    expect(source).toContain('Media providers');
-    expect(source).toContain('MEDIA_PROVIDERS.map');
+    expect(source).not.toContain('Media providers');
+    expect(source).not.toContain('MEDIA_PROVIDERS.map');
     // OpenAI stays one unified entry, now advertising both login methods.
     expect(source).toContain('Connect with an API key for the public API, or sign in with ChatGPT Pro/Plus to run Codex-family models.');
     expect(source).not.toContain('OPENAI_CODEX_PROVIDER');

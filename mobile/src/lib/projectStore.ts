@@ -1,24 +1,21 @@
-import { Directory, File, Paths } from 'expo-file-system';
 import { parseProjectType } from '@openvideo/shared/projectTypes';
-import { recordVideoRecipe } from '@openvideo/shared/videoRecipeHistory';
+import { Directory, File, Paths } from 'expo-file-system';
 
-import { parseTimelineDocument } from '@openvideo/shared/timelineDocumentValidators';
 import type { FramePreference } from '@openvideo/shared/outputFrame';
-import { resolveTimelineTrackForAsset, trackAppendStartMs } from '@openvideo/shared/timelineClipPlacement';
-import { placeClip, replaceClipSource } from '@openvideo/shared/timelineClipLogic';
-import { isStill, stillClipSource } from '@openvideo/shared/timelineStills';
-import { assembleApprovedProductionCut, buildApprovedProductionAssemblyPlan } from '@openvideo/shared/productionWorkflow';
-import { pipelineBaseRequest } from '@openvideo/shared/writerPipeline';
 import { parseSubtitleDelivery, type SubtitleDelivery } from '@openvideo/shared/subtitleDelivery';
+import { placeClip, replaceClipSource } from '@openvideo/shared/timelineClipLogic';
+import { resolveTimelineTrackForAsset, trackAppendStartMs } from '@openvideo/shared/timelineClipPlacement';
+import { parseTimelineDocument } from '@openvideo/shared/timelineDocumentValidators';
+import { isStill, stillClipSource } from '@openvideo/shared/timelineStills';
 
-import { createInitialTimeline } from '@openvideo/shared/timelineLogic';
-import { DEFAULT_CLIP_EFFECTS, PROJECT_SCHEMA_VERSION, type TimelineDocument } from '@openvideo/shared/timelineTypes';
 import {
   createEmptyAiProjectDocument,
   parseAiProjectDocument,
   removeAssetFromAiProjectDocument,
   type AiProjectDocument
 } from '@openvideo/shared/aiProjectDomain';
+import { createInitialTimeline } from '@openvideo/shared/timelineLogic';
+import { DEFAULT_CLIP_EFFECTS, PROJECT_SCHEMA_VERSION, type TimelineDocument } from '@openvideo/shared/timelineTypes';
 
 /**
  * Projects live inside the app's own storage.
@@ -233,27 +230,6 @@ export function writeProject(project: MobileProject): void {
   announce();
 }
 
-/** Copies media bytes, not the generation board or timeline, into a new edit. */
-export function createEditingCopy(sourceId: string): MobileProject {
-  const source = readProject(sourceId);
-  if (source === null || source.projectType === 'editing' || source.assets.length === 0) throw new Error('Open a generation project with saved media first.');
-  const destination = createProject(source.name + ' - Edit', 'editing');
-  try {
-    const assets = source.assets.map((asset, index) => {
-      if (!/^media\/[a-zA-Z0-9._-]+$/.test(asset.relativePath)) throw new Error('Invalid source media path.');
-      const relativePath = `media/${index}-${asset.relativePath.slice(6)}`;
-      new File(assetUri(source.id, asset)).copy(new File(projectDir(destination.id), relativePath));
-      return { ...asset, relativePath };
-    });
-    const result = { ...destination, assets };
-    writeProject(result);
-    return result;
-  } catch (error) {
-    deleteProject(destination.id);
-    throw error;
-  }
-}
-
 /**
  * Who to tell when a project changes on disk.
  *
@@ -305,56 +281,6 @@ export function deleteProject(id: string): void {
   announce();
 }
 
-/**
- * Copies picked media into the project.
- *
- * A photo-library URI is not a stable reference: the asset can be deleted or the
- * permission revoked, and a project that silently loses a clip between sessions
- * is worse than one that costs a copy.
- */
-/**
- * Writes a generated still into the project and records it.
- *
- * Generated images used to be shown and then dropped: leaving the Image tab, or
- * the assistant's thread scrolling on, lost a picture the user had paid for. The
- * bytes arrive as base64 from the adapter and go straight to a file — holding a
- * megabyte of it in the project record would put it through `JSON.parse` on
- * every read of the project.
- */
-export function saveGeneratedImage(
-  projectId: string,
-  image: {
-    readonly base64: string;
-    readonly mimeType: string;
-    readonly prompt: string;
-    readonly modelId: string;
-  }
-): MobileAsset | null {
-  const project = readProject(projectId);
-  if (project === null) return null;
-
-  const dir = new Directory(projectDir(projectId), 'media');
-  if (!dir.exists) dir.create({ intermediates: true });
-  const id = `asset-${Date.now().toString(36)}`;
-  const extension = image.mimeType === 'image/jpeg' ? 'jpg' : 'png';
-  const relativePath = `media/${id}.${extension}`;
-  new File(projectDir(projectId), relativePath).write(image.base64, { encoding: 'base64' });
-
-  const asset: MobileAsset = {
-    id,
-    displayName: `${image.modelId} still`,
-    kind: 'image',
-    mimeType: image.mimeType,
-    relativePath,
-    durationMs: 0,
-    width: 0,
-    height: 0,
-    origin: { kind: 'generated', modelId: image.modelId, prompt: image.prompt, at: new Date().toISOString() }
-  };
-  writeProject({ ...project, assets: [...project.assets, asset] });
-  return asset;
-}
-
 export function importAsset(
   projectId: string,
   source: { readonly uri: string; readonly displayName: string; readonly mimeType: string; readonly durationMs: number; readonly width: number; readonly height: number; readonly kind: 'video' | 'audio' }
@@ -375,15 +301,6 @@ export function importAsset(
     width: source.width,
     height: source.height
   };
-}
-
-/** Saves a generated video in the project library without changing the edit. */
-export function saveGeneratedVideoCandidate(project: MobileProject, asset: MobileAsset, recipe?: import('@openvideo/shared/videoRecipeHistory').VideoRecipe): MobileProject {
-  const known = project.assets.some((entry) => entry.id === asset.id);
-  const updated = { ...project, assets: known ? project.assets : [...project.assets, asset],
-    ai: recipe === undefined ? project.ai : recordVideoRecipe(project.ai, recipe) };
-  writeProject(updated);
-  return updated;
 }
 
 /**
@@ -441,33 +358,6 @@ export function appendAssetToTimeline(project: MobileProject, asset: MobileAsset
   };
   writeProject(updated);
   return updated;
-}
-
-/** Uses the same all-shots-approved and no-duplicate rule as desktop. */
-export function assembleApprovedWriterShots(project: MobileProject):
-  | { readonly ok: true; readonly project: MobileProject }
-  | { readonly ok: false; readonly reason: string } {
-  const plan = buildApprovedProductionAssemblyPlan(project.ai, project.assets.map((asset) => ({
-    id: asset.id,
-    kind: asset.kind,
-    durationMs: asset.kind === 'video' ? asset.durationMs : null
-  })));
-  if (!plan.ok) return plan;
-  const track = project.timeline.tracks.find((entry) => entry.kind === 'video');
-  if (track === undefined) return { ok: false, reason: 'Add a video track before assembling the approved production cut.' };
-  const assemblyId = Date.now().toString(36);
-  let clipOrder = 0;
-  const assembled = assembleApprovedProductionCut({
-    timeline: project.timeline,
-    plan,
-    targetTrackId: track.id,
-    allowExistingPrefix: pipelineBaseRequest(project.ai.writerPipeline)?.productionScope !== undefined,
-    clipIdForShot: () => `production-${assemblyId}-${++clipOrder}`
-  });
-  if (!assembled.ok) return assembled;
-  const updated = { ...project, timeline: assembled.timeline };
-  writeProject(updated);
-  return { ok: true, project: updated };
 }
 
 /**
