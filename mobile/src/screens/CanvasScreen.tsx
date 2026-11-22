@@ -4,176 +4,137 @@ import { CANVAS_BLOCK_CATALOG, canvasDefaultInputCount, canvasVariableInputs, ca
 import { CANVAS_TEMPLATES } from '@openvideo/shared/canvasTemplates';
 import { applyEditorOperations } from '@openvideo/shared/editorOperations';
 import { CANVAS_LAYOUT_MODES } from '@openvideo/shared/canvasLayout';
-import { projectEditorAssets } from '../lib/editorAssetMapping';
+import { clipDurationMs } from '@openvideo/shared/timelineClipGeometry';
 import { connectVideoClips } from '@openvideo/shared/videoCanvas';
-import { applyCanvasBlock, evaluateCanvasBlock } from '@openvideo/shared/videoCanvasBlocks';
-import { CANVAS_BLOCK_KINDS, CANVAS_BLOCK_LABELS, CANVAS_BLOCK_LIMIT, CANVAS_INPUT_LIMIT, EMPTY_CANVAS_GRAPH, canvasInputType, canvasSourceTimeline, connectCanvasInput, type VideoCanvasGraph } from '@openvideo/shared/videoCanvasGraph';
+import { evaluateCanvasBlock } from '@openvideo/shared/videoCanvasBlocks';
+import { CANVAS_BLOCK_KINDS, CANVAS_BLOCK_LABELS, CANVAS_BLOCK_LIMIT, CANVAS_INPUT_LIMIT, EMPTY_CANVAS_GRAPH, canvasInputType, canvasSourceTimeline, connectCanvasInput } from '@openvideo/shared/videoCanvasGraph';
+import { parseTimelineDocument } from '@openvideo/shared/timelineDocumentValidators';
 import type { TimelineDocument } from '@openvideo/shared/timelineTypes';
-import { readProject, writeProject } from '../lib/projectStore';
+import { CanvasGraphViewport, type GraphCard } from '../components/CanvasGraphViewport';
+import { projectEditorAssets } from '../lib/editorAssetMapping';
+import { assetUri, readProject, writeProject } from '../lib/projectStore';
 import { useProject } from '../lib/useProject';
 import { theme } from '../lib/theme';
 import { press } from '../lib/touch';
 
-export function CanvasScreen({ projectId }: { projectId: string }) {
+type Sheet = 'library' | 'selection' | 'arrange' | null;
+type LibraryTab = 'templates' | 'blocks' | 'media' | 'layers';
+type HistoryEntry = { before: TimelineDocument; after: TimelineDocument };
+const LAYOUT_LABELS = { flow: 'Input → output', grid: 'Grid', 'align-left': 'Align left', 'align-top': 'Align top', 'distribute-horizontal': 'Space horizontally', 'distribute-vertical': 'Space vertically' } as const;
+const PX = 0.66, PY = 0.5;
+
+export function CanvasScreen({ projectId, onOpenEditor }: { projectId: string; onOpenEditor?: () => void }) {
   const project = useProject(projectId);
-  const [source, setSource] = useState<string | null>(null);
-  const [target, setTarget] = useState<string | null>(null);
-  const [section, setSection] = useState<'templates' | 'workflow' | 'sources' | 'blocks'>('templates');
-  const [selectedSources, setSelectedSources] = useState<readonly string[]>([]);
-  const [selectedBlocks, setSelectedBlocks] = useState<readonly string[]>([]);
-  const [finalId, setFinalId] = useState('');
+  const [selection, setSelection] = useState<readonly string[]>([]);
+  const [multiple, setMultiple] = useState(false);
+  const [connectingId, setConnectingId] = useState<string | null>(null);
+  const [sheet, setSheet] = useState<Sheet>(null);
+  const [libraryTab, setLibraryTab] = useState<LibraryTab>('templates');
   const [search, setSearch] = useState('');
-  const [notice, setNotice] = useState('Choose an output, then the next clip’s input.');
-  const [undo, setUndo] = useState<{ before: TimelineDocument; after: TimelineDocument } | null>(null);
-  if (project === null) return null;
+  const [finalId, setFinalId] = useState('');
+  const [notice, setNotice] = useState('Drag to explore · tap a node to edit');
+  const [past, setPast] = useState<readonly HistoryEntry[]>([]);
+  const [future, setFuture] = useState<readonly HistoryEntry[]>([]);
+  const [fitKey, setFitKey] = useState(0);
+  if (!project) return null;
   const graph = project.timeline.canvas ?? EMPTY_CANVAS_GRAPH;
-  const inputTimeline = canvasSourceTimeline(project.timeline, graph);
-  const runOperations = (operations: readonly unknown[]) => {
-    const current = readProject(projectId); if (!current) return;
-    const result = applyEditorOperations(current.timeline, operations, projectEditorAssets(current));
-    if (!result.success) { setNotice(result.error); return; }
-    writeProject({ ...current, timeline: result.timeline }); setUndo({ before: current.timeline, after: result.timeline });
-    if (result.outputIds.length) setFinalId(result.outputIds.at(-1)!);
-    setNotice('Workflow updated. Review its output before exporting.');
-  };
+  const inputs = canvasSourceTimeline(project.timeline, graph);
+  const sources = inputs.tracks.flatMap(track => track.clips.map(clip => ({ track, clip, asset: project.assets.find(asset => asset.id === clip.assetId) })));
   const roots = graph.blocks.filter(block => !graph.connections.some(edge => edge.fromId === block.id));
   const finalBlock = roots.find(block => block.id === finalId) ?? roots.at(-1);
   const finalResult = finalBlock ? evaluateCanvasBlock(project.timeline, graph, finalBlock.id) : null;
-  const saveGraph = (next: VideoCanvasGraph) => {
-    const current = readProject(projectId);
-    if (current === null) return;
-    const timeline = { ...current.timeline, canvas: next };
-    writeProject({ ...current, timeline });
-    setUndo({ before: current.timeline, after: timeline });
+  const selectedBlock = graph.blocks.find(block => block.id === selection[0]);
+  const selectedSource = sources.find(source => source.clip.id === selection[0]);
+  const selectedInputIds = selection.filter(id => sources.some(source => source.clip.id === id));
+  const label = (id: string): string => graph.blocks.find(block => block.id === id) ? CANVAS_BLOCK_LABELS[graph.blocks.find(block => block.id === id)!.kind] : sources.find(source => source.clip.id === id)?.asset?.displayName ?? 'Missing source';
+  const commit = (before: TimelineDocument, after: TimelineDocument): boolean => {
+    const current = readProject(projectId), parsed = parseTimelineDocument(after);
+    if (!current || !parsed || JSON.stringify(current.timeline) !== JSON.stringify(before)) { setNotice('The project changed. Select the node again.'); return false; }
+    writeProject({ ...current, timeline: parsed }); setPast(entries => [...entries.slice(-39), { before, after: parsed }]); setFuture([]); return true;
   };
-  const sourceName = (id: string) => {
-    const block = graph.blocks.find(item => item.id === id);
-    if (block) return CANVAS_BLOCK_LABELS[block.kind];
-    const clip = inputTimeline.tracks.flatMap(track => track.clips).find(item => item.id === id);
-    return project.assets.find(asset => asset.id === clip?.assetId)?.displayName ?? 'Missing source';
+  const run = (operations: readonly unknown[], success = 'Canvas updated'): boolean => {
+    const current = readProject(projectId); if (!current) return false;
+    const result = applyEditorOperations(current.timeline, operations, projectEditorAssets(current));
+    if (!result.success) { setNotice(result.error); return false; }
+    if (!commit(current.timeline, result.timeline)) return false;
+    if (result.outputIds.length) setFinalId(result.outputIds.at(-1)!);
+    setNotice(success); return true;
   };
-  const apply = () => {
-    const current = readProject(projectId);
-    if (current === null || source === null || target === null) return;
-    const timeline = connectVideoClips(current.timeline, source, target);
-    if (timeline === null) { setNotice('Choose different clips on the same video track.'); return; }
-    writeProject({ ...current, timeline });
-    setUndo({ before: current.timeline, after: timeline });
-    setSource(null); setTarget(null);
-    setNotice('Connection saved.');
+  const undo = (redo: boolean): void => {
+    const entries = redo ? future : past, entry = entries.at(-1), current = readProject(projectId);
+    if (!entry || !current) return;
+    if (JSON.stringify(current.timeline) !== JSON.stringify(redo ? entry.before : entry.after)) { setNotice('The project changed outside Canvas. Start a new edit.'); return; }
+    writeProject({ ...current, timeline: redo ? entry.after : entry.before });
+    if (redo) { setFuture(entries.slice(0, -1)); setPast(previous => [...previous, entry]); }
+    else { setPast(entries.slice(0, -1)); setFuture(previous => [...previous, entry]); }
+    setNotice(redo ? 'Canvas edit restored' : 'Canvas edit undone');
   };
-  return <ScrollView contentContainerStyle={styles.page}>
-    <Text style={styles.title}>Canvas workflow</Text>
-    <Text style={styles.note}>Arrange selected nodes, or all nodes when none are selected. The desktop canvas uses these saved positions.</Text>
-    <ScrollView horizontal>{CANVAS_LAYOUT_MODES.map(mode => <Pressable key={mode} accessibilityRole="button" style={press(styles.button)} onPress={() => runOperations([{ action: 'canvas.layout', mode, ids: [...selectedSources, ...selectedBlocks] }])}><Text style={styles.label}>{({ flow: 'Input → output', grid: 'Grid', 'align-left': 'Align left', 'align-top': 'Align top', 'distribute-horizontal': 'Space horizontally', 'distribute-vertical': 'Space vertically' })[mode]}</Text></Pressable>)}</ScrollView>
-    <Pressable accessibilityRole="button" style={press(styles.button)} onPress={() => { setSelectedSources([]); setSelectedBlocks([]); }}><Text style={styles.label}>Clear node selection</Text></Pressable>
-    <View style={styles.tabs}>{(['templates', 'workflow', 'sources', 'blocks'] as const).map(tab => <Pressable key={tab} accessibilityRole="button" accessibilityState={{ selected: section === tab }} style={press([styles.button, section === tab && styles.selected])} onPress={() => setSection(tab)}><Text style={styles.label}>{tab === 'templates' ? 'Quick starts' : tab[0]!.toUpperCase() + tab.slice(1)}</Text></Pressable>)}</View>
-    {section === 'templates' && <View>
-      <Text style={styles.note}>Select source cards or use matching inputs automatically. A quick start connects its blocks for you.</Text>
-      {CANVAS_TEMPLATES.map(template => <Pressable key={template.id} accessibilityRole="button" style={press(styles.libraryItem)} onPress={() => {
-        runOperations([{ action: 'canvas.template', templateId: template.id, prefix: 'flow-' + Date.now(), sourceIds: selectedSources }]); setSection('workflow');
-      }}><Text style={styles.label}>{template.label}</Text><Text style={styles.note}>{template.description}</Text></Pressable>)}
-      <Text style={styles.note}>{selectedSources.length} sources selected</Text>
-      <Pressable accessibilityRole="button" style={press(styles.button)} onPress={() => setSelectedSources([])}><Text style={styles.label}>Clear selection</Text></Pressable>
-    </View>}
-    {finalBlock && <View style={styles.block}>
-      <Text style={styles.label}>Final output: {CANVAS_BLOCK_LABELS[finalBlock.kind]}</Text>
-      <ScrollView horizontal>{roots.map(block => <Pressable key={block.id} accessibilityRole="button" style={press(styles.button)} onPress={() => setFinalId(block.id)}><Text style={styles.label}>{CANVAS_BLOCK_LABELS[block.kind]}</Text></Pressable>)}</ScrollView>
-      <Pressable accessibilityRole="button" disabled={!finalResult?.success} style={press(styles.button)} onPress={() => runOperations([{ action: 'canvas.apply', id: finalBlock.id }])}><Text style={styles.label}>Apply workflow</Text></Pressable>
-    </View>}
-    <Text style={styles.note}>Choose a clip or block output, then connect a matching block input. Apply a block to arrange its clips in Edit.</Text>
-    {section === 'blocks' && <View style={styles.sequence}>
-      <TextInput accessibilityLabel="Search blocks" placeholder="Search blocks…" placeholderTextColor={theme.textWeaker} style={styles.search} value={search} onChangeText={setSearch} />
-      {CANVAS_BLOCK_KINDS.filter(kind => `${CANVAS_BLOCK_LABELS[kind]} ${CANVAS_BLOCK_CATALOG[kind].description}`.toLowerCase().includes(search.toLowerCase())).map(kind => <Pressable key={kind} accessibilityRole="button" disabled={graph.blocks.length >= CANVAS_BLOCK_LIMIT} style={press(styles.libraryItem)} onPress={() => {
-        runOperations([{ action: 'canvas.add', id: 'block-' + Date.now() + '-' + Math.random().toString(36).slice(2), kind, inputCount: canvasDefaultInputCount(kind), x: 40, y: 40 + graph.blocks.length * 250 }]);
-        setNotice('Block added. Connect each input.');
-        setSection('workflow');
-      }}><Text style={styles.note}>{CANVAS_BLOCK_CATALOG[kind].category.toUpperCase()}</Text><Text style={styles.label}>+ {CANVAS_BLOCK_LABELS[kind]}</Text><Text style={styles.note}>{CANVAS_BLOCK_CATALOG[kind].description}</Text></Pressable>)}
-    </View>}
-    {section !== 'blocks' && inputTimeline.tracks.map((track) => <View key={track.id}>
-      <Text style={styles.label}>{track.name}</Text>
-      <ScrollView horizontal contentContainerStyle={styles.sequence}>
-        {[...track.clips].sort((a, b) => a.timelineStartMs - b.timelineStartMs).map((clip, index) => <View key={clip.id} style={styles.row}>
-          {index > 0 && <Text style={styles.arrow}>→</Text>}
-          <View style={[styles.card, source === clip.id && styles.selected]}>
-            <Text style={styles.label}>{project.assets.find((asset) => asset.id === clip.assetId)?.displayName ?? 'Missing media'}</Text>
-            <Text style={styles.note}>{(clip.sourceStartMs / 1000).toFixed(2)}–{(clip.sourceEndMs / 1000).toFixed(2)} s</Text>
-            <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: selectedSources.includes(clip.id) }} style={press(styles.button)} onPress={() => setSelectedSources(current => current.includes(clip.id) ? current.filter(id => id !== clip.id) : [...current, clip.id])}><Text style={styles.label}>{selectedSources.includes(clip.id) ? '✓ Selected' : 'Use in quick start'}</Text></Pressable>
-            {track.kind === 'video' && <Pressable accessibilityRole="button" style={press(styles.button)} onPress={() => setTarget(clip.id)}><Text style={styles.label}>● Input</Text></Pressable>}
-            <Pressable accessibilityRole="button" style={press(styles.button)} onPress={() => { setSource(clip.id); setTarget(null); }}><Text style={styles.label}>Output ●</Text></Pressable>
-          </View>
-        </View>)}
+  const cards: GraphCard[] = [
+    ...sources.map(({ clip, track, asset }, index) => { const position = graph.sourcePositions?.[clip.id] ?? { x: 48, y: 48 + index * 278 }; return { id: clip.id, label: asset?.displayName ?? 'Missing media', kind: track.kind === 'audio' ? 'AUDIO SOURCE' : 'VIDEO SOURCE', detail: `${(clip.sourceStartMs / 1000).toFixed(1)}–${(clip.sourceEndMs / 1000).toFixed(1)}s · ${(clipDurationMs(clip) / 1000).toFixed(1)}s`, x: position.x * PX, y: position.y * PY, inputs: connectingId && track.kind === 'video' ? 1 : 0, colour: track.kind === 'audio' ? theme.mint : theme.accent, ...(asset?.kind === 'image' ? { thumbnail: assetUri(project.id, asset) } : {}) }; }),
+    ...graph.blocks.map(block => { const result = evaluateCanvasBlock(project.timeline, graph, block.id); return { id: block.id, label: CANVAS_BLOCK_LABELS[block.kind], kind: CANVAS_BLOCK_CATALOG[block.kind].category.toUpperCase(), detail: result.success ? `${(result.output.durationMs / 1000).toFixed(1)}s · ${block.id === finalBlock?.id ? 'Final output' : 'Ready'}` : 'Connect inputs', ready: result.success, x: block.position.x * PX, y: block.position.y * PY, inputs: block.inputCount, colour: block.kind.startsWith('audio') || block.kind === 'volume' ? theme.mint : '#b7a1fa' }; })
+  ];
+  const select = (id: string): void => {
+    setSelection(current => multiple ? current.includes(id) ? current.filter(value => value !== id) : [...current, id] : [id]);
+    if (!multiple) setSheet('selection');
+  };
+  const connect = (id: string, input: number): void => {
+    if (!connectingId) { setSelection([id]); setSheet('selection'); setNotice('Choose an output in Connections'); return; }
+    if (graph.blocks.some(block => block.id === id)) {
+      if (run([{ action: 'canvas.connect', fromId: connectingId, toId: id, input }], 'Connected')) setConnectingId(null);
+    } else {
+      const current = readProject(projectId); if (!current) return;
+      const timeline = connectVideoClips(current.timeline, connectingId, id);
+      if (!timeline) { setNotice('Choose another clip on the same video track'); return; }
+      if (commit(current.timeline, timeline)) { setConnectingId(null); setNotice('Clips connected in timeline order'); }
+    }
+  };
+  const move = (id: string, x: number, y: number): void => {
+    const position = { x: Math.min(20000, Math.round(x / PX)), y: Math.min(20000, Math.round(y / PY)) };
+    run([{ action: 'canvas.move', id, ...position }], 'Node moved');
+  };
+  const openLibrary = () => { setSheet('library'); setSearch(''); };
+  const closeSheet = () => setSheet(null);
+  const apply = () => { if (finalBlock && run([{ action: 'canvas.apply', id: finalBlock.id }], 'Workflow applied · review your timeline')) { setSheet(null); setConnectingId(null); } };
+  return <View style={styles.root}>
+    <View style={styles.toolbar}><View style={styles.titleGroup}><View style={styles.canvasGlyph}><Text style={styles.canvasGlyphText}>◇</Text></View><View><Text style={styles.title}>Canvas</Text><Text style={styles.meta}>{sources.length} sources · {graph.blocks.length} blocks</Text></View></View>
+      <Pressable accessibilityRole="button" accessibilityLabel="Undo canvas edit" disabled={!past.length} onPress={() => undo(false)} style={press(styles.iconButton)}><Text style={[styles.icon, !past.length && styles.dim]}>↶</Text></Pressable>
+      <Pressable accessibilityRole="button" accessibilityLabel="Redo canvas edit" disabled={!future.length} onPress={() => undo(true)} style={press(styles.iconButton)}><Text style={[styles.icon, !future.length && styles.dim]}>↷</Text></Pressable>
+      <Pressable accessibilityRole="button" accessibilityLabel="Canvas actions" onPress={() => setSheet('arrange')} style={press(styles.iconButton)}><Text style={styles.icon}>•••</Text></Pressable>
+    </View>
+    <View style={styles.stage}>
+      <CanvasGraphViewport nodes={cards} edges={graph.connections} selection={selection} connectingId={connectingId} fitKey={fitKey} onSelect={select} onOutput={id => { setConnectingId(id); setSheet(null); setNotice(`Connect ${label(id)} to an input`); }} onInput={connect} onMove={move} onAdd={openLibrary}/>
+      <View pointerEvents="box-none" style={styles.topHint}><Text accessibilityLiveRegion="polite" numberOfLines={2} style={styles.hint}>{connectingId ? `● ${label(connectingId)} → choose an input` : notice}</Text>{connectingId && <Pressable accessibilityRole="button" onPress={() => setConnectingId(null)} style={styles.cancel}><Text style={styles.small}>Cancel</Text></Pressable>}</View>
+      <View style={styles.leftTools}><Pressable accessibilityRole="button" accessibilityLabel="Add to canvas" onPress={openLibrary} style={press(styles.addButton)}><Text style={styles.addText}>＋</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel="Select multiple nodes" accessibilityState={{ selected: multiple }} onPress={() => { setMultiple(value => !value); setSheet(null); }} style={press([styles.selectButton, multiple && styles.selected])}><Text style={styles.small}>▧</Text></Pressable></View>
+      {selection.length > 1 && !sheet && <Pressable accessibilityRole="button" onPress={() => setSheet('arrange')} style={press(styles.selectionPill)}><Text style={styles.small}>{selection.length} selected · Arrange</Text></Pressable>}
+    </View>
+    <View style={styles.outputBar}><View style={styles.outputInfo}><View style={[styles.statusDot, { backgroundColor: finalResult?.success ? theme.mint : theme.textWeaker }]}/><View style={{ flex: 1 }}><Text style={styles.outputTitle} numberOfLines={1}>{finalBlock ? CANVAS_BLOCK_LABELS[finalBlock.kind] : 'Choose your output'}</Text><Text style={styles.meta}>{finalResult?.success ? `${(finalResult.output.durationMs / 1000).toFixed(1)}s · Ready to apply` : graph.blocks.length ? 'Finish the connections' : 'Start with a quick workflow'}</Text></View></View><Pressable accessibilityRole="button" accessibilityLabel="Apply workflow" disabled={!finalResult?.success} onPress={apply} style={press([styles.primary, !finalResult?.success && styles.disabled])}><Text style={styles.primaryText}>Apply</Text></Pressable></View>
+    {sheet && <View style={StyleSheet.absoluteFill} pointerEvents="box-none"><Pressable accessibilityRole="button" accessibilityLabel="Close canvas panel" onPress={closeSheet} style={styles.backdrop}/><View style={[styles.sheet, sheet === 'selection' && { maxHeight: '62%' }]}>
+      <View style={styles.handle}/><View style={styles.sheetHeader}><View style={{ flex: 1 }}><Text style={styles.sheetTitle}>{sheet === 'library' ? 'Add to canvas' : sheet === 'arrange' ? 'Canvas actions' : selection.length > 1 ? `${selection.length} nodes` : label(selection[0] ?? '')}</Text><Text style={styles.meta}>{sheet === 'library' ? 'Build a workflow, one step at a time' : sheet === 'arrange' ? 'Arrange, choose an output or review your edit' : selectedBlock ? `${CANVAS_BLOCK_CATALOG[selectedBlock.kind].category} block` : 'Source clip'}</Text></View><Pressable accessibilityRole="button" accessibilityLabel="Close canvas panel" onPress={closeSheet} style={styles.iconButton}><Text style={styles.icon}>×</Text></Pressable></View>
+      {sheet === 'library' && <View style={styles.tabs}>{(['templates', 'blocks', 'media', 'layers'] as const).map(tab => <Pressable key={tab} accessibilityRole="button" accessibilityState={{ selected: libraryTab === tab }} onPress={() => { setLibraryTab(tab); setSearch(''); }} style={press([styles.tab, libraryTab === tab && styles.tabOn])}><Text style={[styles.tabText, libraryTab === tab && { color: theme.text }]}>{({ templates: 'Quick starts', blocks: 'Blocks', media: 'Media', layers: 'Layers' })[tab]}</Text></Pressable>)}</View>}
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.sheetContent} keyboardShouldPersistTaps="handled">
+        {sheet === 'library' && libraryTab === 'templates' && <>{CANVAS_TEMPLATES.map((template, index) => <Pressable key={template.id} accessibilityRole="button" accessibilityLabel={`Create ${template.label}`} style={press(styles.libraryRow)} onPress={() => { if (run([{ action: 'canvas.template', templateId: template.id, prefix: 'flow-' + Date.now(), sourceIds: selectedInputIds }, { action: 'canvas.layout', mode: 'flow' }], 'Workflow ready · adjust a block or apply')) { closeSheet(); setFitKey(value => value + 1); } }}><View style={[styles.libraryIcon, { backgroundColor: ['#303e5d', '#28473e', '#403350', '#3d3a29'][index] }]}><Text style={styles.libraryIconText}>{['✦', '♫', '▣', '≋'][index]}</Text></View><View style={{ flex: 1 }}><Text style={styles.rowTitle}>{template.label}</Text><Text style={styles.rowDetail}>{template.description}</Text></View><Text style={styles.plus}>＋</Text></Pressable>)}<Text style={styles.footnote}>{selectedInputIds.length ? `${selectedInputIds.length} selected sources` : 'Uses matching media in timeline order. Select sources to choose your own.'}</Text></>}
+        {sheet === 'library' && libraryTab === 'blocks' && <><TextInput accessibilityLabel="Search blocks" placeholder="Search blocks…" placeholderTextColor={theme.textWeaker} value={search} onChangeText={setSearch} style={styles.search}/>{CANVAS_BLOCK_KINDS.filter(kind => `${CANVAS_BLOCK_LABELS[kind]} ${CANVAS_BLOCK_CATALOG[kind].description}`.toLowerCase().includes(search.toLowerCase())).map(kind => <Pressable key={kind} accessibilityRole="button" accessibilityLabel={`Add ${CANVAS_BLOCK_LABELS[kind]}`} disabled={graph.blocks.length >= CANVAS_BLOCK_LIMIT} style={press(styles.libraryRow)} onPress={() => { const id = 'block-' + Date.now(); if (run([{ action: 'canvas.add', id, kind, inputCount: canvasDefaultInputCount(kind), x: 380 + graph.blocks.length % 4 * 310, y: 48 + Math.floor(graph.blocks.length / 4) * 300 }])) { setSelection([id]); setSheet('selection'); setFitKey(value => value + 1); } }}><View style={styles.libraryIcon}><Text style={styles.libraryIconText}>◇</Text></View><View style={{ flex: 1 }}><Text style={styles.rowTitle}>{CANVAS_BLOCK_LABELS[kind]}</Text><Text style={styles.rowDetail}>{CANVAS_BLOCK_CATALOG[kind].description}</Text></View><Text style={styles.plus}>＋</Text></Pressable>)}</>}
+        {sheet === 'library' && libraryTab === 'media' && <>{project.assets.map(asset => <Pressable key={asset.id} accessibilityRole="button" style={press(styles.libraryRow)} onPress={() => { const track = project.timeline.tracks.find(track => track.kind === (asset.kind === 'audio' ? 'audio' : 'video')); if (!track) { setNotice('Add a matching track in Edit first'); return; } if (run([{ action: 'clip.add', id: 'clip-' + Date.now(), assetId: asset.id, trackId: track.id, startMs: Math.max(0, ...track.clips.map(clip => clip.timelineStartMs + clipDurationMs(clip))) }, { action: 'canvas.layout', mode: 'flow' }])) { closeSheet(); setFitKey(value => value + 1); } }}><View style={styles.libraryIcon}><Text style={styles.libraryIconText}>{asset.kind === 'audio' ? '♫' : '▣'}</Text></View><View style={{ flex: 1 }}><Text style={styles.rowTitle}>{asset.displayName}</Text><Text style={styles.rowDetail}>{asset.kind} · {(asset.durationMs / 1000).toFixed(1)}s</Text></View><Text style={styles.plus}>＋</Text></Pressable>)}<Pressable accessibilityRole="button" onPress={onOpenEditor} style={press(styles.secondary)}><Text style={styles.small}>Import media in Edit ↗</Text></Pressable></>}
+        {sheet === 'library' && libraryTab === 'layers' && cards.map(node => <Pressable key={node.id} accessibilityRole="button" style={press(styles.libraryRow)} onPress={() => { setSelection([node.id]); setSheet('selection'); }}><View style={[styles.statusDot, { backgroundColor: node.colour }]}/><View style={{ flex: 1 }}><Text style={styles.rowTitle}>{node.label}</Text><Text style={styles.rowDetail}>{node.kind}</Text></View><Text style={styles.plus}>›</Text></Pressable>)}
+        {sheet === 'selection' && selectedBlock && <>
+          <Text style={styles.sectionLabel}>CONNECTIONS</Text>{Array.from({ length: selectedBlock.inputCount }, (_, input) => { const edge = graph.connections.find(edge => edge.toId === selectedBlock.id && edge.input === input); return <View key={input} style={styles.inputSection}><View style={styles.inline}><Text style={styles.small}>{canvasInputType(selectedBlock, input)} {input + 1}</Text>{edge && <Pressable accessibilityRole="button" accessibilityLabel={`Disconnect input ${input + 1}`} onPress={() => run([{ action: 'canvas.disconnect', id: selectedBlock.id, input }])} style={styles.miniButton}><Text style={styles.muted}>Disconnect</Text></Pressable>}</View><ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>{cards.filter(card => connectCanvasInput(project.timeline, graph, { fromId: card.id, toId: selectedBlock.id, input }).success).map(card => <Pressable key={card.id} accessibilityRole="button" accessibilityLabel={`Use ${card.id} for input ${input + 1}`} accessibilityState={{ selected: edge?.fromId === card.id }} onPress={() => run([{ action: 'canvas.connect', fromId: card.id, toId: selectedBlock.id, input }])} style={press([styles.chip, edge?.fromId === card.id && styles.selected])}><Text style={styles.small}>{edge?.fromId === card.id ? '✓ ' : ''}{card.label}</Text></Pressable>)}</ScrollView></View>; })}
+          {canvasVariableInputs(selectedBlock.kind) && selectedBlock.inputCount < CANVAS_INPUT_LIMIT && <Pressable accessibilityRole="button" onPress={() => run([{ action: 'canvas.inputs', id: selectedBlock.id, inputCount: selectedBlock.inputCount + 1 }])} style={press(styles.secondary)}><Text style={styles.small}>＋ Add input</Text></Pressable>}
+          {Object.keys(CANVAS_BLOCK_CATALOG[selectedBlock.kind].settings ?? {}).length > 0 && <Text style={styles.sectionLabel}>SETTINGS</Text>}
+          {Object.entries(CANVAS_BLOCK_CATALOG[selectedBlock.kind].settings ?? {}).map(([key, spec]) => <View key={key} style={styles.setting}><Text style={styles.small}>{spec.label}</Text>{spec.options ? <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>{spec.options.map(value => <Pressable key={value} accessibilityRole="button" onPress={() => run([{ action: 'canvas.configure', id: selectedBlock.id, settings: { [key]: value } }])} style={press([styles.chip, canvasSettings(selectedBlock)[key] === value && styles.selected])}><Text style={styles.small}>{value}</Text></Pressable>)}</ScrollView> : <TextInput key={`${selectedBlock.id}-${key}-${canvasSettings(selectedBlock)[key]}`} accessibilityLabel={`${selectedBlock.id} ${spec.label}`} defaultValue={String(canvasSettings(selectedBlock)[key])} keyboardType="numbers-and-punctuation" style={styles.number} onEndEditing={event => { const value = Number(event.nativeEvent.text); if (event.nativeEvent.text.trim() && Number.isFinite(value)) run([{ action: 'canvas.configure', id: selectedBlock.id, settings: { [key]: value } }]); }}/>}</View>)}
+          <Pressable accessibilityRole="button" onPress={() => { setConnectingId(selectedBlock.id); closeSheet(); }} style={press(styles.secondary)}><Text style={styles.small}>Connect this output →</Text></Pressable>
+          <Pressable accessibilityRole="button" onPress={() => { if (run([{ action: 'canvas.apply', id: selectedBlock.id }], 'Block applied · review in Edit')) closeSheet(); }} style={press(styles.primary)}><Text style={styles.primaryText}>Apply block</Text></Pressable>
+          <Pressable accessibilityRole="button" onPress={() => { if (run([{ action: 'canvas.remove', id: selectedBlock.id }])) { setSelection([]); closeSheet(); } }} style={press(styles.secondary)}><Text style={{ color: theme.danger, fontSize: 12 }}>Remove block</Text></Pressable>
+        </>}
+        {sheet === 'selection' && selectedSource && <><Text style={styles.footnote}>{(selectedSource.clip.sourceStartMs / 1000).toFixed(2)}–{(selectedSource.clip.sourceEndMs / 1000).toFixed(2)}s · Original input</Text><Pressable accessibilityRole="button" onPress={() => { setConnectingId(selectedSource.clip.id); closeSheet(); }} style={press(styles.primary)}><Text style={styles.primaryText}>Connect output →</Text></Pressable><Pressable accessibilityRole="button" onPress={() => { setMultiple(true); closeSheet(); }} style={press(styles.secondary)}><Text style={styles.small}>Select more for a quick start</Text></Pressable><Pressable accessibilityRole="button" onPress={onOpenEditor} style={press(styles.secondary)}><Text style={styles.small}>Review timeline ↗</Text></Pressable></>}
+        {sheet === 'arrange' && <><Text style={styles.sectionLabel}>ARRANGE {selection.length ? `${selection.length} SELECTED` : 'ALL NODES'}</Text><View style={styles.layoutGrid}>{CANVAS_LAYOUT_MODES.map(mode => <Pressable key={mode} accessibilityRole="button" onPress={() => { if (run([{ action: 'canvas.layout', mode, ids: selection }], 'Nodes arranged')) { closeSheet(); setFitKey(value => value + 1); } }} style={press(styles.layoutButton)}><Text style={styles.small}>{LAYOUT_LABELS[mode]}</Text></Pressable>)}</View><Text style={styles.sectionLabel}>FINAL OUTPUT</Text><View style={styles.chips}>{roots.map(block => <Pressable key={block.id} accessibilityRole="button" onPress={() => setFinalId(block.id)} style={press([styles.chip, block.id === finalBlock?.id && styles.selected])}><Text style={styles.small}>{CANVAS_BLOCK_LABELS[block.kind]}</Text></Pressable>)}</View><Pressable accessibilityRole="button" onPress={() => { setSelection([]); setMultiple(false); closeSheet(); }} style={press(styles.secondary)}><Text style={styles.small}>Clear selection</Text></Pressable><Pressable accessibilityRole="button" onPress={onOpenEditor} style={press(styles.secondary)}><Text style={styles.small}>Review timeline ↗</Text></Pressable><Pressable accessibilityRole="button" onPress={() => run([{ action: 'canvas.refreshSources' }], 'Inputs refreshed from current timeline')} style={press(styles.secondary)}><Text style={styles.small}>Refresh inputs from timeline</Text></Pressable><Text style={styles.footnote}>Refresh replaces preserved input ranges with your current timeline. It can be undone.</Text></>}
       </ScrollView>
-      {track.clips.length === 0 && <Text style={styles.note}>Add footage in Edit to start connecting clips.</Text>}
-    </View>)}
-    {section === 'workflow' && graph.blocks.map(block => {
-      const result = evaluateCanvasBlock(project.timeline, graph, block.id);
-      return <View key={block.id} style={[styles.block, source === block.id && styles.selected]}>
-        <Text style={styles.label}>{CANVAS_BLOCK_LABELS[block.kind]}</Text>
-        <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: selectedBlocks.includes(block.id) }} style={press(styles.button)} onPress={() => setSelectedBlocks(current => current.includes(block.id) ? current.filter(id => id !== block.id) : [...current, block.id])}><Text style={styles.label}>{selectedBlocks.includes(block.id) ? '✓ Selected node' : 'Select node'}</Text></Pressable>
-        <Pressable accessibilityRole="button" style={press(styles.button)} onPress={() => { setSource(block.id); setTarget(null); }}><Text style={styles.label}>Output ●</Text></Pressable>
-        {Array.from({ length: block.inputCount }, (_, input) => {
-          const edge = graph.connections.find(item => item.toId === block.id && item.input === input);
-          return <View key={input}>
-            <Text style={styles.note}>{canvasInputType(block, input)} {input + 1}: {edge ? sourceName(edge.fromId) : 'Not connected'}</Text>
-            <Pressable accessibilityRole="button" style={press(styles.button)} onPress={() => {
-              if (source === null) { setNotice('Choose an output first.'); return; }
-              const connected = connectCanvasInput(project.timeline, graph, { fromId: source, toId: block.id, input });
-              if (!connected.success) { setNotice(connected.error); return; }
-              saveGraph(connected.graph); setSource(null); setNotice('Input connected.');
-            }}><Text style={styles.label}>Connect input {input + 1}</Text></Pressable>
-            {edge && <Pressable accessibilityRole="button" style={press(styles.button)} onPress={() => saveGraph({ ...graph, connections: graph.connections.filter(item => item !== edge) })}><Text style={styles.label}>Disconnect input {input + 1}</Text></Pressable>}
-          </View>;
-        })}
-        {canvasVariableInputs(block.kind) && block.inputCount < CANVAS_INPUT_LIMIT && <Pressable accessibilityRole="button" style={press(styles.button)} onPress={() => saveGraph({ ...graph, blocks: graph.blocks.map(item => item.id === block.id ? { ...item, inputCount: item.inputCount + 1 } : item) })}><Text style={styles.label}>+ Input</Text></Pressable>}
-        {Object.entries(CANVAS_BLOCK_CATALOG[block.kind].settings ?? {}).map(([key, spec]) => <View key={key}>
-          <Text style={styles.note}>{spec.label}</Text>
-          {spec.options ? <ScrollView horizontal>{spec.options.map(value => <Pressable key={value} accessibilityRole="button" style={press(styles.button)} onPress={() => runOperations([{ action: 'canvas.configure', id: block.id, settings: { [key]: value } }])}><Text style={styles.label}>{canvasSettings(block)[key] === value ? '✓ ' : ''}{value}</Text></Pressable>)}</ScrollView>
-            : <TextInput key={`${block.id}-${key}-${canvasSettings(block)[key]}`} accessibilityLabel={`${block.id} ${spec.label}`} defaultValue={String(canvasSettings(block)[key])} keyboardType="numbers-and-punctuation" style={styles.search} onEndEditing={event => {
-              const value = Number(event.nativeEvent.text);
-              if (event.nativeEvent.text.trim() && Number.isFinite(value)) runOperations([{ action: 'canvas.configure', id: block.id, settings: { [key]: value } }]);
-            }} />}
-        </View>)}
-        <Text style={styles.note}>{result.success ? (result.output.durationMs / 1000).toFixed(2) + ' s · starts at 0 s' : result.error}</Text>
-        <Pressable accessibilityRole="button" disabled={!result.success} style={press(styles.button)} onPress={() => {
-          const current = readProject(projectId);
-          if (current === null) return;
-          const applied = applyCanvasBlock(current.timeline, current.timeline.canvas ?? EMPTY_CANVAS_GRAPH, block.id);
-          if (!applied.success) { setNotice(applied.error); return; }
-          writeProject({ ...current, timeline: applied.timeline });
-          setUndo({ before: current.timeline, after: applied.timeline });
-          setSource(null); setTarget(null); setNotice('Block output applied. Open Edit to preview.');
-        }}><Text style={styles.label}>Apply block</Text></Pressable>
-        <Pressable accessibilityRole="button" style={press(styles.button)} onPress={() => runOperations([{ action: 'canvas.remove', id: block.id }])}><Text style={styles.label}>Remove block</Text></Pressable>
-      </View>;
-    })}
-    <Text accessibilityLiveRegion="polite" style={styles.note}>{notice}</Text>
-    {source !== null && target !== null && <Pressable accessibilityRole="button" style={press(styles.button)} onPress={apply}><Text style={styles.label}>Apply connection</Text></Pressable>}
-    {undo && <Pressable accessibilityRole="button" style={press(styles.button)} onPress={() => {
-      const current = readProject(projectId);
-      if (current === null || JSON.stringify(current.timeline) !== JSON.stringify(undo.after)) {
-        setNotice('The timeline changed. Undo this connection before making other edits.'); return;
-      }
-      writeProject({ ...current, timeline: undo.before }); setUndo(null); setNotice('Connection undone.');
-    }}><Text style={styles.label}>Undo canvas edit</Text></Pressable>}
-    <Pressable accessibilityRole="button" style={press(styles.button)} onPress={() => runOperations([{ action: 'canvas.refreshSources' }])}><Text style={styles.label}>Refresh inputs from current timeline</Text></Pressable>
-    <Text style={styles.note}>Free-position cards, frame inspection and speech analysis are available in the desktop editor.</Text>
-  </ScrollView>;
+    </View></View>}
+  </View>;
 }
-
 const styles = StyleSheet.create({
-  page: { padding: 20, gap: 16 },
-  title: { color: theme.text, fontSize: 22, fontWeight: '600' },
-  label: { color: theme.text, fontSize: 13 },
-  note: { color: theme.textWeak, fontSize: 12, lineHeight: 18 },
-  sequence: { paddingVertical: 12 },
-  tabs: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  search: { minHeight: 44, borderColor: theme.line, borderWidth: 1, color: theme.text, padding: 10, borderRadius: 8 },
-  libraryItem: { minHeight: 80, padding: 14, borderColor: theme.line, borderWidth: 1, borderRadius: 10, gap: 8, marginTop: 12, backgroundColor: theme.surface },
-  row: { flexDirection: 'row', alignItems: 'center' },
-  arrow: { color: theme.textWeak, paddingHorizontal: 12 },
-  card: { width: 180, borderColor: theme.textWeaker, borderWidth: 1, borderRadius: 12, padding: 16, gap: 10 },
-  block: { borderColor: theme.textWeaker, borderWidth: 1, borderRadius: 12, padding: 16, gap: 10 },
-  selected: { borderColor: theme.text, borderWidth: 2 },
-  button: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 12, borderWidth: 1, borderColor: theme.textWeaker, borderRadius: 8 }
+  root: { flex: 1, backgroundColor: '#12151b' }, toolbar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, height: 62, borderBottomWidth: 1, borderBottomColor: '#303642', backgroundColor: '#20242c' }, titleGroup: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 9 }, title: { color: theme.text, fontSize: 15, fontWeight: '600' }, meta: { color: theme.textWeak, fontSize: 11, marginTop: 3 }, canvasGlyph: { width: 30, height: 32, backgroundColor: '#34394b', alignItems: 'center', justifyContent: 'center', borderRadius: 8 }, canvasGlyphText: { color: '#b8b3fe', fontSize: 23 }, iconButton: { width: 38, height: 44, justifyContent: 'center', alignItems: 'center' }, icon: { color: theme.text, fontSize: 22 }, dim: { opacity: 0.3 }, stage: { flex: 1 },
+  topHint: { position: 'absolute', top: 12, left: 14, right: 14, flexDirection: 'row', alignItems: 'center', gap: 8 }, hint: { color: '#c3cbd8', fontSize: 11, flex: 1, backgroundColor: '#1c2029dc', borderRadius: 8, paddingVertical: 7, paddingHorizontal: 10 }, cancel: { backgroundColor: '#303846', padding: 8, borderRadius: 8 }, leftTools: { position: 'absolute', left: 14, bottom: 18, flexDirection: 'row', gap: 8 }, addButton: { width: 48, height: 48, backgroundColor: theme.accent, borderRadius: 15, alignItems: 'center', justifyContent: 'center' }, addText: { fontSize: 28, color: '#12213d' }, selectButton: { width: 42, height: 48, backgroundColor: '#252a34', borderWidth: 1, borderColor: '#414856', borderRadius: 12, alignItems: 'center', justifyContent: 'center' }, selectionPill: { position: 'absolute', bottom: 78, left: 14, backgroundColor: '#303c58', borderRadius: 20, padding: 10 },
+  outputBar: { paddingHorizontal: 14, paddingVertical: 11, minHeight: 66, backgroundColor: '#22262e', borderTopWidth: 1, borderTopColor: '#363d49', flexDirection: 'row', gap: 12, alignItems: 'center' }, outputInfo: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 9 }, statusDot: { width: 6, height: 6, borderRadius: 3 }, outputTitle: { color: theme.text, fontSize: 12, fontWeight: '600' }, primary: { minHeight: 44, backgroundColor: theme.accent, borderRadius: 9, paddingHorizontal: 18, alignItems: 'center', justifyContent: 'center' }, primaryText: { color: '#14223d', fontSize: 12, fontWeight: '700' }, disabled: { opacity: 0.35 },
+  backdrop: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, backgroundColor: '#0000003b' }, sheet: { position: 'absolute', bottom: 0, left: 0, right: 0, maxHeight: '78%', backgroundColor: '#22262f', borderTopLeftRadius: 22, borderTopRightRadius: 22, borderWidth: 1, borderColor: '#414957', overflow: 'hidden' }, handle: { width: 34, height: 4, backgroundColor: '#5c6370', borderRadius: 2, marginTop: 9, alignSelf: 'center' }, sheetHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 18, paddingVertical: 10 }, sheetTitle: { color: theme.text, fontSize: 18, fontWeight: '600' }, sheetContent: { padding: 16, paddingTop: 8, paddingBottom: 24, gap: 12 }, tabs: { flexDirection: 'row', marginHorizontal: 16, borderBottomWidth: 1, borderBottomColor: '#3c4350' }, tab: { flex: 1, minHeight: 42, alignItems: 'center', justifyContent: 'center', borderBottomWidth: 2, borderBottomColor: 'transparent' }, tabOn: { borderBottomColor: theme.accent }, tabText: { color: theme.textWeak, fontSize: 11 },
+  libraryRow: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 70, paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: '#333a46' }, libraryIcon: { width: 38, height: 38, borderRadius: 10, backgroundColor: '#30394d', alignItems: 'center', justifyContent: 'center' }, libraryIconText: { color: theme.accent, fontSize: 23 }, rowTitle: { color: theme.text, fontSize: 13, fontWeight: '600' }, rowDetail: { color: theme.textWeak, fontSize: 11, lineHeight: 16, marginTop: 4 }, plus: { color: theme.textWeak, fontSize: 19 }, footnote: { color: theme.textWeak, fontSize: 11, lineHeight: 18 }, small: { color: theme.text, fontSize: 12 }, muted: { color: theme.textWeak, fontSize: 11 }, sectionLabel: { color: theme.textWeaker, fontSize: 11, fontWeight: '600', letterSpacing: 1.2, marginTop: 8 }, inputSection: { gap: 8, paddingBottom: 8 }, inline: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }, chips: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' }, chip: { paddingVertical: 10, paddingHorizontal: 12, backgroundColor: '#2b323f', borderWidth: 1, borderColor: '#485264', borderRadius: 8 }, selected: { borderColor: theme.accent, backgroundColor: '#303f5d' }, setting: { gap: 9 }, number: { minHeight: 44, borderRadius: 8, backgroundColor: '#171c25', color: theme.text, paddingHorizontal: 12, borderWidth: 1, borderColor: '#414b5c', fontSize: 14 }, search: { minHeight: 44, borderWidth: 1, borderColor: '#465064', borderRadius: 10, color: theme.text, paddingHorizontal: 12, fontSize: 13 }, secondary: { minHeight: 44, paddingHorizontal: 12, borderWidth: 1, borderColor: '#414b5c', borderRadius: 9, alignItems: 'center', justifyContent: 'center' }, miniButton: { padding: 7 }, layoutGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 }, layoutButton: { width: '48%', minHeight: 44, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#465064', borderRadius: 8 }
 });

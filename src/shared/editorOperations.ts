@@ -91,7 +91,10 @@ export function applyEditorOperations(timeline: TimelineDocument, operations: re
           }
           case 'canvas.configure': case 'canvas.move': case 'canvas.inputs': {
             const block = graph.blocks.find(block => block.id === id(op.id));
-            if (!block) throw new Error('Choose an existing block.');
+            if (!block) {
+              if (action !== 'canvas.move' || !canvasSourceTimeline(next, graph).tracks.some(track => track.clips.some(clip => clip.id === op.id))) throw new Error('Choose an existing block or source node.');
+              changed = { ...next, canvas: { ...graph, sourcePositions: { ...graph.sourcePositions, [id(op.id)]: { x: number(op.x), y: number(op.y) } } } }; break;
+            }
             const updated = action === 'canvas.configure' ? { ...block, settings: { ...block.settings, ...record(op.settings) } as Record<string, number | string> }
               : action === 'canvas.move' ? { ...block, position: { x: number(op.x), y: number(op.y) } } : { ...block, inputCount: number(op.inputCount) };
             changed = { ...next, canvas: { ...graph, blocks: graph.blocks.map(item => item.id === block.id ? updated : item), connections: graph.connections.filter(edge => edge.toId !== block.id || edge.input < updated.inputCount) } }; break;
