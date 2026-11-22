@@ -13,13 +13,15 @@ function Segment({ x1, y1, x2, y2, colour }: { x1: number; y1: number; x2: numbe
 }
 function Card({ node, selected, connecting, zoom, onSelect, onOutput, onInput, onMove }: { node: GraphCard; selected: boolean; connecting: boolean; zoom: number; onSelect: () => void; onOutput: () => void; onInput: (input: number) => void; onMove: (x: number, y: number) => void }) {
   const [drag, setDrag] = useState<{ x: number; y: number } | null>(null);
-  const current = useRef({ node, zoom, onMove }); current.current = { node, zoom, onMove };
+  const current = useRef({ node, zoom, onMove, onSelect }); current.current = { node, zoom, onMove, onSelect };
   const start = useRef({ x: 0, y: 0 });
   const responder = useMemo(() => PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
     onMoveShouldSetPanResponder: (_event, gesture) => gesture.numberActiveTouches === 1 && Math.abs(gesture.dx) + Math.abs(gesture.dy) > 8,
+    onPanResponderTerminationRequest: event => event.nativeEvent.touches.length > 1,
     onPanResponderGrant: () => { start.current = { x: current.current.node.x, y: current.current.node.y }; },
     onPanResponderMove: (_event, gesture) => setDrag({ x: Math.max(0, start.current.x + gesture.dx / current.current.zoom), y: Math.max(0, start.current.y + gesture.dy / current.current.zoom) }),
-    onPanResponderRelease: (_event, gesture) => { current.current.onMove(Math.max(0, start.current.x + gesture.dx / current.current.zoom), Math.max(0, start.current.y + gesture.dy / current.current.zoom)); setDrag(null); },
+    onPanResponderRelease: (_event, gesture) => { if (Math.abs(gesture.dx) + Math.abs(gesture.dy) > 8) current.current.onMove(Math.max(0, start.current.x + gesture.dx / current.current.zoom), Math.max(0, start.current.y + gesture.dy / current.current.zoom)); else current.current.onSelect(); setDrag(null); },
     onPanResponderTerminate: () => setDrag(null)
   }), []);
   return <View style={[styles.card, { left: drag?.x ?? node.x, top: drag?.y ?? node.y, borderColor: selected || connecting ? theme.accent : '#454b58', borderWidth: selected || connecting ? 2 : 1 }]}>
