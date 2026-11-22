@@ -1,3 +1,6 @@
 [submodule "external/opencut"]
 	path = external/opencut
 	url = https://github.com/Theorvane/OpenCut.git
+[submodule "external/ffmpeg-skill"]
+	path = external/ffmpeg-skill
+	url = https://github.com/Theorvane/ffmpeg-skill.git
