@@ -171,5 +171,17 @@ export function connectCanvasInput(
     visited.add(id);
     pending.push(...connections.filter(edge => edge.fromId === id).map(edge => edge.toId));
   }
-  return { success: true, graph: { ...graph, connections: [...connections, connection] } };
+  const candidate = { ...graph, connections: [...connections, connection] };
+  // Single-input processing inherits its source type. Rewiring it can invalidate
+  // consumers several blocks away even when the new input itself is compatible.
+  for (const edge of candidate.connections) {
+    if (!visited.has(edge.fromId)) continue;
+    const downstream = candidate.blocks.find(block => block.id === edge.toId);
+    if (!downstream) continue;
+    const output = canvasOutputType(timeline, candidate, edge.fromId);
+    if (output !== null && !canvasPortMatches(output, canvasInputType(downstream, edge.input))) {
+      return { success: false, error: 'This connection would invalidate a downstream input. Disconnect incompatible consumers first.' };
+    }
+  }
+  return { success: true, graph: candidate };
 }

@@ -40,7 +40,7 @@ All time settings below are milliseconds. Video ports include clips placed on vi
 | Picture in picture | Two video → video | Inset scale, X/Y and opacity; inset is above background. Defaults: scale 0.35, X 180px, Y 80px. |
 | Mute video sound | One Picture → same type | Video-lane volume becomes zero; separate audio lanes remain. |
 
-Trim bounds are 0–7,200,000ms. The catalog supplies defaults and bounds to both interfaces and capability discovery. Graphs allow at most 64 blocks and eight inputs per block. Missing inputs, type mismatches, cycles, invalid settings and unsupported resulting timelines are refused. One source ID cannot appear twice in a final output; duplicate the clip in Timeline first.
+Trim bounds are 0–7,200,000ms. The catalog supplies defaults and bounds to both interfaces and capability discovery. Graphs allow at most 64 blocks and eight inputs per block. Missing inputs, type mismatches, cycles, invalid settings and unsupported resulting timelines are refused. Reconnecting an upstream input also checks affected downstream port types; disconnect incompatible consumers before changing the branch type. One source ID cannot appear twice in a final output; duplicate the clip in Timeline first.
 
 ## Apply and original inputs
 
