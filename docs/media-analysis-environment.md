@@ -17,7 +17,7 @@ Docker Desktop의 Linux 엔진과 Git이 필요하다. REA 분석까지 하려�
 .\scripts\verify-media-analysis.ps1 -SkipBuild -AnalyzeEditor
 ```
 
-`npm run verify:media-analysis`도 같은 진입점이다. 검증 소스는 **현재 커밋 HEAD**의 `git archive`이므로 변경을 커밋한 뒤 실행한다. OpenCut도 별도 스냅샷으로 포함한다. 루트·모바일 lockfile로 의존성을 설치하며 npm 설치 스크립트는 실행하지 않는다.
+`npm run verify:media-analysis`도 같은 진입점이다. 검증 소스는 **현재 커밋 HEAD**의 `git archive`이므로 변경을 커밋한 뒤 실행한다. OpenCut과 FFmpeg skill도 별도 스냅샷으로 포함한다. 먼저 `git submodule update --init --recursive`로 서브모듈을 준비한다. FFmpeg skill은 부모 HEAD의 gitlink 리비전을 아카이브하므로 작업 디렉터리의 다른 버전을 임의 채택하지 않는다. 추출본에는 Git 메타데이터가 없으며, 통합 테스트가 `UPSTREAM.json`의 전체 SHA256 manifest와 라이선스·핀 문서를 검사한다. 루트·모바일 lockfile로 의존성을 설치하며 npm 설치 스크립트는 실행하지 않는다.
 
 이미지 정의는 `scripts/media-analysis/`에 있다. 프로젝트를 `/input`에 읽기 전용 연결하고 컨테이너 내부 `/work/project`에서 검사한다. 기존 Windows `node_modules`는 사용하지 않는다. 결과는 `.local-runtimes/linux-verification/`에 기록한다. 선택적 분석 단계는 네트워크 없이 실행한다.
 

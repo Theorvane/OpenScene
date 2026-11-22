@@ -64,7 +64,7 @@ The optional setup script downloads pinned whisper.cpp binaries and model files 
 - Upstream: https://github.com/kajisho5/ffmpeg-skill
 - Version: 3.13.1; commit: 3145261a1c19f399b9520fad7fdac741871e1426
 - Copyright: 2026 kajisho5
-- License: MIT; complete notice: `.agents/skills/ffmpeg-skill/LICENSE`
+- License: MIT; complete notice: `external/ffmpeg-skill/LICENSE`
 - Snapshot provenance and file hashes: `.agents/skills/ffmpeg-skill/UPSTREAM.json`
 
 The repository includes the Python tools and documentation for coding-agent use. The packaged app uses only a compact adapted editing workflow, not the upstream scripts or MCP server. See `docs/ffmpeg-skill-integration.md`.

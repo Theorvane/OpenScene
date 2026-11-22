@@ -8,7 +8,7 @@ OpenScene owns the timeline model, editing rules, project storage, source inspec
 
 ## FFmpeg skill
 
-The MIT ffmpeg-skill snapshot is pinned at commit 3145261a1c19f399b9520fad7fdac741871e1426. Its version and hashes are recorded in .agents/skills/ffmpeg-skill/UPSTREAM.json.
+The MIT `external/ffmpeg-skill` submodule from https://github.com/Theorvane/ffmpeg-skill.git is pinned at commit 3145261a1c19f399b9520fad7fdac741871e1426. Its version and hashes are recorded in .agents/skills/ffmpeg-skill/UPSTREAM.json.
 
 ## Speech transcription
 

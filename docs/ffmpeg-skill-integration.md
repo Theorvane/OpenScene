@@ -1,8 +1,8 @@
 # FFmpeg workflow integration
 
-OpenScene includes a pinned MIT snapshot of kajisho5/ffmpeg-skill in .agents/skills/ffmpeg-skill. UPSTREAM.json records the upstream commit and file checksums.
+OpenScene includes the MIT skill through the pinned `external/ffmpeg-skill` Git submodule, from https://github.com/Theorvane/ffmpeg-skill.git, just like `external/opencut`. Initialize both with `git submodule update --init --recursive`. The discoverable `.agents/skills/ffmpeg-skill/SKILL.md` adapter points to the complete external skill. Its `UPSTREAM.json` records the revision and source-file checksums; tools are not duplicated in the adapter directory.
 
-The organization maintains [Theorvane/ffmpeg-skill](https://github.com/Theorvane/ffmpeg-skill), forked from [kajisho5/ffmpeg-skill](https://github.com/kajisho5/ffmpeg-skill). Use the organization fork for OpenScene-specific fixes and reviewed snapshot updates. `UPSTREAM.json.managedFork` identifies that maintenance source; `repository`, `commit`, and checksums retain the original snapshot's provenance. Creating the fork does not upgrade the bundled 3.13.1 snapshot to a different release.
+The organization maintains [Theorvane/ffmpeg-skill](https://github.com/Theorvane/ffmpeg-skill), forked from [kajisho5/ffmpeg-skill](https://github.com/kajisho5/ffmpeg-skill). Use the organization fork for OpenScene-specific fixes and reviewed submodule updates. `UPSTREAM.json.managedFork` identifies that maintenance source; `repository`, `commit`, and checksums retain the pinned source's provenance. This migration preserves reviewed commit `3145261a1c19f399b9520fad7fdac741871e1426` (3.13.1); fork main is not silently adopted. For an upgrade, review the fork diff, run its checks and OpenScene integration tests, then update the gitlink, manifest and pins together.
 
 Coding agents use its probe, plan, edit and verification workflow for authorized local media work. The in-app assistant receives the adapted instructions in src/shared/ffmpegEditingWorkflow.ts.
 
