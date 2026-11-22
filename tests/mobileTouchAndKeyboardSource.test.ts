@@ -57,7 +57,7 @@ describe('mobile touch and keyboard source contract', () => {
     expect(form).toContain('keyboardShouldPersistTaps="handled"');
     expect(form).toContain('keyboardDismissMode="on-drag"');
 
-    for (const screen of ['PlanScreen', 'ImageScreen', 'VoiceScreen', 'SettingsScreen', 'ProjectsScreen']) {
+    for (const screen of ['SettingsScreen', 'ProjectsScreen']) {
       const body = await readSource(`src/screens/${screen}.tsx`);
       expect(body, `${screen} must scroll through FormScreen`).toContain('<FormScreen');
       expect(body, `${screen} must not hand-roll a bare ScrollView`).not.toContain('<ScrollView style={styles.root}');
@@ -91,9 +91,6 @@ describe('mobile touch and keyboard source contract', () => {
     for (const path of [
       'src/components/ProviderConnect.tsx',
       'src/components/AddCustomProvider.tsx',
-      'src/screens/PlanScreen.tsx',
-      'src/screens/ImageScreen.tsx',
-      'src/screens/VoiceScreen.tsx'
     ]) {
       const body = await readSource(path);
       expect(body, `${path} must reveal its focused field`).toContain('useRevealOnFocus()');
@@ -102,7 +99,6 @@ describe('mobile touch and keyboard source contract', () => {
 
     // Both scroll containers that hold a field provide it.
     expect(await readSource('src/components/FormScreen.tsx')).toContain('<KeyboardAwareScroll');
-    expect(await readSource('src/components/ModelSelect.tsx')).toContain('<KeyboardAwareScroll');
   });
 
   it('abandons a turn whose conversation was ended while it was in flight', async () => {
@@ -148,52 +144,6 @@ describe('mobile touch and keyboard source contract', () => {
     expect(agent).toContain('disabled={thinking || pending !== null || draft.trim().length === 0}');
     // And the outgoing history is repaired the same way the stored one is.
     expect(agent).toContain('...trimHistory(dropUnansweredCalls(history))');
-  });
-
-  it('treats backing out of a price prompt as a dismissal, not a refusal', async () => {
-    // `onRequestClose` fires on the Android back button, and it was wired to
-    // `onDecide('reject')` — which is remembered. One back press turned the
-    // feature off for good, silently, undoable only from Settings.
-    const prompt = await readSource('src/components/SpendPrompt.tsx');
-    expect(prompt).toContain('onRequestClose={onDismiss}');
-    expect(prompt).not.toContain("onRequestClose={() => onDecide('reject')}");
-
-    // Every caller has to say what backing out means for it.
-    for (const path of ['src/screens/AgentScreen.tsx', 'src/screens/ImageScreen.tsx', 'src/screens/PlanScreen.tsx']) {
-      expect(await readSource(path), `${path} must handle dismissal`).toContain('onDismiss=');
-    }
-    // The agent still answers the call it left hanging, without recording a
-    // standing choice for it.
-    const agent = await readSource('src/screens/AgentScreen.tsx');
-    expect(agent).toContain('const dismiss = (): void => {');
-    expect(agent).toContain('dismissed this without deciding');
-  });
-
-  it('keeps what the project made, and gives it somewhere to be seen', async () => {
-    // A generated shot went straight onto the timeline and a generated still
-    // went nowhere at all, so nothing answered "what have I made?".
-    const store = await readSource('src/lib/projectStore.ts');
-    expect(store).toContain('export function saveGeneratedImage(');
-    // A still is placeable now — on a video track, held rather than played —
-    // and the rule for that lives in the shared core.
-    expect(store).toContain('export function isStillAsset(');
-
-    // Both things that make a still keep it.
-    expect(await readSource('src/screens/ImageScreen.tsx')).toContain('saveGeneratedImage(');
-    expect(await readSource('src/lib/agentTools.ts')).toContain('saveGeneratedImage(');
-
-    // And it has a home of its own rather than a toggle inside the editor.
-    const app = await readSource('App.tsx');
-    expect(app).toContain("{ id: 'library', label: 'Library', Icon: StackIcon }");
-    expect(app).toContain('<LibraryScreen');
-
-    const library = await readSource('src/screens/LibraryScreen.tsx');
-    expect(library).toContain('appendAssetToTimeline');
-    expect(library).toContain('deleteAsset');
-    // A still is placed like anything else now, and the note says what it did
-    // — a hold the user is expected to trim rather than a length it claims.
-    expect(library).toContain('STILL_DEFAULT_HOLD_MS');
-    expect(library).not.toContain('Stills have no track to sit on');
   });
 
   it('places an asset it already holds without recording it twice', async () => {
@@ -264,7 +214,7 @@ describe('mobile touch and keyboard source contract', () => {
     // Measured, not assumed: the bar carries the top inset and grows a row
     // whenever an export result is showing.
     expect(app).toContain('onLayout={(event) => setBodyTop(event.nativeEvent.layout.y)}');
-    for (const screen of ['PlanScreen', 'VoiceScreen', 'ImageScreen', 'AgentScreen']) {
+    for (const screen of ['AgentScreen']) {
       expect(app, `${screen} must be told where the body starts`).toMatch(
         new RegExp(`<${screen}[^>]*keyboardOffset=\\{bodyTop\\}`, 's')
       );
@@ -278,7 +228,7 @@ describe('mobile touch and keyboard source contract', () => {
     // A Modal is its own window, so the calling screen's avoidance does not
     // reach inside it. Both of these hold a field: the rename sheet is centred
     // where the keyboard lands, and the provider sheet sits on the bottom edge.
-    for (const path of ['src/screens/ProjectsScreen.tsx', 'src/components/ModelSelect.tsx']) {
+    for (const path of ['src/screens/ProjectsScreen.tsx']) {
       const body = await readSource(path);
       expect(body, `${path} must avoid the keyboard inside its Modal`).toContain(
         '<KeyboardAvoidingView style={styles.scrim} behavior="padding">'

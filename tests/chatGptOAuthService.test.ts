@@ -58,6 +58,16 @@ describe('ChatGptOAuthService device authorization', () => {
     const accessToken = createJwt({
       'https://api.openai.com/auth': { chatgpt_account_id: 'account-123' }
     });
+    const saveStarted = createDeferred<void>();
+    const unblockSave = createDeferred<void>();
+    const saveCompleted = createDeferred<void>();
+    const originalSave = ChatGptOAuthTokenStore.prototype.save;
+    vi.spyOn(ChatGptOAuthTokenStore.prototype, 'save').mockImplementationOnce(async function (this: ChatGptOAuthTokenStore, tokens) {
+      saveStarted.resolve();
+      await unblockSave.promise;
+      await originalSave.call(this, tokens);
+      saveCompleted.resolve();
+    });
     let pollCount = 0;
     const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
       const url = String(input);
@@ -93,6 +103,19 @@ describe('ChatGptOAuthService device authorization', () => {
       userCode: 'ABCD-EFGH'
     });
     await eventually(() => expect(pollCount).toBe(2));
+    await saveStarted.promise;
+    try {
+      // Approval is not completion: the atomic token write may still be in flight.
+      await expect(service.getStatus()).resolves.toEqual({
+        kind: 'pending',
+        verificationUrl: 'https://auth.openai.com/codex/device',
+        userCode: 'ABCD-EFGH'
+      });
+    } finally {
+      unblockSave.resolve();
+    }
+    // Synchronize with the real write/fsync/rename, not a fixed number of timer turns.
+    await saveCompleted.promise;
     await eventually(() => expect(service.getStatus()).resolves.toEqual({ kind: 'connected' }));
     await expect(service.acquireCredentials()).resolves.toEqual({ accessToken, accountId: 'account-123' });
   });

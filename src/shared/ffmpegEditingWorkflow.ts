@@ -7,7 +7,7 @@ export const FFMPEG_EDITING_WORKFLOW =
   'Verified local-edit workflow (adapted from ffmpeg-skill):\n' +
   '1. Inspect before planning. Read available project/asset/timeline metadata with registered tools. ' +
   'Use measured duration, dimensions, frame rate and audio information when available; never invent missing probe results. ' +
-  'Inspect relevant frames only if a vision-capable tool is available.\n' +
+  'When tools support it, inspect relevant footage at one frame per second with a vision-capable model. Use visible text and timestamped speech as evidence, and distinguish reviewed time ranges from unseen footage.\n' +
   '2. Plan from the user request. State source clips, time ranges, aspect/duration and intended changes. ' +
   'Ask only for choices that change the output and are not already specified. Prefer existing footage to generation. ' +
   'Keep original media unchanged; use timeline edits and separate outputs. Do not equate stream-copy cuts with frame-exact cuts.\n' +

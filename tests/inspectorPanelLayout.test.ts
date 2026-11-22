@@ -15,21 +15,19 @@ function indexOfRequired(source: string, marker: string): number {
 describe('inspector panel selected clip layout', () => {
   it('keeps selected clip trim controls before the selected clip metadata list', async () => {
     const source = await readFile(INSPECTOR_PANEL_SOURCE_URL, 'utf8');
-    const selectedClipMetadataIndex = indexOfRequired(source, "{ term: 'Track', description: clip.track.name }");
+    const selectedClipMetadataIndex = indexOfRequired(source, '<PropertyGroup title="Timing">');
     const toolbarMarkers = [
       'aria-label="Selected clip trim controls"',
-      'editor.moveSelectedClip(-500)',
-      'Nudge -0.5s',
-      'editor.moveSelectedClip(500)',
-      'Nudge +0.5s',
-      "editor.trimSelectedClip('left', 500)",
-      'Trim left',
-      "editor.trimSelectedClip('right', -500)",
-      'Trim right',
-      'onClick={editor.splitSelectedClip}',
-      'Split middle',
+      'onClick={editor.splitAtPlayhead}',
+      'Split at playhead',
+      "editor.trimClipTo(clip.clip.id, 'left', editor.playheadMs)",
+      'Trim start here',
+      "editor.trimClipTo(clip.clip.id, 'right', editor.playheadMs)",
+      'Trim end here',
+      'onClick={editor.duplicateSelectedClip}',
+      'Duplicate clip',
       'onClick={editor.deleteSelectedClip}',
-      'Delete clip'
+      'Delete selection'
     ];
 
     for (const marker of toolbarMarkers) {

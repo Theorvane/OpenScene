@@ -1,35 +1,11 @@
-# OpenScene Agent & Development Guidelines (Claude Entrypoint)
+# OpenScene development
 
-> **Inherits and enforces all rules in [`AGENTS.md`](./AGENTS.md).**
+Follow AGENTS.md for architecture, security, compatibility identifiers and verification.
 
-## Project Overview & Architecture
+The product edits imported media through Timeline, a node Canvas and an editing agent over one saved project. Apply canvas results to the timeline before preview/export. Shared modules own blocks, templates, original-input snapshots, node layout and atomic editing batches; agents discover the same capabilities.
 
-OpenScene is an Electron, React, TypeScript, and Vite desktop application built with local-first security and hybrid AI capabilities.
+Main-process services own files, credentials, FFmpeg, transcription and desktop tool execution. Desktop and mobile share editing decisions in `src/shared/`. Preserve approval boundaries and state each platform's limits. Generation workspaces and voice synthesis are not active surfaces.
 
-- **Main Surface** (`src/main/`): Desktop capture, project storage, FFmpeg jobs, local TTS, TypeMCP server (`src/main/openVideoMcpServer.ts`).
-- **Preload Surface** (`src/preload/`): Context-isolated IPC bridge exposing typed `window.videoTool`.
-- **Renderer Surface** (`src/renderer/`): React NLE timeline editor, AI Video Studio, AI Voice Studio, Theme Selector, and Settings.
-- **Shared Surface** (`src/shared/`): Type contracts, IPC definitions, timeline models, LLM models catalog (`src/shared/llmModels.ts`), and provider seams.
-- **Agent Skills**: `.agents/skills/api-to-typemcp/SKILL.md` for OpenAPI/Swagger to TypeMCP generator orchestration.
+Run root typecheck, tests and build, plus mobile typecheck. Existing project codecs must preserve imported assets and timelines from earlier versions.
 
-## Common Development Commands
-
-```bash
-npm install        # Install dependencies
-npm run dev        # Run local Electron + Vite development server
-npm run typecheck  # Run strict TypeScript typechecking
-npm test           # Run Vitest unit & integration test suite
-npm run build      # Perform typecheck and build Electron main, preload, & renderer into out/
-```
-
-## Mandatory Agent Workflow Rules (from `AGENTS.md`)
-
-1. Inspect open GitHub Issues & PRs, then create or update one focused GitHub Issue before branching.
-2. Put the issue number in the branch name: `<type>/<issue-number>-<short-description>` (e.g. `feat/24-typemcp-agent-integration`).
-3. Branch from current `origin/dev`.
-4. Use Conventional Commit format: `type(scope): subject`.
-5. Push branch and open a PR targeting `dev` with `Closes #<issue-number>` in the body.
-6. Verify code using `npm run typecheck && npm test && npm run build` before asking for review or merging.
-7. Implement the mobile screen in the same PR as the desktop one, and run `npm run typecheck` in `mobile/` too. Rules live in `src/shared/`; a surface that genuinely cannot have a feature says so, visibly and with the reason, rather than omitting it. See **Two Surfaces, One Core** in [`AGENTS.md`](./AGENTS.md).
-
-For full architecture details, local security constraints, and public compatibility identifiers, refer directly to [`AGENTS.md`](./AGENTS.md).
+Start documentation updates with [the documentation index](docs/README.md). Record verification by revision and distinguish actual app tests, scripted tool calls, model conversations and mobile-device checks.

@@ -1,13 +1,10 @@
-import { spawn } from 'node:child_process';
+import { runFfprobe } from './ffprobeRunner';
 
 import {
   personalMetadataFieldsForKeys,
   type MetadataTagInventory
 } from '../shared/metadataPrivacy';
 import { ffprobePathFor } from './exportMeasurement';
-
-const PROBE_TIMEOUT_MS = 15_000;
-const MAXIMUM_PROBE_OUTPUT_BYTES = 1024 * 1024;
 
 export type InspectContainerMetadataInput = {
   readonly ffmpegPath: string;
@@ -62,47 +59,6 @@ export function parseContainerMetadataProbeOutput(stdout: string): MetadataTagIn
 
 /** Null raw results become an unchecked, path-free inventory. */
 export async function inspectContainerMetadata(input: InspectContainerMetadataInput): Promise<MetadataTagInventory> {
-  const probePath = ffprobePathFor(input.ffmpegPath);
-  return new Promise<MetadataTagInventory>((resolve) => {
-    let settled = false;
-    let stdout = '';
-    const finish = (inventory: MetadataTagInventory) => {
-      if (settled) return;
-      settled = true;
-      resolve(inventory);
-    };
-    const unavailable = (): MetadataTagInventory => ({ checked: false, fields: [] });
-    let child: ReturnType<typeof spawn>;
-    try {
-      child = spawn(probePath, [...containerMetadataProbeArgs(input.filePath)], { stdio: ['ignore', 'pipe', 'ignore'] });
-    } catch {
-      finish(unavailable());
-      return;
-    }
-    if (child.stdout === null) {
-      child.kill();
-      finish(unavailable());
-      return;
-    }
-    child.stdout.on('data', (chunk: Buffer) => {
-      if (Buffer.byteLength(stdout, 'utf8') + chunk.byteLength > MAXIMUM_PROBE_OUTPUT_BYTES) {
-        child.kill();
-        finish(unavailable());
-        return;
-      }
-      stdout += chunk.toString('utf8');
-    });
-    const timeout = setTimeout(() => {
-      child.kill();
-      finish(unavailable());
-    }, PROBE_TIMEOUT_MS);
-    child.on('error', () => {
-      clearTimeout(timeout);
-      finish(unavailable());
-    });
-    child.on('close', (code) => {
-      clearTimeout(timeout);
-      finish(code === 0 ? parseContainerMetadataProbeOutput(stdout) ?? unavailable() : unavailable());
-    });
-  });
+  const result = await runFfprobe({ executablePath: ffprobePathFor(input.ffmpegPath), filePath: input.filePath, args: containerMetadataProbeArgs(input.filePath) });
+  return result === null ? { checked: false, fields: [] } : parseContainerMetadataProbeOutput(result.stdout) ?? { checked: false, fields: [] };
 }

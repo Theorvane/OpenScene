@@ -133,6 +133,11 @@ public struct ComposerTitle {
   public var positionX: Double
   public var positionY: Double
   public var bold: Bool
+  public var fontFamily: String
+  public var shadowColor: String
+  public var shadowOpacity: Double
+  public var shadowOffsetX: Double
+  public var shadowOffsetY: Double
   public var outlineColor: String
   public var outlineWidthPx: Double
   public var backgroundColor: String
@@ -148,6 +153,11 @@ public struct ComposerTitle {
     positionX: Double = 0,
     positionY: Double = 0,
     bold: Bool = false,
+    fontFamily: String = "legacy",
+    shadowColor: String = "#000000",
+    shadowOpacity: Double = 0,
+    shadowOffsetX: Double = 4,
+    shadowOffsetY: Double = 4,
     outlineColor: String = "#000000",
     outlineWidthPx: Double = 0,
     backgroundColor: String = "#000000",
@@ -162,6 +172,11 @@ public struct ComposerTitle {
     self.positionX = positionX
     self.positionY = positionY
     self.bold = bold
+    self.fontFamily = fontFamily
+    self.shadowColor = shadowColor
+    self.shadowOpacity = shadowOpacity
+    self.shadowOffsetX = shadowOffsetX
+    self.shadowOffsetY = shadowOffsetY
     self.outlineColor = outlineColor
     self.outlineWidthPx = outlineWidthPx
     self.backgroundColor = backgroundColor
@@ -731,7 +746,19 @@ public enum VideoComposer {
       for title in request.titles where !title.text.isEmpty && title.timelineEndMs > title.timelineStartMs {
         let text = CATextLayer()
         let fontSize = CGFloat(title.sizePx)
-        let font = CTFontCreateWithName((title.bold ? "Helvetica-Bold" : "Helvetica") as CFString, fontSize, nil)
+        let fontName: String
+        switch title.fontFamily {
+        case "serif": fontName = title.bold ? "Georgia-Bold" : "Georgia"
+        case "mono": fontName = title.bold ? "Courier-Bold" : "Courier"
+        case "sans", "korean":
+          #if canImport(AppKit)
+          fontName = NSFont.systemFont(ofSize: fontSize, weight: title.bold ? .bold : .regular).fontName
+          #else
+          fontName = UIFont.systemFont(ofSize: fontSize, weight: title.bold ? .bold : .regular).fontName
+          #endif
+        default: fontName = title.bold ? "Helvetica-Bold" : "Helvetica"
+        }
+        let font = CTFontCreateWithName(fontName as CFString, fontSize, nil)
         var attributes: [NSAttributedString.Key: Any] = [
           NSAttributedString.Key(rawValue: kCTFontAttributeName as String): font,
           NSAttributedString.Key(rawValue: kCTForegroundColorAttributeName as String): parseHexColor(title.color)
@@ -765,17 +792,34 @@ public enum VideoComposer {
           width: width,
           height: height
         )
+        let group = CALayer()
+        group.frame = parent.bounds
         if title.backgroundOpacity > 0 {
-          text.backgroundColor = parseHexColor(title.backgroundColor).copy(alpha: CGFloat(max(0, min(1, title.backgroundOpacity))))
+          let plate = CALayer()
+          plate.frame = text.frame
+          plate.backgroundColor = parseHexColor(title.backgroundColor).copy(alpha: CGFloat(max(0, min(1, title.backgroundOpacity))))
+          group.addSublayer(plate)
         }
-
-        text.beginTime = AVCoreAnimationBeginTimeAtZero + title.timelineStartMs / 1000
-        text.duration = (title.timelineEndMs - title.timelineStartMs) / 1000
-        text.isHidden = false
-        text.speed = 0
-        text.timeOffset = 0
-        text.fillMode = .both
-        parent.addSublayer(text)
+        if title.shadowOpacity > 0 {
+          let shadow = CATextLayer()
+          shadow.string = NSAttributedString(string: title.text, attributes: [
+            NSAttributedString.Key(rawValue: kCTFontAttributeName as String): font,
+            NSAttributedString.Key(rawValue: kCTForegroundColorAttributeName as String): parseHexColor(title.shadowColor).copy(alpha: CGFloat(max(0, min(1, title.shadowOpacity)))) ?? parseHexColor(title.shadowColor)
+          ])
+          shadow.alignmentMode = text.alignmentMode
+          shadow.isWrapped = text.isWrapped
+          shadow.contentsScale = text.contentsScale
+          shadow.frame = text.frame.offsetBy(dx: CGFloat(title.shadowOffsetX), dy: -CGFloat(title.shadowOffsetY))
+          group.addSublayer(shadow)
+        }
+        group.addSublayer(text)
+        group.beginTime = AVCoreAnimationBeginTimeAtZero + title.timelineStartMs / 1000
+        group.duration = (title.timelineEndMs - title.timelineStartMs) / 1000
+        group.isHidden = false
+        group.speed = 0
+        group.timeOffset = 0
+        group.fillMode = .both
+        parent.addSublayer(group)
       }
 
       videoComposition.animationTool = AVVideoCompositionCoreAnimationTool(

@@ -9,6 +9,7 @@ Closes #
 - [ ] `npm run typecheck`
 - [ ] `npm test`
 - [ ] `npm run build`
+- [ ] Mobile `npm run typecheck` (required for shared/editing code changes)
 - [ ] Manual validation, if applicable (describe below)
 
 ## Checklist
@@ -18,6 +19,7 @@ Closes #
 - [ ] I used a Conventional Commit message.
 - [ ] I added or updated tests, or explained why tests are not applicable.
 - [ ] I updated documentation where behavior or setup changed.
+- [ ] Shared editing changes reach Timeline/Canvas, the mobile surface and agent tools; platform limits and unverified device checks are stated.
 - [ ] I did not include secrets, private media, private file paths, credentials, or security exploit material.
 
 ## Notes for reviewers

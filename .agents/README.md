@@ -11,4 +11,6 @@ Files:
 
 Keep these files short. They are guidance, not a second README.
 
+Current product: Timeline + node Canvas + editing agent over imported media. Use `docs/README.md` to find shared-core, workflow and verification guides; legacy generation fields exist for compatibility only.
+
 - `skills/ffmpeg-skill/SKILL.md`: pinned upstream local FFmpeg editing skill; integration/capability boundaries in `docs/ffmpeg-skill-integration.md`.

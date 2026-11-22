@@ -130,7 +130,7 @@ export function AgentChatPanel({ width, onCollapse }: AgentChatPanelProps): Reac
             <div className="agent-chat-hint-card agent-chat-hint-card--welcome">
               <span className="agent-chat-hint-card__icon">✦</span>
               <p className="agent-chat-hint-card__text">
-                Ask the agent to generate video or speech, add a clip to the timeline, check a job, or export a project. Changes ask for approval before they run.
+                Try “Find the part where the speaker introduces the product and trim the clip around it.” Video review uses a vision model, and speech review uses local whisper.cpp.
               </p>
             </div>
           )}
@@ -144,6 +144,9 @@ export function AgentChatPanel({ width, onCollapse }: AgentChatPanelProps): Reac
               <p className="agent-chat-approval__tool">
                 Run <strong>{pendingApproval.toolName}</strong>?
               </p>
+              {pendingApproval.toolName === 'transcribeProjectVideoRange' && (
+                <p>OpenScene will transcribe this video range locally and send the timestamped text to the selected chat model.</p>
+              )}
               <pre className="agent-chat-approval__args">{JSON.stringify(pendingApproval.args, null, 2)}</pre>
               <label className="agent-chat-approval__feedback">
                 <span className="visually-hidden">Why are you denying this action?</span>
