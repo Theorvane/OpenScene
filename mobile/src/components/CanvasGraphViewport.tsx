@@ -16,7 +16,7 @@ function Card({ node, selected, connecting, zoom, onSelect, onOutput, onInput, o
   const current = useRef({ node, zoom, onMove }); current.current = { node, zoom, onMove };
   const start = useRef({ x: 0, y: 0 });
   const responder = useMemo(() => PanResponder.create({
-    onMoveShouldSetPanResponder: (_event, gesture) => Math.abs(gesture.dx) + Math.abs(gesture.dy) > 8,
+    onMoveShouldSetPanResponder: (_event, gesture) => gesture.numberActiveTouches === 1 && Math.abs(gesture.dx) + Math.abs(gesture.dy) > 8,
     onPanResponderGrant: () => { start.current = { x: current.current.node.x, y: current.current.node.y }; },
     onPanResponderMove: (_event, gesture) => setDrag({ x: Math.max(0, start.current.x + gesture.dx / current.current.zoom), y: Math.max(0, start.current.y + gesture.dy / current.current.zoom) }),
     onPanResponderRelease: (_event, gesture) => { current.current.onMove(Math.max(0, start.current.x + gesture.dx / current.current.zoom), Math.max(0, start.current.y + gesture.dy / current.current.zoom)); setDrag(null); },
@@ -40,11 +40,12 @@ export function CanvasGraphViewport({ nodes, edges, selection, connectingId, fit
 }) {
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [camera, setCamera] = useState<CanvasCamera>({ x: 24, y: 32, zoom: 0.85 });
+  const host = useRef<View>(null), origin = useRef({ x: 0, y: 0 });
   const live = useRef({ camera, size }); live.current = { camera, size };
   const start = useRef<CanvasCamera>(camera), pinch = useRef<{ distance: number; x: number; y: number } | null>(null);
   const pan = useMemo(() => PanResponder.create({
     onMoveShouldSetPanResponder: (_event, gesture) => gesture.numberActiveTouches > 1 || Math.abs(gesture.dx) + Math.abs(gesture.dy) > 6,
-    onPanResponderGrant: event => { start.current = live.current.camera; const [a, b] = event.nativeEvent.touches; pinch.current = a && b ? { distance: Math.hypot(b.pageX - a.pageX, b.pageY - a.pageY), x: (a.locationX + b.locationX) / 2, y: (a.locationY + b.locationY) / 2 } : null; },
+    onPanResponderGrant: event => { start.current = live.current.camera; const [a, b] = event.nativeEvent.touches; pinch.current = a && b ? { distance: Math.hypot(b.pageX - a.pageX, b.pageY - a.pageY), x: (a.pageX + b.pageX) / 2 - origin.current.x, y: (a.pageY + b.pageY) / 2 - origin.current.y } : null; },
     onPanResponderMove: (event, gesture) => {
       const [a, b] = event.nativeEvent.touches;
       if (a && b && pinch.current) { const distance = Math.hypot(b.pageX - a.pageX, b.pageY - a.pageY); setCamera(zoomCanvasAt(start.current, start.current.zoom * distance / Math.max(1, pinch.current.distance), pinch.current)); }
@@ -65,7 +66,7 @@ export function CanvasGraphViewport({ nodes, edges, selection, connectingId, fit
     if (node) setCamera(current => ({ ...current, x: size.width / 2 - (node.x + WIDTH / 2) * current.zoom, y: 72 - node.y * current.zoom }));
   }, [selection[0], selection.length]);
   const zoom = (factor: number) => setCamera(current => zoomCanvasAt(current, current.zoom * factor, { x: size.width / 2, y: size.height / 2 }));
-  return <View style={styles.viewport} onLayout={event => setSize({ width: event.nativeEvent.layout.width, height: event.nativeEvent.layout.height })}>
+  return <View ref={host} style={styles.viewport} onLayout={event => { setSize({ width: event.nativeEvent.layout.width, height: event.nativeEvent.layout.height }); host.current?.measureInWindow((x, y) => { origin.current = { x, y }; }); }}>
     <View style={StyleSheet.absoluteFill} {...pan.panHandlers}>
       <View pointerEvents="none" style={StyleSheet.absoluteFill}>{Array.from({ length: Math.ceil(size.height / 24) }, (_, row) => <View key={row} style={[styles.dotRow, { top: row * 24 + ((camera.y % 24) + 24) % 24 }]}>{Array.from({ length: Math.ceil(size.width / 24) + 1 }, (_, column) => <View key={column} style={styles.dot} />)}</View>)}</View>
       <View style={{ position: 'absolute', left: camera.x, top: camera.y, width: Math.max(1, ...nodes.map(node => node.x + WIDTH)), height: Math.max(1, ...nodes.map(node => node.y + HEIGHT)), transformOrigin: 'top left', transform: [{ scale: camera.zoom }] }}>
