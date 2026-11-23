@@ -17,3 +17,7 @@ scripts/install-transcription-runtime.ps1 pins the whisper.cpp executable and mo
 ## Verification
 
 Run root typecheck, tests and build, plus mobile typecheck. Check a real imported video through mode switching, clip connection, saving and reopening after editor changes.
+
+## AutoClip
+
+`external/autoclip` from https://github.com/Theorvane/autoclip.git (upstream zhouxiaoka/autoclip), MIT, version 1.5.9, pinned at `39c856b0277cd22e730002f693ca333da1f625ba`. See docs/autoclip-integration.md for the read-only planning bridge and approval/runtime boundaries.

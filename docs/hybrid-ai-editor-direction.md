@@ -67,3 +67,7 @@ The selected model may receive project context, sampled frames and transcripts f
 A job ID means started. Inspect the final job state and verification before saying a video is complete. An unmeasured export is not a verified export, and a passing metadata review is not a subjective quality judgment.
 
 Mobile tools are `describe_timeline`, `get_editing_capabilities`, `get_canvas_workflow`, `edit_project` and `export_project`. They use the shared core and existing approval UI. `canvas.move` supports both source and block node positions without changing clip timing. Export uses the native module and user-controlled Photos/share delivery. Chat-based source frame and speech inspection remain desktop capabilities. Desktop scripted tool execution does not prove an external model conversation or a mobile-device export succeeded.
+
+## AutoClip highlight planning
+
+`planAutoClipEdit` is a registered read-only desktop tool. It converts source-second segments of imported assets into validated operations on a new track; it never runs Python or persists edits. Submit the reviewed result to approved `editProject`. See [AutoClip integration](autoclip-integration.md).
