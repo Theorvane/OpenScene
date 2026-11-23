@@ -15,6 +15,7 @@ export type ShortsStartInput = {
   readonly maxDurationMs?: number;
 };
 export type ShortsJobInput = { readonly jobId: string };
+export type ShortsListInput = { readonly projectId: string };
 /** Calling this is the explicit approval of the selected candidates and transcript captions. */
 export type ShortsMaterializeInput = ShortsJobInput & { readonly candidateIds: readonly string[] };
 /** Separate explicit export action, after normal project editing/review. */
@@ -35,11 +36,17 @@ export type ShortsJob = {
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly cleanupComplete: boolean;
+  /** Export retries create a fresh run; prior successful files/jobs remain intact. */
+  readonly parentJobId?: string;
   readonly transcription?: { readonly jobId: string; readonly progressPercent: number; readonly status: string };
   readonly selection?: ShortsSelectionResult;
+  /** Original source milliseconds, not candidate-relative preview timestamps. */
+  readonly captions?: readonly SubtitleCue[];
+  readonly recipes?: readonly ShortsRecipe[];
   readonly items: readonly ShortsItem[];
   readonly error?: string;
   readonly failureKind?: 'configuration' | 'transcription' | 'provider' | 'storage';
+  readonly errorCode?: 'transcription_not_configured' | 'transcription_failed' | 'llm_not_configured' | 'provider_failed' | 'storage_failed' | 'interrupted';
 };
 export type ShortsRecipe = {
   readonly version: 1;
