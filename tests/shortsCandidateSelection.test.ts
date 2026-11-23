@@ -83,7 +83,8 @@ describe('evidence-grounded shorts selection', () => {
     const currentSignal = signal();
     const result = await selectShortsCandidates(fixture, createShortsCandidateProvider({ invoke }), currentSignal);
     expect(result.candidates[0]?.startMs).toBe(0);
-    expect(invoke.mock.calls[0]?.[1]).toEqual({ signal: currentSignal });
+    expect(invoke.mock.calls[0]?.[1]?.signal).toBeInstanceOf(AbortSignal);
+    expect(invoke.mock.calls[0]?.[1]?.signal?.aborted).toBe(false);
   });
   it('adapter rejects invalid JSON', async () => {
     const provider = createShortsCandidateProvider({ invoke: async () => new AIMessage('```json {} ```') });
@@ -118,6 +119,39 @@ describe('evidence-grounded shorts selection', () => {
     const model = createAgentChatModel([])({ modelId: 'openai/gpt-5', openAiAuthMode: undefined, ollamaBaseUrl: undefined, reasoningEffort: undefined });
     await expect(model.invoke([])).rejects.toBeInstanceOf(AgentChatModelConfigurationError);
   });
+  it.each(['cancel', 'timeout', 'body-stall'] as const)('actually closes a stalled Ollama transport on %s', async mode => {
+    let accepted!: () => void, closed!: () => void;
+    const received = new Promise<void>(resolve => { accepted = resolve; });
+    const disconnected = new Promise<void>(resolve => { closed = resolve; });
+    const sockets = new Set<import('node:net').Socket>();
+    const server = createServer(async (request, response) => {
+      for await (const _chunk of request) { /* Consume body; deliberately never provide response content. */ }
+      response.once('close', closed);
+      if (mode === 'body-stall') { response.writeHead(200, { 'Content-Type': 'application/x-ndjson' }); response.flushHeaders(); }
+      accepted();
+    });
+    server.on('connection', socket => { sockets.add(socket); socket.once('close', () => sockets.delete(socket)); });
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Missing fixture port');
+      const model = createAgentChatModel([])({ modelId: 'fixture-model', ollamaBaseUrl: `http://127.0.0.1:${address.port}`, openAiAuthMode: undefined, reasoningEffort: undefined });
+      const controller = new AbortController();
+      const provider = createShortsCandidateProvider(model, { timeoutMs: mode === 'timeout' ? 100 : 2000 });
+      // Await the actual provider promise, not selection's cancellation race.
+      const work = provider(fixture, controller.signal);
+      const rejected = expect(work).rejects.toThrow();
+      await received;
+      const started = Date.now();
+      if (mode !== 'timeout') controller.abort();
+      await rejected;
+      await disconnected;
+      expect(Date.now() - started).toBeLessThan(1500);
+      // Closing the server must complete without force-destroying active requests.
+      await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+      expect(sockets.size).toBe(0);
+    } finally { server.closeAllConnections(); server.close(); }
+  }, 5000);
   it('respects configurable short fixtures without expanding into invented source time', async () => {
     const input = { ...fixture, minDurationMs: 500, maxDurationMs: 1000, transcript: [{ id: 'tiny', startMs: 250, endMs: 1000, text: 'A complete short thought.' }] };
     const result = await selectShortsCandidates(input, async () => ({ candidates: [proposal('tiny', 'tiny')] }), signal());
