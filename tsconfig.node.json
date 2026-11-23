@@ -33,6 +33,7 @@
     "src/renderer/src/editor/projectAssetImportFeedback.ts",
     "src/renderer/src/editor/exportUiState.ts",
     "src/renderer/src/editor/exportFramePreference.ts",
+    "src/renderer/src/editor/shorts/shortsReviewState.ts",
     "src/renderer/src/agentChatHistoryView.ts",
     "src/renderer/src/agentChatSessions.ts",
     "src/renderer/src/workspaceTabs.ts",

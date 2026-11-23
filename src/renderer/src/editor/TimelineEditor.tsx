@@ -41,14 +41,19 @@ import { useTheme } from '../ThemeProvider';
 import { THEME_PRESETS, type ThemePresetId } from '../theme';
 import type { TabDefinition } from '../ui';
 import { VideoConnectionCanvas } from './VideoConnectionCanvas';
+import { ShortsReviewWorkspace, type ShortsOpenEditorRequest } from './shorts/ShortsReviewWorkspace';
+import { writeExportFramePreference } from './exportFramePreference';
 import './videoCanvas.css';
 import './editorWorkbench.css';
 
 export type InspectorTabId = (typeof EDITOR_INSPECTOR_DOCK_TAB_IDS)[number];
 
+type EditorViewMode = 'timeline' | 'canvas' | 'shorts';
+
 type TimelineEditorProps = {
   readonly editor: TimelineEditorController;
   readonly onProjectSettings?: () => void;
+  readonly onOpenSettings?: () => void;
 };
 
 const INSPECTOR_TAB_LABELS: Readonly<Record<InspectorTabId, string>> = {
@@ -99,15 +104,24 @@ function getDefaultInspectorTabId({ selectedAssetId, selectedClipId }: Inspector
   return 'selection';
 }
 
-export function TimelineEditor({ editor, onProjectSettings }: TimelineEditorProps): ReactElement {
-  const [editorView, setEditorView] = useState<'timeline' | 'canvas'>(() => {
+export function TimelineEditor({ editor, onProjectSettings, onOpenSettings }: TimelineEditorProps): ReactElement {
+  const [editorView, setEditorView] = useState<EditorViewMode>(() => {
     try {
-      return localStorage.getItem('openvideo-editor-view') === 'canvas' ? 'canvas' : 'timeline';
+      const stored = localStorage.getItem('openvideo-editor-view');
+      return stored === 'canvas' || stored === 'shorts' ? stored : 'timeline';
     } catch {
       return 'timeline';
     }
   });
+  const [shortsReturnContext, setShortsReturnContext] = useState<ShortsOpenEditorRequest | null>(null);
+  const [restoredShortsTarget, setRestoredShortsTarget] = useState<{
+    readonly jobId: string;
+    readonly candidateId: string;
+    readonly token: number;
+  } | null>(null);
   const canvasMode = editorView === 'canvas';
+  const shortsMode = editorView === 'shorts';
+  const fullStageMode = canvasMode || shortsMode;
   useEffect(() => {
     const closeOutside = (event: globalThis.PointerEvent) => {
       document.querySelectorAll<HTMLDetailsElement>('details.workbench-menu[open]').forEach(menu => {
@@ -134,7 +148,7 @@ export function TimelineEditor({ editor, onProjectSettings }: TimelineEditorProp
   const [inspectorTabId, setInspectorTabId] = useState<InspectorTabId>('selection');
   const { layoutPreference, updateLayoutPreference } = useEditorLayoutPreference();
   const { shortcutPreferences } = useEditorShortcutPreference();
-  const selectEditorView = (view: 'timeline' | 'canvas'): void => {
+  const selectEditorView = (view: EditorViewMode): void => {
     editor.setIsPlaying(false);
     setEditorView(view);
     try {
@@ -142,6 +156,31 @@ export function TimelineEditor({ editor, onProjectSettings }: TimelineEditorProp
     } catch {
       // The selected view remains usable when browser storage is unavailable.
     }
+  };
+  const openMaterializedShortInEditor = async (request: ShortsOpenEditorRequest): Promise<void> => {
+    if (editor.hasUnsavedTimeline && !(await editor.saveTimeline())) return;
+    // Refresh the project list before opening the newly materialized project so
+    // App.tsx's tab pruning sees it as an existing project.
+    await editor.refreshProjects();
+    writeExportFramePreference(request.resultProjectId, 'portrait');
+    const opened = await editor.openProject(request.resultProjectId);
+    if (!opened) return;
+    setShortsReturnContext(request);
+    selectEditorView('timeline');
+  };
+  const returnToShortsReview = async (): Promise<void> => {
+    if (shortsReturnContext === null) return;
+    if (editor.hasUnsavedTimeline && !(await editor.saveTimeline())) return;
+    const context = shortsReturnContext;
+    const opened = await editor.openProject(context.sourceProjectId);
+    if (!opened) return;
+    setShortsReturnContext(null);
+    setRestoredShortsTarget((current) => ({
+      jobId: context.jobId,
+      candidateId: context.candidateId,
+      token: (current?.token ?? 0) + 1
+    }));
+    selectEditorView('shorts');
   };
   const inspectorTabs = getInspectorTabs(editor);
   const projectIdentity = editor.project?.id ?? '';
@@ -170,7 +209,8 @@ export function TimelineEditor({ editor, onProjectSettings }: TimelineEditorProp
 
   const workspaceClassName = [
     canvasMode ? 'oc-editor-host--canvas' : null,
-    canvasMode || !layoutPreference.leftDockVisible ? 'oc-editor-host--left-hidden' : null,
+    shortsMode ? 'oc-editor-host--shorts' : null,
+    fullStageMode || !layoutPreference.leftDockVisible ? 'oc-editor-host--left-hidden' : null,
     layoutPreference.inspectorVisible ? null : 'oc-editor-host--inspector-hidden',
     `oc-editor-host--inspector-${layoutPreference.inspectorPlacement}`
   ].filter((className): className is string => className !== null).join(' ');
@@ -272,8 +312,9 @@ export function TimelineEditor({ editor, onProjectSettings }: TimelineEditorProp
         onThemePresetChange={(next) => setPreset(next as ThemePresetId)}
         actions={<>
           <div className="editor-view-switch" role="group" aria-label="Editor mode">
-            <button type="button" aria-pressed={!canvasMode} onClick={() => selectEditorView('timeline')}>Timeline</button>
-            <button type="button" aria-pressed={canvasMode} onClick={() => selectEditorView('canvas')}>Canvas</button>
+            <button type="button" data-testid="editor-mode-timeline" aria-pressed={!fullStageMode} onClick={() => selectEditorView('timeline')}>Timeline</button>
+            <button type="button" data-testid="editor-mode-canvas" aria-pressed={canvasMode} onClick={() => selectEditorView('canvas')}>Canvas</button>
+            <button type="button" data-testid="editor-mode-shorts" aria-pressed={shortsMode} onClick={() => selectEditorView('shorts')}>Shorts</button>
           </div>
           <details className="workbench-menu">
             <summary>Project</summary>
@@ -286,8 +327,8 @@ export function TimelineEditor({ editor, onProjectSettings }: TimelineEditorProp
             <summary>View</summary>
             <div className="workbench-menu__popover">
               <span className="workbench-menu__label">WORKSPACE PANELS</span>
-              <button type="button" disabled={canvasMode} aria-pressed={layoutPreference.leftDockVisible} onClick={() => updateLayoutPreference(toggleEditorLeftDock)}>Media library {layoutPreference.leftDockVisible ? '✓' : ''}</button>
-              <button type="button" disabled={canvasMode} aria-pressed={layoutPreference.inspectorVisible} onClick={() => updateLayoutPreference(toggleEditorInspector)}>Inspector {layoutPreference.inspectorVisible ? '✓' : ''}</button>
+              <button type="button" disabled={fullStageMode} aria-pressed={layoutPreference.leftDockVisible} onClick={() => updateLayoutPreference(toggleEditorLeftDock)}>Media library {layoutPreference.leftDockVisible ? '✓' : ''}</button>
+              <button type="button" disabled={fullStageMode} aria-pressed={layoutPreference.inspectorVisible} onClick={() => updateLayoutPreference(toggleEditorInspector)}>Inspector {layoutPreference.inspectorVisible ? '✓' : ''}</button>
               <button type="button" onClick={resetLayout}>Reset layout</button>
             </div>
           </details>
@@ -295,7 +336,7 @@ export function TimelineEditor({ editor, onProjectSettings }: TimelineEditorProp
           {!floatingExportVisible && <ExportPanel editor={editor} />}
         </>}
       />}
-      left={canvasMode ? null : <TimelineEditorLeftDock
+      left={fullStageMode ? null : <TimelineEditorLeftDock
         activeTabId={leftDockTabId}
         editor={editor}
         leftDockVisible={layoutPreference.leftDockVisible}
@@ -303,7 +344,7 @@ export function TimelineEditor({ editor, onProjectSettings }: TimelineEditorProp
         onActiveTabChange={setLeftDockTabId}
       />}
 
-      leftSplitter={canvasMode ? null : <EditorLeftDockSplitter leftDockVisible={layoutPreference.leftDockVisible} leftDockWidth={layoutPreference.leftDockWidth} onLeftDockWidthChange={setLeftDockWidth} />}
+      leftSplitter={fullStageMode ? null : <EditorLeftDockSplitter leftDockVisible={layoutPreference.leftDockVisible} leftDockWidth={layoutPreference.leftDockWidth} onLeftDockWidthChange={setLeftDockWidth} />}
 
       auxiliary={<AssetMetadataProbeHost
         failuresByAssetId={editor.metadataProbeFailuresByAssetId}
@@ -320,20 +361,48 @@ export function TimelineEditor({ editor, onProjectSettings }: TimelineEditorProp
           <h1 id="timeline-editor-title">OpenScene</h1>
           <span className="editor-program-region__subtitle">Timeline editor</span>
         </div>
+        {!shortsMode && shortsReturnContext !== null && editor.project?.id === shortsReturnContext.resultProjectId && (
+          <div className="shorts-return-banner" data-testid="shorts-return-banner" role="region" aria-label="Return to Shorts review">
+            <span>
+              격리 쇼츠 프로젝트({shortsReturnContext.candidateId}) 편집 중 · 9:16 수동 Transform(얼굴추적 미포함) · 트림 · 자막 수정 후 저장하고 복귀하세요.
+            </span>
+            <button
+              type="button"
+              className="button button--primary"
+              data-testid="shorts-return-to-review-btn"
+              disabled={editor.isBusy}
+              onClick={() => { void returnToShortsReview(); }}
+            >
+              {editor.hasUnsavedTimeline ? '저장 후 쇼츠 검토로 돌아가기' : '쇼츠 검토로 돌아가기'}
+            </button>
+          </div>
+        )}
         <div className="editor-view" hidden={!canvasMode}>
           {editor.project !== null && <VideoConnectionCanvas key={editor.project.id} editor={editor}
             locked={isAgentBusy || editor.isBusy} onPreview={() => selectEditorView('timeline')} />}
         </div>
-        <div className="editor-view" hidden={canvasMode}>
+        <div className="editor-view" hidden={!shortsMode}>
+          {shortsMode && editor.project !== null && (
+            <ShortsReviewWorkspace
+              editor={editor}
+              initialJobId={restoredShortsTarget?.jobId ?? null}
+              initialCandidateId={restoredShortsTarget?.candidateId ?? null}
+              returnReloadToken={restoredShortsTarget?.token ?? 0}
+              onOpenSettings={onOpenSettings}
+              onOpenMaterializedProject={openMaterializedShortInEditor}
+            />
+          )}
+        </div>
+        <div className="editor-view" hidden={fullStageMode}>
             {floatingProgramVisible ? <div className="empty-slate">Program Monitor is floating above the workspace.</div> : <ProgramMonitor editor={editor} />}
         </div>
       </main>}
 
-      programSplitter={canvasMode ? null : <EditorProgramSplitter programPercent={layoutPreference.programPercent} onProgramPercentChange={setProgramPercent} />}
+      programSplitter={fullStageMode ? null : <EditorProgramSplitter programPercent={layoutPreference.programPercent} onProgramPercentChange={setProgramPercent} />}
 
-      inspector={!canvasMode && dockedInspectorVisible ? inspectorPanel : null}
+      inspector={!fullStageMode && dockedInspectorVisible ? inspectorPanel : null}
 
-      inspectorSplitter={canvasMode ? null : <EditorInspectorSplitter
+      inspectorSplitter={fullStageMode ? null : <EditorInspectorSplitter
         inspectorPlacement={layoutPreference.inspectorPlacement}
         inspectorVisible={layoutPreference.inspectorVisible}
         inspectorWidth={layoutPreference.inspectorWidth}
@@ -342,14 +411,14 @@ export function TimelineEditor({ editor, onProjectSettings }: TimelineEditorProp
         onInspectorWidthChange={setInspectorWidth}
       />}
 
-      floatingPanels={canvasMode ? null : <div className="editor-floating-layer" aria-label="Floating workspace panels">
+      floatingPanels={fullStageMode ? null : <div className="editor-floating-layer" aria-label="Floating workspace panels">
         {floatingProjectVisible && renderFloatingPanel({ child: <ProjectRail editor={editor} />, floatingPanel: layoutPreference.floatingPanels.project, panelId: 'project' })}
         {floatingProgramVisible && renderFloatingPanel({ child: <ProgramMonitor editor={editor} />, floatingPanel: layoutPreference.floatingPanels.program, panelId: 'program' })}
         {floatingInspectorVisible && renderFloatingPanel({ child: inspectorPanel, floatingPanel: layoutPreference.floatingPanels.inspector, panelId: 'inspector' })}
         {floatingExportVisible && renderFloatingPanel({ child: <ExportPanel editor={editor} />, floatingPanel: layoutPreference.floatingPanels.export, panelId: 'export' })}
       </div>}
 
-      timeline={canvasMode ? null : <TimelineCanvas id="editor-timeline-panel" editor={editor} />}
+      timeline={fullStageMode ? null : <TimelineCanvas id="editor-timeline-panel" editor={editor} />}
     />
   );
 }
