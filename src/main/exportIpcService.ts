@@ -203,6 +203,11 @@ export class ExportIpcService {
     return ok(ffmpeg.kind === 'unavailable' ? { kind: 'unavailable', reason: ffmpeg.reason } : { kind: ffmpeg.kind });
   }
 
+  /** A cancelled job state is acceptance only; pending work owns files until this becomes true. */
+  isSettled(jobId: string): boolean {
+    return !this.pendingJobs.has(jobId) && !this.activeExecutions.has(jobId);
+  }
+
   async getExportJob(payload: unknown): Promise<ApiResponse<LocalExportJob>> {
     const input = parseExportJobActionInput(payload);
     if (input === null) {
