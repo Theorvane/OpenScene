@@ -190,12 +190,12 @@ export function createAgentChatModel(
     if (spec.kind === 'ollama') {
       const baseUrl = (ollamaBaseUrl || DEFAULT_OLLAMA_BASE_URL).replace(/\/$/, '');
       const model = new ChatOllama({ model: modelId, baseUrl }).bindTools([...tools]);
-      return { invoke: (messages) => model.invoke([...messages]) };
+      return { invoke: (messages, options) => model.invoke([...messages], options) };
     }
 
     if (spec.kind === 'chatgpt-codex') {
       return {
-        invoke: async (messages) => {
+        invoke: async (messages, options) => {
           if (chatGptOAuthService === null) {
             throw new AgentChatModelConfigurationError('ChatGPT authentication is unavailable for Edit Agent.');
           }
@@ -205,13 +205,13 @@ export function createAgentChatModel(
             resolveChatGptCodexClientConfig(spec, credentials, randomUUID(), reasoningEffort)
           );
           const model = cloudModel.bindTools([...tools]);
-          return model.invoke([...messages]);
+          return model.invoke([...messages], options);
         }
       };
     }
 
     return {
-      invoke: async (messages) => {
+      invoke: async (messages, options) => {
         const apiKey = (await credentialStore?.getCredentialValue(spec.credentialKey))?.trim();
         if (apiKey === undefined || apiKey.length === 0) {
           throw new Error(`API key for ${spec.providerLabel} is missing. Connect the provider in Settings first.`);
@@ -221,7 +221,7 @@ export function createAgentChatModel(
           throw new Error(`${spec.providerLabel} client does not support tool calling in this build.`);
         }
         const model = cloudModel.bindTools([...tools]);
-        return model.invoke([...messages]);
+        return model.invoke([...messages], options);
       }
     };
   };
