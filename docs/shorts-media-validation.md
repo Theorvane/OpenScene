@@ -144,6 +144,106 @@ An earlier run prepending Homebrew to PATH selected its different Node binary;
 the managed-runtime test copies that executable and failed its health check.
 Keeping the session Node first and appending `/opt/homebrew/bin` passed the full
 suite. This is environment evidence, not a product change. No new OSS component,
-model, or bundled binary was added. Full candidate→approval→materialize→batch
-export/partial failure/cancel verification remains dependent on a committed,
-integrated Backend/LLM runtime SHA and its settlement hook.
+model, or bundled binary was added. This initial calibration did not execute
+candidate→approval→materialize→batch export. The later pinned-runtime checks
+below establish that separate service/media evidence.
+
+## Opt-in real product service verification
+
+`node scripts/verify-shorts-product.mjs` is separate from the independent smoke
+CI. It requires the Backend/LLM runtime (`src/main/shortsService.ts`) and installed
+root/mobile dependencies in a clean, isolated runtime checkout. On older dev it
+exits nonzero with an explicit missing-runtime message. Never treat that as a
+skip/pass. It creates fresh fixtures, temporarily writes one generated Vitest
+file under `tests/` with exclusive creation, and removes only that file on exit.
+Fixtures, projects, jobs, actual exports and evidence stay in printed temporary
+directories. `execution.json` records runtime Git SHA and SHA-256 of the three
+harness files, preserving the distinction between test code and product code.
+
+To test a runtime branch before this harness is merged, overlay only
+`scripts/shorts-media.mjs`, `scripts/verify-shorts-product.mjs` and
+`scripts/shorts-product.integration.ts.template` from this PR in a dedicated clean
+runtime checkout. Do not overwrite tracked files or use another worker's checkout.
+No product source modification is needed. The template is intentionally outside
+the regular test glob because older dev has no ShortsService API.
+
+```sh
+VIDEO_TOOL_FFMPEG_PATH=/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg \
+FFMPEG_PATH=/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg \
+FFPROBE_PATH=/opt/homebrew/opt/ffmpeg-full/bin/ffprobe \
+OPENSCENE_SHORTS_UNSUPPORTED_FFMPEG=/opt/homebrew/bin/ffmpeg \
+node scripts/verify-shorts-product.mjs
+```
+
+The final variable is optional: it explicitly supplies a known build lacking
+drawtext to verify product refusal. Omission does not establish that negative
+case. The matching explicit FFmpeg/FFprobe paths are required. This does not
+change the default FFmpeg link or shell PATH. Product captions use drawtext;
+the libass `subtitles` filter is not required by the compiler. Independent smoke
+does not render captions and cannot detect missing drawtext by itself.
+
+The opt-in test uses real ProjectStore, AssetLibraryStore, ShortsService,
+ExportIpcService, FFprobe and FFmpeg. Declared transcript cues and a deterministic
+provider response are test inputs; no ASR, live model or paid provider is called.
+It creates eight portrait outputs (two per audible/silent/no-audio/90°-rotated
+source), checks streams/length/RMS, measured displayed dimensions and contain
+scaling, SRT clipping/rebasing and supporting paired burn-in frames. It corrupts
+only owned copied media to test source-change refusal and mixed-batch failure.
+Cancellation checks actual export child exit and no owned stage/partial files,
+independent parallel export success, persisted cleanup state, a fresh retry run
+and immutable previous results. A failed/timeout run is never cleanup success;
+inspect retained artifacts. On POSIX the runner kills its own test process group
+after failure; Windows failure-process cleanup is not verified here.
+
+## Product and packaging observations at a pinned runtime
+
+At runtime `e8913aaa3279cb79e5726c2a3dbb6f3651834e9d`, the original local
+integration harness passed in 9.35 seconds on macOS arm64 with Homebrew
+`ffmpeg-full` 9.0.2_3 (upstream FFmpeg 9.0.2). Eight outputs measured exactly
+1.500 or 2.000 seconds at 1080×1920@30; tone RMS was 0.088099–0.088355,
+silence 0, and no-audio had no audio stream. Rotation metadata 90° measured as
+360×640; the existing 2× scale cap preserves padding on that small portrait
+source. Ordinary 640×360 uses scale 1.6875 and reaches both portrait frame edges.
+All source mutation/partial/cancel/parallel/retry assertions above passed.
+
+Historical failures are retained as limits: first cold FFprobe invocation on
+`6f3fab3` exceeded the product's 15-second source-measurement deadline and led
+to failed/storage_failed with cleanup unverified. Warming the installed binary
+then passed. The first rotated fixture used an obsolete metadata-writing option
+that produced no display matrix under FFmpeg 9; the assertion correctly failed.
+Using `-display_rotation 90` and probing the actual matrix corrected the fixture,
+without a product change. These failures are not hidden by the final pass.
+
+At the same e8913aaa runtime, root build and unsigned macOS directory packaging
+passed using `CSC_IDENTITY_AUTO_DISCOVERY=false npx electron-builder --mac --dir
+--arm64 --config.mac.identity=null --publish never`. This produces a local
+unsigned `.app`, not a signed installer or publication. Packaged
+`licenses/AutoClip-LICENSE.txt` exactly matched `external/autoclip/LICENSE`:
+SHA-256 `dac7c1396ebc3de77b3d2d9dafe396f6b6d03752ea9b74a270cb81ceea911ade`.
+AutoClip 1.5.9 / `39c856b0277cd22e730002f693ca333da1f625ba` supplies the
+documented shared planning integration; the upstream Python runtime is not
+executed. Its full MIT notice now ships with the packaged inventory.
+
+The packaged app.asar contains LICENSE files for all six checked SDK dependencies:
+@langchain/core 1.2.3, @langchain/ollama 1.3.0, @langchain/openai 1.5.5,
+@langchain/anthropic 1.5.2, @langchain/google-genai 2.2.0 and ollama 0.6.3.
+Installed manifests, lock versions and MIT licenses agree. This is evidence for
+these six packages, not a complete transitive-license audit. FFmpeg/FFprobe,
+whisper-cli and model files were absent from app.asar/resources. The tested full
+FFmpeg build reports GPL v3-or-later and enable-gpl/version3/libx264/libfreetype;
+it is an explicitly selected development/system tool. Bundling it would require
+a separate binary/source-obligation review, regardless of process boundaries.
+
+No Whisper model was downloaded. The existing optional Windows installer pins
+whisper.cpp b4938, binary archive SHA-256
+`c2a4b60edb11f7e11a9191ffb50929535527d4d91c9903dbe3e554583bbbc63d`, and
+ggml-small.bin at Hugging Face commit
+`5359861c739e955e79d9a303bcbc70fb988958b1`, model SHA-256
+`1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b`.
+Its [pinned runtime license](https://raw.githubusercontent.com/ggml-org/whisper.cpp/b4938/LICENSE)
+and [pinned model card](https://huggingface.co/ggerganov/whisper.cpp/raw/5359861c739e955e79d9a303bcbc70fb988958b1/README.md)
+declare MIT. The full FFmpeg formula installed a separate whisper.cpp 1.9.5_2
+binary transitively in the local development environment; it is not the pinned
+Windows runtime, is not configured in OpenScene and has no model here. Actual
+automatic transcription and live model inference remain unverified. No mobile
+development-client screen or Electron GUI flow was exercised by this harness.
