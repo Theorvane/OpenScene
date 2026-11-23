@@ -124,13 +124,17 @@ describe('evidence-grounded shorts selection', () => {
     const received = new Promise<void>(resolve => { accepted = resolve; });
     const disconnected = new Promise<void>(resolve => { closed = resolve; });
     const sockets = new Set<import('node:net').Socket>();
+    const socketClosures: Promise<void>[] = [];
     const server = createServer(async (request, response) => {
       for await (const _chunk of request) { /* Consume body; deliberately never provide response content. */ }
       response.once('close', closed);
       if (mode === 'body-stall') { response.writeHead(200, { 'Content-Type': 'application/x-ndjson' }); response.flushHeaders(); }
       accepted();
     });
-    server.on('connection', socket => { sockets.add(socket); socket.once('close', () => sockets.delete(socket)); });
+    server.on('connection', socket => {
+      sockets.add(socket);
+      socketClosures.push(new Promise<void>(resolve => socket.once('close', () => { sockets.delete(socket); resolve(); })));
+    });
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
     try {
       const address = server.address();
@@ -149,6 +153,7 @@ describe('evidence-grounded shorts selection', () => {
       expect(Date.now() - started).toBeLessThan(1500);
       // Closing the server must complete without force-destroying active requests.
       await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+      await Promise.all(socketClosures);
       expect(sockets.size).toBe(0);
     } finally { server.closeAllConnections(); server.close(); }
   }, 5000);
