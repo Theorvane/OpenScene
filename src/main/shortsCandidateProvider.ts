@@ -11,8 +11,11 @@ export function createShortsCandidateProvider(model: AgentChatModelHandle): Shor
       new HumanMessage(JSON.stringify({ ...input, requestedCount: input.requestedCount ?? 4, minDurationMs: input.minDurationMs ?? 15000, maxDurationMs: input.maxDurationMs ?? 60000 }))
     ], { signal });
     signal.throwIfAborted();
-    if (typeof response.content !== 'string') throw new Error('Shorts provider returned non-text content.');
-    try { return JSON.parse(response.content) as unknown; }
+    const content = typeof response.content === 'string' ? response.content :
+      response.content.every(block => typeof block === 'object' && block.type === 'text' && typeof block.text === 'string')
+        ? response.content.map(block => typeof block === 'object' ? block.text : '').join('') : null;
+    if (content === null) throw new Error('Shorts provider returned non-text content.');
+    try { return JSON.parse(content) as unknown; }
     catch { throw new Error('Shorts provider returned invalid JSON.'); }
   };
 }

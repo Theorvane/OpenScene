@@ -80,7 +80,7 @@ export async function selectShortsCandidates(
     if (!proposal.context.completeThought || duration < min || duration > max) { warnings.push('Omitted a candidate with incomplete context or unsupported duration.'); continue; }
     // Include all intervening evidence in the fingerprint; different IDs for a repeated spoken passage still deduplicate.
     const span = [...evidence.values()].filter(item => item.kind === first.kind && item.index >= first.index && item.index <= last.index);
-    const signature = span.map(item => item.content).join(' ').normalize('NFKC').toLocaleLowerCase().replace(/[\p{P}\p{Z}\s]/gu, '');
+    const signature = span.map(item => item.content).join(' ').normalize('NFKC').toLowerCase().replace(/[\p{P}\p{Z}\s]/gu, '');
     const duplicate = signatures.has(signature) || candidates.some(candidate => {
       const overlap = Math.max(0, Math.min(candidate.endMs, last.endMs) - Math.max(candidate.startMs, first.startMs));
       return overlap / Math.min(candidate.endMs - candidate.startMs, duration) > 0.5;
