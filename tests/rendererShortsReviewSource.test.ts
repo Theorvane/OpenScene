@@ -95,5 +95,8 @@ describe('renderer shorts review UI source & CUA contract', () => {
     expect(workspaceSource).toContain('role="option"');
     expect(workspaceSource).toContain('SHORTS_FIT_LABEL');
     expect(editorPanelSource).toContain('얼굴추적 미포함');
+    expect(editorPanelSource).toContain('data-dirty=');
+    expect(editorPanelSource).toContain('data-saving=');
+    expect(editorPanelSource).toContain('step={1}');
   });
 });

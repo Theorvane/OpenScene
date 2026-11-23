@@ -112,10 +112,16 @@ export function ShortsReviewWorkspace({
   } | null>(null);
 
   const [resultProjectsById, setResultProjectsById] = useState<Readonly<Record<string, LocalProjectSnapshot>>>({});
+  const resultProjectsRef = useRef<Readonly<Record<string, LocalProjectSnapshot>>>({});
+  const lastReloadTokenRef = useRef<number>(returnReloadToken);
   const [loadingResultIds, setLoadingResultIds] = useState<ReadonlySet<string>>(() => new Set());
   const [dirtyResultIds, setDirtyResultIds] = useState<ReadonlySet<string>>(() => new Set());
   const [savingResultId, setSavingResultId] = useState<string | null>(null);
   const [resultStatusById, setResultStatusById] = useState<Readonly<Record<string, string>>>({});
+
+  useEffect(() => {
+    resultProjectsRef.current = resultProjectsById;
+  }, [resultProjectsById]);
 
   const [exportJobsById, setExportJobsById] = useState<Readonly<Record<string, LocalExportJob>>>({});
   const [unavailableExportJobIds, setUnavailableExportJobIds] = useState<ReadonlySet<string>>(() => new Set());
@@ -344,12 +350,16 @@ export function ShortsReviewWorkspace({
   }, [pollableExportJobIds]);
 
   const loadResultProject = useCallback(async (resultProjectId: string, force = false): Promise<void> => {
-    if (!force && resultProjectsById[resultProjectId] !== undefined) return;
+    if (!force && resultProjectsRef.current[resultProjectId] !== undefined) return;
     setLoadingResultIds((current) => new Set(current).add(resultProjectId));
     try {
       const response = await window.videoTool.openProject({ projectId: resultProjectId });
       if (response.ok) {
-        setResultProjectsById((current) => ({ ...current, [resultProjectId]: response.value }));
+        setResultProjectsById((current) => {
+          const next = { ...current, [resultProjectId]: response.value };
+          resultProjectsRef.current = next;
+          return next;
+        });
         setDirtyResultIds((current) => {
           if (!current.has(resultProjectId)) return current;
           const next = new Set(current);
@@ -366,20 +376,25 @@ export function ShortsReviewWorkspace({
         return next;
       });
     }
-  }, [resultProjectsById]);
+  }, []);
 
   useEffect(() => {
     if (activeResultProjectId === undefined) return;
-    void loadResultProject(activeResultProjectId, returnReloadToken > 0);
+    const force = returnReloadToken > lastReloadTokenRef.current;
+    if (force) lastReloadTokenRef.current = returnReloadToken;
+    void loadResultProject(activeResultProjectId, force);
   }, [activeResultProjectId, loadResultProject, returnReloadToken]);
 
   const updateInlineTimeline = useCallback(
-    (resultProjectId: string, timeline: TimelineDocument): void => {
-      setResultProjectsById((current) => {
-        const existing = current[resultProjectId];
-        if (existing === undefined) return current;
-        return { ...current, [resultProjectId]: { ...existing, timeline } };
-      });
+    (resultProjectId: string, updater: (timeline: TimelineDocument) => TimelineDocument | null): void => {
+      const existing = resultProjectsRef.current[resultProjectId];
+      if (existing === undefined) return;
+      const nextTimeline = updater(existing.timeline);
+      if (nextTimeline === null) return;
+      const updatedSnapshot: LocalProjectSnapshot = { ...existing, timeline: nextTimeline };
+      const nextMap = { ...resultProjectsRef.current, [resultProjectId]: updatedSnapshot };
+      resultProjectsRef.current = nextMap;
+      setResultProjectsById(nextMap);
       setDirtyResultIds((current) => new Set(current).add(resultProjectId));
       setResultStatusById((current) => {
         if (current[resultProjectId] === undefined) return current;
@@ -393,7 +408,7 @@ export function ShortsReviewWorkspace({
 
   const saveResultProject = useCallback(
     async (resultProjectId: string): Promise<boolean> => {
-      const snapshot = resultProjectsById[resultProjectId];
+      const snapshot = resultProjectsRef.current[resultProjectId];
       if (snapshot === undefined) return true;
       setSavingResultId(resultProjectId);
       try {
@@ -405,7 +420,11 @@ export function ShortsReviewWorkspace({
           setResultStatusById((current) => ({ ...current, [resultProjectId]: errorMessage(response.error) }));
           return false;
         }
-        setResultProjectsById((current) => ({ ...current, [resultProjectId]: response.value }));
+        setResultProjectsById((current) => {
+          const next = { ...current, [resultProjectId]: response.value };
+          resultProjectsRef.current = next;
+          return next;
+        });
         setDirtyResultIds((current) => {
           const next = new Set(current);
           next.delete(resultProjectId);
@@ -417,7 +436,7 @@ export function ShortsReviewWorkspace({
         setSavingResultId((current) => (current === resultProjectId ? null : current));
       }
     },
-    [resultProjectsById]
+    []
   );
 
   const handleStartShorts = async (): Promise<void> => {
@@ -598,13 +617,13 @@ export function ShortsReviewWorkspace({
 
   const handlePreviewTransformUpdate = useCallback(
     (partial: Partial<Pick<ClipEffects, 'positionX' | 'positionY' | 'scale'>>): void => {
-      if (activeResultProjectId === undefined || activeResultProject === null) return;
-      const clip = getPrimaryShortsClip(activeResultProject.timeline);
-      if (clip === null) return;
-      const next = updateShortsClipTransform(activeResultProject.timeline, clip.id, partial);
-      if (next !== null) updateInlineTimeline(activeResultProjectId, next);
+      if (activeResultProjectId === undefined) return;
+      updateInlineTimeline(activeResultProjectId, (timeline) => {
+        const clip = getPrimaryShortsClip(timeline);
+        return clip === null ? null : updateShortsClipTransform(timeline, clip.id, partial);
+      });
     },
-    [activeResultProject, activeResultProjectId, updateInlineTimeline]
+    [activeResultProjectId, updateInlineTimeline]
   );
 
   return (
@@ -1002,8 +1021,8 @@ export function ShortsReviewWorkspace({
                 isSavingResult={activeResultProjectId !== undefined && savingResultId === activeResultProjectId}
                 isDirty={activeResultProjectId !== undefined && dirtyResultIds.has(activeResultProjectId)}
                 statusMessage={activeResultProjectId === undefined ? null : resultStatusById[activeResultProjectId] ?? null}
-                onChangeTimeline={(timeline) => {
-                  if (activeResultProjectId !== undefined) updateInlineTimeline(activeResultProjectId, timeline);
+                onChangeTimeline={(updater) => {
+                  if (activeResultProjectId !== undefined) updateInlineTimeline(activeResultProjectId, updater);
                 }}
                 onSaveTimeline={() => {
                   if (activeResultProjectId !== undefined) void saveResultProject(activeResultProjectId);

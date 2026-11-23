@@ -37,7 +37,7 @@ type ShortsResultEditorProps = {
   readonly isSavingResult: boolean;
   readonly isDirty: boolean;
   readonly statusMessage: string | null;
-  readonly onChangeTimeline: (timeline: TimelineDocument) => void;
+  readonly onChangeTimeline: (updater: (timeline: TimelineDocument) => TimelineDocument | null) => void;
   readonly onSaveTimeline: () => void;
   readonly onOpenInTimelineEditor: () => void;
 };
@@ -128,18 +128,18 @@ export function ShortsResultEditor({
 
   const applyRange = (sourceStartMs: number, sourceEndMs: number): void => {
     if (clip === null) return;
-    const next = updateShortsClipSourceRange(resultProject.timeline, {
-      clipId: clip.id,
-      sourceStartMs,
-      sourceEndMs
-    });
-    if (next !== null) onChangeTimeline(next);
+    onChangeTimeline((current) =>
+      updateShortsClipSourceRange(current, {
+        clipId: clip.id,
+        sourceStartMs,
+        sourceEndMs
+      })
+    );
   };
 
   const applyTransform = (partial: Partial<Pick<ClipEffects, 'positionX' | 'positionY' | 'scale'>>): void => {
     if (clip === null) return;
-    const next = updateShortsClipTransform(resultProject.timeline, clip.id, partial);
-    if (next !== null) onChangeTimeline(next);
+    onChangeTimeline((current) => updateShortsClipTransform(current, clip.id, partial));
   };
 
   return (
@@ -153,6 +153,9 @@ export function ShortsResultEditor({
           <Button
             variant="primary"
             data-testid="shorts-save-result-btn"
+            data-dirty={isDirty ? 'true' : 'false'}
+            data-saving={isSavingResult ? 'true' : 'false'}
+            aria-busy={isSavingResult}
             disabled={!isDirty || isSavingResult}
             onClick={onSaveTimeline}
           >
@@ -326,7 +329,7 @@ export function ShortsResultEditor({
               aria-label="9:16 crop manual scale"
               min={10}
               max={CLIP_EFFECT_RANGES.scale.max * 100}
-              step={5}
+              step={1}
               value={Math.round(effects.scale * 100)}
               onChange={(event) => applyTransform({ scale: Number(event.currentTarget.value) / 100 })}
             />
@@ -369,13 +372,15 @@ export function ShortsResultEditor({
             type="button"
             data-testid="shorts-subtitle-add-btn"
             onClick={() => {
-              const lastEnd = titles.reduce((max, item) => Math.max(max, item.timelineEndMs), 0);
-              const next = addShortsTitle(resultProject.timeline, {
-                id: `shorts-caption-${Date.now()}-${titles.length + 1}`,
-                atMs: lastEnd,
-                text: '새 자막'
+              onChangeTimeline((current) => {
+                const currentTitles = current.titles ?? [];
+                const lastEnd = currentTitles.reduce((max, item) => Math.max(max, item.timelineEndMs), 0);
+                return addShortsTitle(current, {
+                  id: `shorts-caption-${Date.now()}-${currentTitles.length + 1}`,
+                  atMs: lastEnd,
+                  text: '새 자막'
+                });
               });
-              onChangeTimeline(next);
             }}
           >
             + 자막 추가
@@ -392,7 +397,7 @@ export function ShortsResultEditor({
               onChange={(event) => {
                 const presetId = event.currentTarget.value as CaptionPresetId | '';
                 if (presetId === '') return;
-                onChangeTimeline(applyPresetToShortsTitles(resultProject.timeline, presetId));
+                onChangeTimeline((current) => applyPresetToShortsTitles(current, presetId));
               }}
             >
               <option value="" disabled>프리셋 선택…</option>
@@ -414,8 +419,7 @@ export function ShortsResultEditor({
                       label={`Caption ${title.id} start in seconds`}
                       valueMs={title.timelineStartMs}
                       onCommit={(ms) => {
-                        const next = updateShortsTitle(resultProject.timeline, title.id, { timelineStartMs: ms });
-                        if (next !== null) onChangeTimeline(next);
+                        onChangeTimeline((current) => updateShortsTitle(current, title.id, { timelineStartMs: ms }));
                       }}
                     />
                   </span>
@@ -425,8 +429,7 @@ export function ShortsResultEditor({
                       label={`Caption ${title.id} end in seconds`}
                       valueMs={title.timelineEndMs}
                       onCommit={(ms) => {
-                        const next = updateShortsTitle(resultProject.timeline, title.id, { timelineEndMs: ms });
-                        if (next !== null) onChangeTimeline(next);
+                        onChangeTimeline((current) => updateShortsTitle(current, title.id, { timelineEndMs: ms }));
                       }}
                     />
                   </span>
@@ -435,8 +438,7 @@ export function ShortsResultEditor({
                     aria-label={`Delete caption ${title.id}`}
                     data-testid={`shorts-subtitle-delete-${title.id}`}
                     onClick={() => {
-                      const next = removeShortsTitle(resultProject.timeline, title.id);
-                      if (next !== null) onChangeTimeline(next);
+                      onChangeTimeline((current) => removeShortsTitle(current, title.id));
                     }}
                   >
                     삭제
@@ -447,8 +449,8 @@ export function ShortsResultEditor({
                   data-testid={`shorts-subtitle-text-${title.id}`}
                   value={title.text}
                   onChange={(event) => {
-                    const next = updateShortsTitle(resultProject.timeline, title.id, { text: event.currentTarget.value });
-                    if (next !== null) onChangeTimeline(next);
+                    const nextText = event.currentTarget.value;
+                    onChangeTimeline((current) => updateShortsTitle(current, title.id, { text: nextText }));
                   }}
                 />
               </div>

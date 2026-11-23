@@ -244,6 +244,14 @@ describe('shortsReviewState pure logic', () => {
     expect(computeContainScale(1920, 1080)).toBeCloseTo(1080 / 1920, 6);
     expect(computeContainScale(320, 180)).toBe(2);
     expect(isManualTransformModified(clip!.effects, 1920, 1080)).toBe(false);
+    // Resetting via updateShortsClipTransform preserves 4-decimal 0.5625 precision without drifting from Contain.
+    const resetBack = updateShortsClipTransform(trimmed!, clip!.id, {
+      positionX: 0,
+      positionY: 0,
+      scale: computeContainScale(1920, 1080)
+    });
+    expect(getPrimaryShortsClip(resetBack!)?.effects.scale).toBe(0.5625);
+    expect(isManualTransformModified(getPrimaryShortsClip(resetBack!)?.effects, 1920, 1080)).toBe(false);
 
     // Manual 9:16 transform via pointer drag & keyboard contract.
     const dragDelta = pointerDeltaToOutputOffset({

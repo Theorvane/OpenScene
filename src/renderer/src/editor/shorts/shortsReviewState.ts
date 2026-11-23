@@ -462,7 +462,7 @@ export function clampShortsTransform(
   }
   if (effects.scale !== undefined && Number.isFinite(effects.scale)) {
     const clamped = Math.max(0.1, Math.min(CLIP_EFFECT_RANGES.scale.max, effects.scale));
-    result.scale = Math.round(clamped * 100) / 100;
+    result.scale = Math.round(clamped * 10_000) / 10_000;
   }
   return result;
 }
