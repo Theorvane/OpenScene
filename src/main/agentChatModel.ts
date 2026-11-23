@@ -189,9 +189,20 @@ export function createAgentChatModel(
 
     if (spec.kind === 'ollama') {
       const baseUrl = (ollamaBaseUrl || DEFAULT_OLLAMA_BASE_URL).replace(/\/$/, '');
-      const client = new ChatOllama({ model: modelId, baseUrl });
-      const model = tools.length === 0 ? client : client.bindTools([...tools]);
-      return { invoke: (messages, options) => model.invoke([...messages], options) };
+      return { invoke: (messages, options) => {
+        options?.signal?.throwIfAborted();
+        // Ollama's SDK does not register its streaming request until response
+        // headers arrive. client.abort() therefore cannot cancel a server that
+        // never sends headers. Bind the invocation signal to fetch itself,
+        // including body consumption, and isolate clients between invocations.
+        const invocationSignal = options?.signal;
+        const client = new ChatOllama({ model: modelId, baseUrl, fetch: (url, init) => {
+          const signals = [invocationSignal, init?.signal].filter((value): value is AbortSignal => value !== undefined && value !== null);
+          return fetch(url, { ...init, ...(signals.length === 0 ? {} : { signal: AbortSignal.any(signals) }) });
+        } });
+        const model = tools.length === 0 ? client : client.bindTools([...tools]);
+        return model.invoke([...messages], options);
+      } };
     }
 
     if (spec.kind === 'chatgpt-codex') {
