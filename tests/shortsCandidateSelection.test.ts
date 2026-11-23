@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
+import { createServer } from 'node:http';
+import { createAgentChatModel, AgentChatModelConfigurationError } from '../src/main/agentChatModel';
 import type { AgentChatModelHandle } from '../src/main/agentChatGraph';
 import { AIMessage } from '@langchain/core/messages';
 import { selectShortsCandidates, type ShortsSelectionInput } from '../src/shared/shortsCandidateSelection';
@@ -90,6 +92,31 @@ describe('evidence-grounded shorts selection', () => {
   it('supports text blocks returned by configured provider clients', async () => {
     const provider = createShortsCandidateProvider({ invoke: async () => new AIMessage({ content: [{ type: 'text', text: JSON.stringify({ candidates: [] }) }] }) });
     expect(await provider(fixture, signal())).toEqual({ candidates: [] });
+  });
+  it('executes the existing Ollama client through local HTTP without binding tools or calling a paid model', async () => {
+    let requestBody: Record<string, unknown> = {};
+    const server = createServer(async (request, response) => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) chunks.push(Buffer.from(chunk));
+      requestBody = JSON.parse(Buffer.concat(chunks).toString()) as Record<string, unknown>;
+      response.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
+      response.end(JSON.stringify({ model: 'fixture-model', created_at: new Date(0).toISOString(), message: { role: 'assistant', content: JSON.stringify({ candidates: [proposal()] }) }, done: true, prompt_eval_count: 1, eval_count: 1 }) + '\n');
+    });
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Missing local fixture address');
+      const model = createAgentChatModel([])({ modelId: 'fixture-model', ollamaBaseUrl: `http://127.0.0.1:${address.port}`, openAiAuthMode: undefined, reasoningEffort: undefined });
+      const result = await selectShortsCandidates(fixture, createShortsCandidateProvider(model), signal());
+      expect(result.candidates[0]?.endMs).toBe(20000);
+      expect(requestBody.tools).toBeUndefined();
+      expect(requestBody.model).toBe('fixture-model');
+      expect(requestBody.messages).toHaveLength(2);
+    } finally { server.closeAllConnections(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); }
+  });
+  it('classifies missing configured credentials as configuration errors', async () => {
+    const model = createAgentChatModel([])({ modelId: 'openai/gpt-5', openAiAuthMode: undefined, ollamaBaseUrl: undefined, reasoningEffort: undefined });
+    await expect(model.invoke([])).rejects.toBeInstanceOf(AgentChatModelConfigurationError);
   });
   it('respects configurable short fixtures without expanding into invented source time', async () => {
     const input = { ...fixture, minDurationMs: 500, maxDurationMs: 1000, transcript: [{ id: 'tiny', startMs: 250, endMs: 1000, text: 'A complete short thought.' }] };

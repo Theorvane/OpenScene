@@ -189,22 +189,25 @@ export function createAgentChatModel(
 
     if (spec.kind === 'ollama') {
       const baseUrl = (ollamaBaseUrl || DEFAULT_OLLAMA_BASE_URL).replace(/\/$/, '');
-      const model = new ChatOllama({ model: modelId, baseUrl }).bindTools([...tools]);
+      const client = new ChatOllama({ model: modelId, baseUrl });
+      const model = tools.length === 0 ? client : client.bindTools([...tools]);
       return { invoke: (messages, options) => model.invoke([...messages], options) };
     }
 
     if (spec.kind === 'chatgpt-codex') {
       return {
         invoke: async (messages, options) => {
+          options?.signal?.throwIfAborted();
           if (chatGptOAuthService === null) {
             throw new AgentChatModelConfigurationError('ChatGPT authentication is unavailable for Edit Agent.');
           }
           const credentials = await chatGptOAuthService.acquireCredentials();
+          options?.signal?.throwIfAborted();
           const { ChatOpenAI } = await import('@langchain/openai');
           const cloudModel = new ChatOpenAI(
             resolveChatGptCodexClientConfig(spec, credentials, randomUUID(), reasoningEffort)
           );
-          const model = cloudModel.bindTools([...tools]);
+          const model = tools.length === 0 ? cloudModel : cloudModel.bindTools([...tools]);
           return model.invoke([...messages], options);
         }
       };
@@ -212,15 +215,17 @@ export function createAgentChatModel(
 
     return {
       invoke: async (messages, options) => {
+        options?.signal?.throwIfAborted();
         const apiKey = (await credentialStore?.getCredentialValue(spec.credentialKey))?.trim();
+        options?.signal?.throwIfAborted();
         if (apiKey === undefined || apiKey.length === 0) {
-          throw new Error(`API key for ${spec.providerLabel} is missing. Connect the provider in Settings first.`);
+          throw new AgentChatModelConfigurationError(`API key for ${spec.providerLabel} is missing. Connect the provider in Settings first.`);
         }
         const cloudModel = await createCloudChatModel(spec, apiKey, reasoningEffort);
-        if (cloudModel.bindTools === undefined) {
+        if (tools.length > 0 && cloudModel.bindTools === undefined) {
           throw new Error(`${spec.providerLabel} client does not support tool calling in this build.`);
         }
-        const model = cloudModel.bindTools([...tools]);
+        const model = tools.length === 0 ? cloudModel : cloudModel.bindTools([...tools]);
         return model.invoke([...messages], options);
       }
     };
