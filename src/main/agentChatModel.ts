@@ -225,7 +225,7 @@ export function createAgentChatModel(
         if (tools.length > 0 && cloudModel.bindTools === undefined) {
           throw new Error(`${spec.providerLabel} client does not support tool calling in this build.`);
         }
-        const model = tools.length === 0 ? cloudModel : cloudModel.bindTools([...tools]);
+        const model = tools.length === 0 ? cloudModel : cloudModel.bindTools!([...tools]);
         return model.invoke([...messages], options);
       }
     };
