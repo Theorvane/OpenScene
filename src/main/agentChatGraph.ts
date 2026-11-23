@@ -146,7 +146,7 @@ function buildWatchFramesMessage(toolName: string, payload: WatchFramesPayload):
 }
 
 export interface AgentChatModelHandle {
-  invoke(messages: BaseMessage[]): Promise<AIMessage>;
+  invoke(messages: BaseMessage[], options?: { signal?: AbortSignal }): Promise<AIMessage>;
 }
 
 export type AgentChatModelFactory = (config: {
