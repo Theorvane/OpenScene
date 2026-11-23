@@ -27,7 +27,7 @@ type Dependencies = {
   measureSource: (projectId: string, assetId: string) => Promise<{ durationMs: number; width: number; height: number }>;
   pollMs?: number;
 };
-type ActiveRun = { controller: AbortController; promise: Promise<void> };
+type ActiveRun = { controller: AbortController; promise: Promise<void>; settling: boolean };
 const busyStages = new Set(['transcribing', 'selecting', 'creating', 'exporting', 'cancelling']);
 
 /** One local source, isolated editable projects, and explicitly separate export runs. */
@@ -86,6 +86,10 @@ export class ShortsService {
         cleanupComplete = error instanceof Error && error.name === 'AbortError';
         if (!controller.signal.aborted) await this.patch(job.id, { stage: 'failed', errorCode: 'storage_failed', failureKind: 'storage', error: 'The local shorts operation could not be completed safely.' });
       } finally {
+        // Work and cleanup are over. A late cancellation cannot rewrite the
+        // final snapshot while its durable publication is in flight.
+        const run = this.active.get(job.id);
+        if (run) run.settling = true;
         const finalJob: ShortsJob = { ...this.jobs.get(job.id)!, ...(controller.signal.aborted ? { stage: 'cancelled' as const } : {}), cleanupComplete, updatedAt: new Date().toISOString() };
         // Persist before atomically publishing cleanup truth and releasing the gate.
         // An observer can then start the next action and reopen the same durable state.
@@ -94,7 +98,7 @@ export class ShortsService {
         this.jobs.set(job.id, finalJob);
       }
     }).catch(() => { this.active.delete(job.id); });
-    this.active.set(job.id, { controller, promise });
+    this.active.set(job.id, { controller, promise, settling: false });
   }
   private delay(): Promise<void> { return new Promise(resolve => setTimeout(resolve, this.deps.pollMs ?? 100)); }
 
@@ -199,7 +203,7 @@ export class ShortsService {
     const job = this.jobs.get(input.jobId);
     if (!job) return fail('JOB_NOT_FOUND', 'The shorts run was not found.');
     const active = this.active.get(job.id);
-    if (!active) return ok({ accepted: false });
+    if (!active || active.settling) return ok({ accepted: false });
     active.controller.abort();
     await this.patch(job.id, { stage: 'cancelling', cleanupComplete: false });
     return ok({ accepted: true });
@@ -308,7 +312,7 @@ export class ShortsService {
     return ok(job);
   }
   async shutdown(): Promise<void> {
-    for (const run of this.active.values()) run.controller.abort();
+    for (const run of this.active.values()) if (!run.settling) run.controller.abort();
     await Promise.all([...this.active.values()].map(run => run.promise));
     await Promise.all([...this.writes.values()]);
   }

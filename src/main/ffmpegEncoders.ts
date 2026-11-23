@@ -1,16 +1,25 @@
 import { spawn } from 'node:child_process';
 
-/** A bounded local capability listing; resolve only after the process has exited. */
-export function inspectFfmpegEncoders(executablePath: string): Promise<string> {
+/** Bounded preparation subprocess; successful spawn settles only after process exit. */
+export function runFfmpegPreparationProbe(executablePath: string, args: readonly string[], timeoutMs = 5000): Promise<{ stdout: string; exitCode: number | null }> {
   return new Promise(resolve => {
-    const child = spawn(executablePath, ['-hide_banner', '-encoders'], { shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+    let child: ReturnType<typeof spawn>;
+    try { child = spawn(executablePath, [...args], { shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }); }
+    catch { resolve({ stdout: '', exitCode: null }); return; }
     let listing = '';
-    const timer = setTimeout(() => child.kill('SIGKILL'), 5000);
-    child.stdout.on('data', (chunk: Buffer) => {
-      if (listing.length + chunk.byteLength > 1024 * 1024) child.kill('SIGKILL');
+    let stopped = false;
+    const stop = () => { stopped = true; child.kill('SIGKILL'); };
+    const timer = setTimeout(stop, timeoutMs);
+    child.stdout?.on('data', (chunk: Buffer) => {
+      if (listing.length + chunk.byteLength > 1024 * 1024) stop();
       else listing += chunk.toString();
     });
-    child.once('error', () => { clearTimeout(timer); resolve(''); });
-    child.once('close', code => { clearTimeout(timer); resolve(code === 0 ? listing : ''); });
+    child.once('error', () => { clearTimeout(timer); resolve({ stdout: '', exitCode: null }); });
+    child.once('close', code => { clearTimeout(timer); resolve({ stdout: stopped ? '' : listing, exitCode: stopped ? null : code }); });
   });
+}
+
+export async function inspectFfmpegEncoders(executablePath: string): Promise<string> {
+  const result = await runFfmpegPreparationProbe(executablePath, ['-hide_banner', '-encoders']);
+  return result.exitCode === 0 ? result.stdout : '';
 }

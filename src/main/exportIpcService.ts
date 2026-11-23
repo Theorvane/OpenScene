@@ -1,5 +1,3 @@
-import { spawn } from 'node:child_process';
-
 import { audioProbeArgs, probeSaysAudible } from '../shared/audibleAssets';
 import { FILTER_LIST_ARGS, escapeFontPath, supportsDrawtext } from '../shared/titleFont';
 import type { ApiResponse } from '../shared/models';
@@ -25,7 +23,7 @@ import { ExportAssetStagingError, removeExportStaging, stageExportAssets, type S
 import { preflightExport, preflightSummary } from '../shared/exportPreflight';
 import { reviewExport, type ExportPromise } from '../shared/exportReview';
 import { measureExportedFile } from './exportMeasurement';
-import { inspectFfmpegEncoders } from './ffmpegEncoders';
+import { inspectFfmpegEncoders, runFfmpegPreparationProbe } from './ffmpegEncoders';
 import { missingFfmpegEncoders } from '../shared/ffmpegExportCapabilities';
 import { discoverFfmpeg, type FfmpegDiscoveryResult } from './ffmpegDiscovery';
 import { startFfmpegExportProcess, type FfmpegExecution, type StartFfmpegExportProcessInput } from './ffmpegExportProcess';
@@ -279,15 +277,10 @@ export class ExportIpcService {
     const audible = new Set<string>();
     await Promise.all(
       [...assetPaths].map(
-        async ([assetId, assetPath]) =>
-          new Promise<void>((resolve) => {
-            const probe = spawn(executablePath, [...audioProbeArgs(assetPath)], { stdio: 'ignore' });
-            probe.on('error', () => resolve());
-            probe.on('close', (code) => {
-              if (probeSaysAudible(code)) audible.add(assetId);
-              resolve();
-            });
-          })
+        async ([assetId, assetPath]) => {
+          const probe = await runFfmpegPreparationProbe(executablePath, audioProbeArgs(assetPath));
+          if (probeSaysAudible(probe.exitCode)) audible.add(assetId);
+        }
       )
     );
     return audible;
@@ -302,15 +295,8 @@ export class ExportIpcService {
    * between a fixable message and a mysterious export.
    */
   private async titleFont(executablePath: string, weight: 'regular' | 'bold' = 'regular', family: TitleFontFamily = 'sans'): Promise<{ readonly path: string; readonly bytes: Uint8Array }> {
-    const filters = await new Promise<string>((resolve) => {
-      let listing = '';
-      const probe = spawn(executablePath, [...FILTER_LIST_ARGS]);
-      probe.stdout?.on('data', (chunk: Buffer) => {
-        listing += chunk.toString();
-      });
-      probe.on('error', () => resolve(''));
-      probe.on('close', () => resolve(listing));
-    });
+    const probe = await runFfmpegPreparationProbe(executablePath, FILTER_LIST_ARGS);
+    const filters = probe.exitCode === 0 ? probe.stdout : '';
     if (!supportsDrawtext(filters)) {
       throw new ExportAssetStagingError(
         'This FFmpeg build lacks the drawtext filter required for titles and captions. Configure VIDEO_TOOL_FFMPEG_PATH to a build with drawtext support.'

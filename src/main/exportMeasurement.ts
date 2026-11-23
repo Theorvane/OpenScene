@@ -32,7 +32,7 @@ export function ffprobeArgs(filePath: string): readonly string[] {
     '-v',
     'error',
     '-show_entries',
-    'stream=codec_type,width,height,avg_frame_rate:format=duration',
+    'stream=codec_type,width,height,avg_frame_rate:stream_side_data=rotation:stream_tags=rotate:format=duration',
     '-of',
     'json',
     filePath
@@ -44,6 +44,8 @@ type ProbeStream = {
   readonly width?: unknown;
   readonly height?: unknown;
   readonly avg_frame_rate?: unknown;
+  readonly tags?: { readonly rotate?: unknown };
+  readonly side_data_list?: readonly { readonly rotation?: unknown }[];
 };
 
 function positiveInteger(value: unknown): number | null {
@@ -91,11 +93,16 @@ export function parseFfprobeOutput(stdout: string): ExportMeasurement | null {
 
   const width = positiveInteger(video.width);
   const height = positiveInteger(video.height);
+  // FFmpeg autorotates input before timeline filters. Measure displayed geometry,
+  // otherwise a portrait recipe can crop a phone clip whose coded axes are swapped.
+  const rotation = Number(video.side_data_list?.find(item => item.rotation !== undefined)?.rotation ?? video.tags?.rotate ?? 0);
+  if (!Number.isFinite(rotation) || rotation % 90 !== 0) return null;
+  const swapped = Math.abs(rotation % 180) === 90;
   const frameRate = frameRateOf(video.avg_frame_rate);
 
   return {
-    widthPx: width ?? 0,
-    heightPx: height ?? 0,
+    widthPx: (swapped ? height : width) ?? 0,
+    heightPx: (swapped ? width : height) ?? 0,
     durationMs: Number.isFinite(durationSeconds) && durationSeconds > 0 ? Math.round(durationSeconds * 1_000) : 0,
     hasSoundTrack,
     ...(frameRate === undefined ? {} : { frameRate })
