@@ -4,3 +4,6 @@
 [submodule "external/ffmpeg-skill"]
 	path = external/ffmpeg-skill
 	url = https://github.com/Theorvane/ffmpeg-skill.git
+[submodule "external/autoclip"]
+	path = external/autoclip
+	url = https://github.com/Theorvane/autoclip.git

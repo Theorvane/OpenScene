@@ -8,6 +8,8 @@ mkdir -p /work/project/external/opencut
 tar -xf /input/.local-runtimes/verification-opencut.tar -C /work/project/external/opencut
 mkdir -p /work/project/external/ffmpeg-skill
 tar -xf /input/.local-runtimes/verification-ffmpeg-skill.tar -C /work/project/external/ffmpeg-skill
+mkdir -p /work/project/external/autoclip
+tar -xf /input/.local-runtimes/verification-autoclip.tar -C /work/project/external/autoclip
 cd /work/project
 node --version > /results/tool-versions.txt
 ffmpeg -version >> /results/tool-versions.txt

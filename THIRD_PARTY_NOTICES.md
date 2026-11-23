@@ -90,3 +90,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+## AutoClip
+
+AutoClip, copyright (c) 2024 AutoClip Team, MIT. Source: https://github.com/zhouxiaoka/autoclip; managed fork https://github.com/Theorvane/autoclip. Pinned source and full license: `external/autoclip/LICENSE`. OpenScene does not automatically execute the upstream runtime.

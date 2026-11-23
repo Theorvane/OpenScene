@@ -11,6 +11,10 @@ $skillCommit = & git -C $repositoryPath rev-parse 'HEAD:external/ffmpeg-skill'
 if ($LASTEXITCODE -ne 0) { throw 'Could not resolve the pinned FFmpeg skill revision.' }
 & git -c core.autocrlf=false -C (Join-Path $repositoryPath 'external/ffmpeg-skill') archive $skillCommit -o (Join-Path $repositoryPath '.local-runtimes/verification-ffmpeg-skill.tar')
 if ($LASTEXITCODE -ne 0) { throw 'Could not snapshot the pinned FFmpeg skill source. Initialize the submodule first.' }
+$autoclipCommit = & git -C $repositoryPath rev-parse 'HEAD:external/autoclip'
+if ($LASTEXITCODE -ne 0) { throw 'Could not resolve the pinned AutoClip revision.' }
+& git -c core.autocrlf=false -C (Join-Path $repositoryPath 'external/autoclip') archive $autoclipCommit -o (Join-Path $repositoryPath '.local-runtimes/verification-autoclip.tar')
+if ($LASTEXITCODE -ne 0) { throw 'Could not snapshot AutoClip. Initialize the submodule first.' }
 if (-not $SkipBuild) {
   & docker build -t openscene-media-analysis:local (Join-Path $PSScriptRoot 'media-analysis')
   if ($LASTEXITCODE -ne 0) { throw 'Could not build the analysis environment.' }

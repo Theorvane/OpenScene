@@ -16,3 +16,5 @@ Current product: Timeline + node Canvas + editing agent over imported media. Use
 - `skills/ffmpeg-skill/SKILL.md`: pinned upstream local FFmpeg editing skill; integration/capability boundaries in `docs/ffmpeg-skill-integration.md`.
 
 The FFmpeg skill adapter points to the pinned `external/ffmpeg-skill` submodule. Initialize it along with OpenCut using `git submodule update --init --recursive`; run its Python tools from that external root, not the adapter directory.
+
+AutoClip: read `skills/autoclip/SKILL.md`; pinned source is `external/autoclip`. The registered desktop preview tool validates source-second highlights before approved edits, without automatically starting the upstream runtime.

@@ -1,3 +1,4 @@
+import { planAutoClipEdit } from '../shared/autoClipPlan';
 import { getMcpServerDefinition, McpResource, McpServer, McpTool } from '@theorvane/type-mcp';
 import { randomUUID } from 'node:crypto';
 import { realpath } from 'node:fs/promises';
@@ -816,6 +817,17 @@ export class OpenVideoMcpServer {
           : { blockId: block.id, ready: false, error: result.error };
       }) };
     } catch (error: unknown) { return { success: false, error: error instanceof Error ? error.message : 'Cannot read workflow.' }; }
+  }
+
+  @McpTool({ description: 'Preview an AutoClip highlight edit from imported media. Read-only: convert source-second start_time/end_time segments to a validated editProject batch on a new track. Does not run AutoClip, call models, download media or save. Inspect and obtain approval before passing returned operations to editProject.',
+    input: z.object({ projectId: z.string().min(1), assetId: z.string().min(1), prefix: z.string().min(1).max(96), segments: z.array(z.object({ start_time: z.number().finite().nonnegative(), end_time: z.number().finite().positive() }).strict()).min(1).max(32) }) })
+  async planAutoClipEdit(params: { projectId: string; assetId: string; prefix: string; segments: { start_time: number; end_time: number }[] }) {
+    if (!this.projectStore) return { success: false, error: 'ProjectStore service is not available.' };
+    try {
+      const project = await this.projectStore.open(params.projectId);
+      if (!project) return { success: false, error: 'Project not found.' };
+      return planAutoClipEdit(project.timeline, project.assets, params);
+    } catch { return { success: false, error: 'Cannot preview the automatic edit.' }; }
   }
 
   @McpTool({ description: 'Apply 1–64 editing operations atomically, then save and refresh the editor. Supports all canvas blocks/templates/connections, clip placement/move/duplicate/trim/split/effects, track mix/order and titles including font/shadow/caption styles. Call getEditingCapabilities for field names and examples. Times are milliseconds. Unknown fields, invalid ports, cycles and invalid timeline edits are refused without partial writes. Requires user approval.',
