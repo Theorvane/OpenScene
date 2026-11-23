@@ -25,6 +25,8 @@ import { ExportAssetStagingError, removeExportStaging, stageExportAssets, type S
 import { preflightExport, preflightSummary } from '../shared/exportPreflight';
 import { reviewExport, type ExportPromise } from '../shared/exportReview';
 import { measureExportedFile } from './exportMeasurement';
+import { inspectFfmpegEncoders } from './ffmpegEncoders';
+import { missingFfmpegEncoders } from '../shared/ffmpegExportCapabilities';
 import { discoverFfmpeg, type FfmpegDiscoveryResult } from './ffmpegDiscovery';
 import { startFfmpegExportProcess, type FfmpegExecution, type StartFfmpegExportProcessInput } from './ffmpegExportProcess';
 import { compileFfmpegTimeline, FfmpegTimelineError } from './ffmpegTimelineCompiler';
@@ -53,6 +55,7 @@ type ExportIpcServiceDependencies = {
   readonly revealPath?: (path: string) => void;
   readonly now?: () => Date;
   readonly inspectContainerMetadata?: (input: InspectContainerMetadataInput) => Promise<MetadataTagInventory>;
+  readonly inspectEncoders?: (executablePath: string) => Promise<string>;
 };
 
 type PreparedExport = {
@@ -310,7 +313,7 @@ export class ExportIpcService {
     });
     if (!supportsDrawtext(filters)) {
       throw new ExportAssetStagingError(
-        'This FFmpeg build cannot draw text — it was compiled without libfreetype, so titles cannot be rendered.'
+        'This FFmpeg build lacks the drawtext filter required for titles and captions. Configure VIDEO_TOOL_FFMPEG_PATH to a build with drawtext support.'
       );
     }
     const file = await readTitleFontFile({ family, weight });
@@ -384,6 +387,14 @@ export class ExportIpcService {
         frameRate,
         metadataPrivacyMode
       });
+      // A custom execution adapter supplies its own runtime. Production probes only
+      // the encoders this exact compiled command needs (AAC is absent on silent cuts).
+      if (this.dependencies.startProcess === undefined || this.dependencies.inspectEncoders !== undefined) {
+        const encoders = await (this.dependencies.inspectEncoders ?? inspectFfmpegEncoders)(input.executablePath);
+        assertPreparing();
+        const missing = missingFfmpegEncoders(compiled.args, encoders);
+        if (missing.length) throw new ExportAssetStagingError(`This FFmpeg build lacks required encoders: ${missing.join(', ')}. Configure VIDEO_TOOL_FFMPEG_PATH to a compatible build.`);
+      }
       return {
         executablePath: input.executablePath,
         outputPath,

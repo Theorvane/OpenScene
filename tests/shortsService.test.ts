@@ -156,4 +156,41 @@ describe('local multi-shorts service', () => {
     expect(await settled(s.service, exportRun.id)).toMatchObject({ stage: 'cancelled', cleanupComplete: true });
     expect(await s.projects.open(created.items[0]!.resultProjectId!)).not.toBeNull();
   });
+  it('refuses changed media after review and cleans copied results', async () => {
+    const s = await setup();
+    const job = await settled(s.service, value(await s.service.start(s.request)).id);
+    const source = await s.assets.getPlaybackSource(s.project.id, s.asset.id);
+    await writeFile(source!.filePath, 'changed source after evidence review');
+    value(await s.service.materialize({ jobId: job.id, candidateIds: [job.selection!.candidates[0]!.id] }));
+    expect(await settled(s.service, job.id)).toMatchObject({ stage: 'failed', items: [{ status: 'failed' }] });
+    expect(await s.projects.list()).toHaveLength(1);
+  });
+  it('cancels during a copy, waits for that copy, and removes only the incomplete project', async () => {
+    const s = await setup();
+    const job = await settled(s.service, value(await s.service.start(s.request)).id);
+    let release!: () => void;
+    let copying = false;
+    const actual = s.assets.import.bind(s.assets);
+    vi.spyOn(s.assets, 'import').mockImplementation(async input => {
+      copying = true;
+      await new Promise<void>(resolve => { release = resolve; });
+      return actual(input);
+    });
+    value(await s.service.materialize({ jobId: job.id, candidateIds: job.selection!.candidates.map(item => item.id) }));
+    while (!copying) await new Promise(resolve => setTimeout(resolve, 1));
+    value(await s.service.cancel({ jobId: job.id }));
+    expect(value(await s.service.get({ jobId: job.id }))).toMatchObject({ stage: 'cancelling', cleanupComplete: false });
+    release();
+    const cancelled = await settled(s.service, job.id);
+    expect(cancelled.items.map(item => item.status)).toEqual(['cancelled', 'cancelled']);
+    expect(await s.projects.list()).toHaveLength(1);
+  });
+  it('loads interrupted runs without resuming or claiming crash cleanup', async () => {
+    const s = await setup();
+    const job = await settled(s.service, value(await s.service.start(s.request)).id);
+    await writeFile(join(s.root, 'shorts-jobs', `${job.id}.json`), JSON.stringify({ ...job, stage: 'exporting', cleanupComplete: false }));
+    const restarted = new ShortsService(s.dependencies);
+    expect(value(await restarted.get({ jobId: job.id }))).toMatchObject({ stage: 'failed', errorCode: 'interrupted', cleanupComplete: false });
+    expect(s.exports.startExportJob).not.toHaveBeenCalled();
+  });
 });

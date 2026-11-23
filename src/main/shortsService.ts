@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ApiResponse } from '../shared/models';
 import type { SubtitleCue } from '../shared/narrationPlan';
@@ -14,6 +14,7 @@ import type { AssetLibraryStore } from './assetLibraryStore';
 import type { ExportIpcService } from './exportIpcService';
 import type { TranscriptionService } from './transcriptionService';
 import { fail, ok } from './ipcResponses';
+import { hashExportOutput } from './exportOutputFiles';
 
 type Dependencies = {
   projects: ProjectStore;
@@ -52,14 +53,16 @@ export class ShortsService {
     })();
     return this.loaded;
   }
-  private async save(job: ShortsJob): Promise<void> {
-    this.jobs.set(job.id, job);
+  private async save(job: ShortsJob, publish = true): Promise<void> {
+    if (publish) this.jobs.set(job.id, job);
     const prior = this.writes.get(job.id) ?? Promise.resolve();
     const next = prior.catch(() => undefined).then(async () => {
       const target = join(this.deps.jobsDirectory, `${job.id}.json`);
       const temporary = `${target}.tmp`;
-      await writeFile(temporary, JSON.stringify(job), { mode: 0o600 });
-      await rename(temporary, target);
+      try {
+        await writeFile(temporary, JSON.stringify(job), { mode: 0o600 });
+        await rename(temporary, target);
+      } finally { await rm(temporary, { force: true }); }
     });
     this.writes.set(job.id, next);
     await next;
@@ -83,9 +86,12 @@ export class ShortsService {
         cleanupComplete = error instanceof Error && error.name === 'AbortError';
         if (!controller.signal.aborted) await this.patch(job.id, { stage: 'failed', errorCode: 'storage_failed', failureKind: 'storage', error: 'The local shorts operation could not be completed safely.' });
       } finally {
-        if (controller.signal.aborted) await this.patch(job.id, { stage: 'cancelled', cleanupComplete });
-        else await this.patch(job.id, { cleanupComplete });
+        const finalJob: ShortsJob = { ...this.jobs.get(job.id)!, ...(controller.signal.aborted ? { stage: 'cancelled' as const } : {}), cleanupComplete, updatedAt: new Date().toISOString() };
+        // Persist before atomically publishing cleanup truth and releasing the gate.
+        // An observer can then start the next action and reopen the same durable state.
+        await this.save(finalJob, false);
         this.active.delete(job.id);
+        this.jobs.set(job.id, finalJob);
       }
     }).catch(() => { this.active.delete(job.id); });
     this.active.set(job.id, { controller, promise });
@@ -107,9 +113,14 @@ export class ShortsService {
   private async select(id: string, input: ShortsStartInput, asset: MediaAsset, existing: readonly SubtitleCue[] | undefined, signal: AbortSignal): Promise<void> {
     let transcriptionId: string | undefined;
     try {
+      const opened = await this.deps.assets.openPlaybackSource(input.projectId, asset.id);
+      if (!opened) throw new Error('Source unavailable.');
+      let sourceSha256: string;
+      try { sourceSha256 = (await hashExportOutput(opened.filePath)).sha256; }
+      finally { await opened.file.close(); }
       const measured = await this.deps.measureSource(input.projectId, asset.id);
       signal.throwIfAborted();
-      if (!Number.isSafeInteger(measured.durationMs) || measured.durationMs <= 0 || measured.width <= 0 || measured.height <= 0) throw new Error('Source measurement unavailable.');
+      if (!Number.isSafeInteger(measured.durationMs) || measured.durationMs <= 0 || !Number.isSafeInteger(measured.width) || !Number.isSafeInteger(measured.height) || measured.width <= 0 || measured.height <= 0) throw new Error('Source measurement unavailable.');
       let cues = existing;
       if (!cues?.length) {
         const runtime = await this.deps.transcription.runtimeStatus();
@@ -154,8 +165,8 @@ export class ShortsService {
             ...(input.maxDurationMs === undefined ? {} : { maxDurationMs: input.maxDurationMs }) }, tracked, signal);
         } finally { await providerWork?.catch(() => undefined); }
         signal.throwIfAborted();
-        const recipes: ShortsRecipe[] = selection.candidates.map(candidate => ({ version: 1, sourceProjectId: input.projectId, sourceAssetId: asset.id, sourceDurationMs: measured.durationMs,
-          candidate, evidenceSnapshot: cues!, output: { width: 1080, height: 1920, frameRate: 30, fit: 'contain' }, createdAt: new Date().toISOString() }));
+        const recipes: ShortsRecipe[] = selection.candidates.map(candidate => ({ version: 1, sourceProjectId: input.projectId, sourceAssetId: asset.id, sourceDurationMs: measured.durationMs, sourceSha256, sourceDimensions: { width: measured.width, height: measured.height },
+          candidate, evidenceSnapshot: cues!.filter(cue => cue.startMs < candidate.endMs && cue.endMs > candidate.startMs), output: { width: 1080, height: 1920, frameRate: 30, fit: 'contain' }, createdAt: new Date().toISOString() }));
         await this.patch(id, { stage: 'review', selection, recipes });
       } catch (error) {
         signal.throwIfAborted();
@@ -216,8 +227,13 @@ export class ShortsService {
             const project = await this.deps.projects.create({ name: `Short ${candidateId}` });
             resultProjectId = project.id;
             const imported = await this.deps.assets.import({ projectId: project.id, sourcePath: source.filePath, displayName: sourceAsset.displayName, kind: 'video', mimeType: sourceAsset.mimeType });
+            const copied = await this.deps.assets.openPlaybackSource(project.id, imported.id);
+            if (!copied) throw new Error('Copy unavailable.');
+            try {
+              if ((await hashExportOutput(copied.filePath)).sha256 !== recipe.sourceSha256) throw new Error('Source changed since selection; select again.');
+            } finally { await copied.file.close(); }
             signal.throwIfAborted();
-            const asset = await this.deps.assets.updateMetadata({ projectId: project.id, assetId: imported.id, ...sourceAsset.metadata, durationMs: recipe.sourceDurationMs });
+            const asset = await this.deps.assets.updateMetadata({ projectId: project.id, assetId: imported.id, ...recipe.sourceDimensions, durationMs: recipe.sourceDurationMs });
             await this.deps.projects.saveTimeline(project.id, buildShortsTimeline(asset, recipe));
             signal.throwIfAborted();
             await this.item(job.id, candidateId, { status: 'ready', resultProjectId: project.id });
@@ -259,7 +275,10 @@ export class ShortsService {
         let exportId: string | undefined;
         try {
           const response = await this.deps.exports.startExportJob({ projectId: item.resultProjectId!, width: 1080, height: 1920, frameRate: 30 });
-          if (!response.ok) throw new Error('Export could not start.');
+          if (!response.ok) {
+            await this.item(job.id, item.candidateId, { status: 'failed', error: response.error.message });
+            continue;
+          }
           exportId = response.value.id;
           await this.item(job.id, item.candidateId, { exportJobId: exportId });
           for (;;) {
@@ -291,5 +310,6 @@ export class ShortsService {
   async shutdown(): Promise<void> {
     for (const run of this.active.values()) run.controller.abort();
     await Promise.all([...this.active.values()].map(run => run.promise));
+    await Promise.all([...this.writes.values()]);
   }
 }

@@ -53,6 +53,9 @@ export type ShortsRecipe = {
   readonly sourceProjectId: string;
   readonly sourceAssetId: string;
   readonly sourceDurationMs: number;
+  /** SHA-256 of the imported source at selection; copied media must match before publication. */
+  readonly sourceSha256: string;
+  readonly sourceDimensions: { readonly width: number; readonly height: number };
   readonly candidate: ShortsCandidate;
   readonly evidenceSnapshot: readonly SubtitleCue[];
   readonly output: { readonly width: 1080; readonly height: 1920; readonly frameRate: 30; readonly fit: 'contain' };
