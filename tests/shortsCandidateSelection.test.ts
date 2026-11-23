@@ -87,4 +87,13 @@ describe('evidence-grounded shorts selection', () => {
     const provider = createShortsCandidateProvider({ invoke: async () => new AIMessage('```json {} ```') });
     await expect(provider(fixture, signal())).rejects.toThrow('invalid JSON');
   });
+  it('supports text blocks returned by configured provider clients', async () => {
+    const provider = createShortsCandidateProvider({ invoke: async () => new AIMessage({ content: [{ type: 'text', text: JSON.stringify({ candidates: [] }) }] }) });
+    expect(await provider(fixture, signal())).toEqual({ candidates: [] });
+  });
+  it('respects configurable short fixtures without expanding into invented source time', async () => {
+    const input = { ...fixture, minDurationMs: 500, maxDurationMs: 1000, transcript: [{ id: 'tiny', startMs: 250, endMs: 1000, text: 'A complete short thought.' }] };
+    const result = await selectShortsCandidates(input, async () => ({ candidates: [proposal('tiny', 'tiny')] }), signal());
+    expect(result.candidates.map(c => [c.startMs, c.endMs])).toEqual([[250, 1000]]);
+  });
 });
