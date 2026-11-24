@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
+import type { CuaState, CuaStopResult, CuaSurfaceSnapshot } from '../shared/cua';
 
 import type {
   AgentChatApprovalInput,
@@ -64,6 +65,10 @@ type AssetPlaybackUrl = {
 };
 
 export interface VideoToolApi {
+  cuaGetState(): Promise<ApiResponse<CuaState>>;
+  cuaStop(): Promise<ApiResponse<CuaStopResult>>;
+  cuaReportSurfaceSnapshot(snapshot: CuaSurfaceSnapshot): Promise<ApiResponse<{ accepted: boolean }>>;
+  onCuaStateChanged(listener: (state: CuaState) => void): () => void;
   shortsStart(input: ShortsStartInput): Promise<ApiResponse<ShortsJob>>;
   shortsGet(input: ShortsJobInput): Promise<ApiResponse<ShortsJob>>;
   shortsList(input: ShortsListInput): Promise<ApiResponse<readonly ShortsJob[]>>;
@@ -153,6 +158,14 @@ function parseUpdaterSnapshot(payload: unknown): UpdaterSnapshot | null {
 }
 
 const videoTool: VideoToolApi = {
+  cuaGetState: () => ipcRenderer.invoke(IPC_CHANNELS.cuaGetState) as Promise<ApiResponse<CuaState>>,
+  cuaStop: () => ipcRenderer.invoke(IPC_CHANNELS.cuaStop) as Promise<ApiResponse<CuaStopResult>>,
+  cuaReportSurfaceSnapshot: snapshot => ipcRenderer.invoke(IPC_CHANNELS.cuaReportSurfaceSnapshot, snapshot) as Promise<ApiResponse<{ accepted: boolean }>>,
+  onCuaStateChanged: listener => {
+    const subscription = (_event: IpcRendererEvent, state: CuaState): void => listener(state);
+    ipcRenderer.on(IPC_CHANNELS.cuaStateChanged, subscription);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.cuaStateChanged, subscription);
+  },
   shortsStart: input => ipcRenderer.invoke(IPC_CHANNELS.shortsStart, input) as Promise<ApiResponse<ShortsJob>>,
   shortsGet: input => ipcRenderer.invoke(IPC_CHANNELS.shortsGet, input) as Promise<ApiResponse<ShortsJob>>,
   shortsList: input => ipcRenderer.invoke(IPC_CHANNELS.shortsList, input) as Promise<ApiResponse<readonly ShortsJob[]>>,
