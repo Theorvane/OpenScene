@@ -49,6 +49,8 @@ import { ChatGptCodexAdapter } from './chatGptCodexAdapter';
 import { ChatGptOAuthService } from './chatGptOAuthService';
 import { CredentialStore } from './credentialStore';
 import { createJevService, registerJevCredentialIpc } from './jevCredentialService';
+import { createJevRuntime } from './jevRuntime';
+import { createMainJevObservationHook } from './jevMainObservation';
 import { LlmExecutionAdapter } from './llmAdapter';
 import { LlmPromptRouter } from './llmPromptRouter';
 import { getOpenVideoMcpDefinition, OpenVideoMcpServer } from './openVideoMcpServer';
@@ -478,7 +480,12 @@ async function installIpcHandlers(): Promise<void> {
   });
 
   const agentChatTools = await createAgentChatTools(mcpServerInstance, cuaAgent, cuaSaveAgent);
+  const jevObservationHook = createMainJevObservationHook({
+    runtime: createJevRuntime({ service: jevService }), // No opt-in source: remains default-off.
+    agent: cuaAgent, getDriver: () => cuaTarget?.driver ?? null
+  });
   const agentChatGraphBundle = buildAgentChatGraph({
+    jevObservationHook,
     tools: agentChatTools,
     // Derived from the tools that exist, so a tool added tomorrow asks for
     // approval by default rather than because someone remembered a list.
