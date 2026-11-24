@@ -1,0 +1,69 @@
+{
+  "autoclip": {
+    "fork": "Theorvane/autoclip",
+    "upstream": "zhouxiaoka/autoclip",
+    "refs": {
+      "refs/heads/codex/1.5.9-content-round2": "70faa1072ae14dad33fa72ef2b77dc4be745340b",
+      "refs/heads/codex/dashscope-model-capabilities": "1735d78111a8f40094ca91873fc20e4bceae2b8e",
+      "refs/heads/codex/obs-post-stream": "5af112996e7cdb53e9e9bffe64808c0b5766fbf2",
+      "refs/heads/cursor/159-mac-653f8f54-acceptance-4c60": "34fc4a043aee2d3969309abb4a6148277043b9ff",
+      "refs/heads/cursor/community-model-reports-10fa": "187fc88c1de6859cf7db69445c67dea7dcf40d7c",
+      "refs/heads/docs/internal-acceptance-156": "1d55dadf131f27bccc32064dd17343eca28f7a35",
+      "refs/heads/docs/internal-acceptance-157": "ca1fb45db5bf4b154071a1a733101299af343982",
+      "refs/heads/docs/internal-acceptance-158": "76ea2e19877d22be3de9ea1103e7a079af91fa22",
+      "refs/heads/docs/internal-acceptance-159-b72ee39f": "ad99d3a45312ad42860c5b64bff5ea2e860cb723",
+      "refs/heads/docs/release-acceptance-v1.5.9": "c99531bae72efc27c145a1ca7938f3ec731bb518",
+      "refs/heads/main": "39c856b0277cd22e730002f693ca333da1f625ba",
+      "refs/tags/mcp-v1.5.7": "cc491fe8ed041a0475a64a68a9fc3b5c9b81e862",
+      "refs/tags/mcp-v1.5.7^{}": "3c81aab946a565682bd8af4cc882813c86e81490",
+      "refs/tags/mcp-v1.5.7.post1": "30b623261ac0dd03837a280d78c2d213dd0aec50",
+      "refs/tags/v1.0.0": "ea84004e3f95ac8a86d3675bf1fd0a0c9a4fb8f5",
+      "refs/tags/v1.1.0": "16ea8f10a6875511cee821a22b6a5d15e873359b",
+      "refs/tags/v1.1.0^{}": "ea8245462dc3f089b25f7a733c6f8959e2c7c30c",
+      "refs/tags/v1.2.0": "17100c05252b9a947ea1a857f8d0ea4f3af2317b",
+      "refs/tags/v1.2.1": "1d70524bf95534330d22d57616b69232c3d502ed",
+      "refs/tags/v1.2.1^{}": "a5c20ae575361c340afa9504e0ba7fe7d0d796b5",
+      "refs/tags/v1.3.0": "386cfde6da48c615d2e0fa169724e3fca8a3f871",
+      "refs/tags/v1.3.0^{}": "2a393f88fbec1e5cec380684a69ffb51816ab401",
+      "refs/tags/v1.3.1": "de4dee377e23ebf185c40325b4f82dfc722f66e7",
+      "refs/tags/v1.3.2": "5a53a446171e8eb32dd38a0827492edd9eaa9f5c",
+      "refs/tags/v1.3.2^{}": "af2012a085bfa39888160573db299089315a8aac",
+      "refs/tags/v1.3.3": "743a29bb3a3996b30da488b9b4eed388e996a9e4",
+      "refs/tags/v1.3.4": "d1fe99dcc67934bea8992a1a4dbaa68f458e1156",
+      "refs/tags/v1.3.5": "58a4972850e5b28f6c79916139146fbf15b3e00d",
+      "refs/tags/v1.4.0": "6717e22b04741ed6b81e25b5cb65924c90564191",
+      "refs/tags/v1.4.0^{}": "0241198ca013f5573a1d2f8e3a1d2a407d39cb6c",
+      "refs/tags/v1.5.0": "4b959ecc169afefc1a6aad752f8a171e50d2a378",
+      "refs/tags/v1.5.0^{}": "e940f5aef485409b13950c405fab6a9344376c88",
+      "refs/tags/v1.5.1": "4996b410f3cb08855c928851fc4513e579277f3f",
+      "refs/tags/v1.5.1^{}": "3ab82741d11e98fe1361067b08aec44b634999a2",
+      "refs/tags/v1.5.2": "ea869cd3a5ed6daf4288e791fb383ca3e72535b0",
+      "refs/tags/v1.5.2^{}": "085c098abdea6f0ae2ebb13ce90644a1e63cb496",
+      "refs/tags/v1.5.3": "d6485a35c04c36f3820bfc65734a74d588b36870",
+      "refs/tags/v1.5.3^{}": "5b3ec0b1cf321d967facae470c0e2ebdb92a7b8f",
+      "refs/tags/v1.5.4": "64d81bcdcc011752f99f48065a282a8c20b07728",
+      "refs/tags/v1.5.4^{}": "90edc851b435c4d2bf5bd8fd5a47777183a3c625",
+      "refs/tags/v1.5.5": "b594ef083b816de9f00e0e991e4365a7d6a254a3",
+      "refs/tags/v1.5.5^{}": "e9aba52eda5ff8b91304eb608cdd836801f68ab9",
+      "refs/tags/v1.5.6": "8f90cf21f70448c792fca92d8872c4894712c9f1",
+      "refs/tags/v1.5.6^{}": "80bf1d6c41b97b45aa965d670f6f955299d5899c",
+      "refs/tags/v1.5.7": "30caeeeb62e022518031a4bb7809fc84ff26f673",
+      "refs/tags/v1.5.7^{}": "29583c5373f2a35f4465105e01e7151e88b9d28f",
+      "refs/tags/v1.5.8": "06c91597899b886dd8cceaec3a8d8277084bc0f8",
+      "refs/tags/v1.5.8^{}": "b706c76d231c801884405b663183cb75ae867004",
+      "refs/tags/v1.5.9": "6c5bbd1edfdfa065bf007cab5b0de3cb37097016",
+      "refs/tags/v1.5.9^{}": "b72ee39f10e14a48c8ddabe2d1d27b28237c6e9b"
+    },
+    "shas_not_advertised_upstream": [
+      "39c856b0277cd22e730002f693ca333da1f625ba"
+    ]
+  },
+  "ffmpeg-skill": {
+    "fork": "Theorvane/ffmpeg-skill",
+    "upstream": "kajisho5/ffmpeg-skill",
+    "refs": {
+      "refs/heads/main": "59e9bac150b14aa5fbcfa8fd7f52147f4b7fc9d4"
+    },
+    "shas_not_advertised_upstream": []
+  }
+}

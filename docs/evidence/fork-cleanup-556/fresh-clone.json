@@ -1,0 +1,22 @@
+{
+  "commit": "4ba2b3d64a47fa260b07488a9ae17376d8d4f543",
+  "observed_at": "2026-11-24T00:04:49.887448+00:00",
+  "submodules": {
+    "autoclip": {
+      "url": "https://github.com/zhouxiaoka/autoclip.git",
+      "commit": "39c856b0277cd22e730002f693ca333da1f625ba",
+      "license_sha256": "dac7c1396ebc3de77b3d2d9dafe396f6b6d03752ea9b74a270cb81ceea911ade"
+    },
+    "ffmpeg-skill": {
+      "url": "https://github.com/kajisho5/ffmpeg-skill.git",
+      "commit": "3145261a1c19f399b9520fad7fdac741871e1426",
+      "license_sha256": "7522b29e4d6e90f2a8fab15f07d224b1064c70692a872be9996ac1a88cf474e9"
+    },
+    "opencut": {
+      "url": "https://github.com/Theorvane/OpenCut.git",
+      "commit": "56fd309f648b129db3348728ba90a825cbaebc04",
+      "license_sha256": "05ab02fd3151198e3c0a698a3b7abfa6149c7bec26230f47c80c4dc5b6dc263f"
+    }
+  },
+  "ffmpeg_manifest_files_verified": 85
+}

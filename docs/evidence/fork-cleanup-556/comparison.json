@@ -1,0 +1,21 @@
+{
+  "observed_at": "2026-11-24T00:02:46.022697+00:00",
+  "base_dev": "b8e1f1a27e731d471f40286652441431eeb95fc6",
+  "scope": "read-only Git refs and GitHub asset metadata; secret values were not requested",
+  "repositories": {
+    "autoclip": {
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 14,
+      "base_commit": "dd1f5daa884ec677931cc1ee2e9e9aa01dff9e03",
+      "merge_base_commit": "39c856b0277cd22e730002f693ca333da1f625ba"
+    },
+    "ffmpeg-skill": {
+      "status": "behind",
+      "ahead_by": 0,
+      "behind_by": 38,
+      "base_commit": "bad487c5c4c1d3db52893b27d5ff1278da5274a8",
+      "merge_base_commit": "59e9bac150b14aa5fbcfa8fd7f52147f4b7fc9d4"
+    }
+  }
+}
