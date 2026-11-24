@@ -6,6 +6,9 @@ import { expect, it, vi } from 'vitest';
 import { CuaSaveBridge, cuaSaveDigest } from '../src/main/cuaSaveBridge';
 import { ProjectStore } from '../src/main/projectStore';
 import { CuaSaveApprovalAuthority } from '../src/main/cuaSaveApprovalAuthority';
+import { CuaApprovalAuthority } from '../src/main/cuaAgentOrchestration';
+import { CuaAgentSaveOrchestrator } from '../src/main/cuaAgentSaveOrchestration';
+import { isCuaSaveErrorCode, normalizeCuaSaveError } from '../src/main/cuaSaveErrors';
 import { IPC_CHANNELS } from '../src/shared/ipc';
 import type { CuaSaveReadyRequest, CuaSaveResult, CuaSaveScope, CuaSaveSnapshotRequest } from '../src/shared/cuaSave';
 import type { TimelineDocument } from '../src/shared/timelineTypes';
@@ -134,4 +137,52 @@ it('uses the real Save permit original clock again after async storage preparati
     expect((await f.store.open(f.project.id))!.timeline).toEqual(f.project.timeline);
     expect(() => authority.check(proposal, permit)).toThrow('CUA_ACTION_REPLAYED');
   });
+});
+
+it('rejects arbitrary renderer error codes instead of accepting a CUA_SAVE prefix', async () => {
+  await withBridge(async f => {
+    const proposal = await f.bridge.prepareSaveSnapshot(f.scope);
+    f.options.ready = false;
+    const save = f.bridge.saveApproved(proposal.proposalId, 'permit');
+    await Promise.resolve();
+    const request = f.emitted.find(event => event.channel === IPC_CHANNELS.cuaSaveRequested)!.payload as CuaSaveReadyRequest;
+    for (const errorCode of ['CUA_SAVE_PREFIX_POISON', '/private/user-secret/project.json']) {
+      expect(f.bridge.ackReady({ saveToken: request.saveToken, runId: 'r', projectId: f.project.id, contentRevision: 2,
+        snapshotId: proposal.snapshotId, timelineDigest: proposal.timelineDigest, ready: false, errorCode })).toBe(false);
+    }
+    f.bridge.cancelRun('r');
+    const result = await save;
+    expect(result.status).toBe('not-written');
+    expect(JSON.stringify([result, f.emitted])).not.toMatch(/PREFIX_POISON|user-secret/);
+    expect(f.consumePermit).not.toHaveBeenCalled();
+  });
+});
+
+it('preserves post-publication uncertainty while keeping IO paths out of notifications and actual agent results', async () => {
+  await withBridge(async f => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const warnings = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const authority = new CuaSaveApprovalAuthority({ permitTtlMs: 5000, proposalTtlMs: 120000, maxSavesPerRun: 2, now: () => 0 });
+    const inputAuthority = new CuaApprovalAuthority({ permitTtlMs: 2000, maxActionsPerRun: 2, now: () => 0 });
+    f.checkPermit.mockImplementation((proposal, permit) => authority.check(proposal, permit));
+    f.consumePermit.mockImplementation((proposal, permit) => authority.consume(proposal, permit));
+    const agent = new CuaAgentSaveOrchestrator(authority, { bridge: f.bridge, inputAuthority, assertScope: () => undefined });
+    await agent.prepareApproval('conversation', 'call', f.scope);
+    const original = f.store.saveTimeline.bind(f.store);
+    vi.spyOn(f.store, 'saveTimeline').mockImplementation(async (...args) => {
+      await original(...args);
+      throw new Error('rename/fsync failed: /private/user-secret/.project.json.temp');
+    });
+    const result = await agent.executeApproved('conversation', 'call', f.scope);
+    expect(result.status).toBe('write-outcome-unknown');
+    expect((await f.store.open(f.project.id))!.timeline.tracks[0]!.name).toBe('Unsaved live edit');
+    expect(isCuaSaveErrorCode(result.errorCode)).toBe(true);
+    expect(JSON.stringify([result, agent.getLastResult('conversation'), f.emitted, errors.mock.calls, warnings.mock.calls])).not.toContain('user-secret');
+  });
+});
+
+it('normalizes only exact protocol error values', () => {
+  expect(normalizeCuaSaveError(new Error('CUA_APPROVAL_EXPIRED'))).toBe('CUA_APPROVAL_EXPIRED');
+  expect(normalizeCuaSaveError(new Error('CUA_SAVE_NOT_A_REAL_CODE'))).toBe('CUA_SAVE_FAILED');
+  expect(normalizeCuaSaveError(new Error('CUA_SAVE_FAILED /private/sensitive'))).toBe('CUA_SAVE_FAILED');
 });
