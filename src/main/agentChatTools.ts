@@ -63,6 +63,13 @@ export const CUA_ACTION_TOOL_SCHEMA = z.object({
   ])
 }).strict();
 
+/** Scope only. The backend supplies and pins the actual immutable proposal. */
+export const CUA_SAVE_TOOL_SCHEMA = z.object({
+  projectId: z.string().min(1), sessionId: z.string().min(1), runId: z.string().min(1),
+  windowId: z.number().int().nonnegative(), frameId: z.string().min(1),
+  layoutRevision: z.number().int().nonnegative(), contentRevision: z.number().int().nonnegative()
+}).strict();
+
 export const AGENT_CHAT_CUA_PER_CALL_TOOL_NAMES: ReadonlySet<string> = new Set(['executeCuaAction']);
 
 export function createCuaAgentChatTools(cua: CuaAgentOrchestrator): DynamicStructuredTool[] {

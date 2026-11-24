@@ -107,7 +107,7 @@ export class CuaApprovalAuthority {
     if (permit === undefined) throw new CuaApprovalError('CUA_ACTION_REPLAYED');
     if (permit.digest !== digest(request)) throw new CuaApprovalError('CUA_APPROVAL_MISMATCH');
     const elapsed = this.options.now() - permit.issuedAt;
-    if (elapsed < 0 || elapsed >= this.options.permitTtlMs) throw new CuaApprovalError('CUA_APPROVAL_EXPIRED');
+    if (!Number.isFinite(elapsed) || elapsed < 0 || elapsed >= this.options.permitTtlMs) throw new CuaApprovalError('CUA_APPROVAL_EXPIRED');
     const count = this.actionsByRun.get(request.runId) ?? 0;
     if (count >= this.options.maxActionsPerRun) throw new CuaApprovalError('CUA_BUDGET_EXCEEDED');
   }

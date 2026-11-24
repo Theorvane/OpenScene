@@ -38,3 +38,24 @@ Local evidence: `/tmp/openscene-cua-agent-app-initial4/evidence.json`, `00-actua
 ## Verification boundary
 
 At pushed agent HEAD `58a25f499cdc85233b66a170c133c7043ad55323`, root typecheck, 219 test files / 1,387 tests, build and mobile typecheck passed locally. Its `verify`, `ios-module`, `android-module` and `ios-export` CI checks passed; automatic review was skipped for Draft. Later dependency merges and the E2E script require fresh exact-HEAD verification and independent review. The PR must stay Draft until coordinator authorization; no readiness or merge is implied by these intermediate checks.
+
+## Explicit Save follow-up test plan
+
+The Save DTO and runtime are still being coordinated. These are acceptance cases for the separately approved capability, not claims of implemented or passing tests:
+
+| Boundary | Required observation |
+| --- | --- |
+| Wrong project, session, run, frame, layout or content revision | No preparation with authority; no project publication |
+| Direct tool invocation, denial or pointer permit used as Save permit | No Save dispatch/publication; token pools cannot substitute for one another |
+| Repeated non-consuming permit checks | Original issue time and evidence remain unchanged; final consumption still happens once |
+| Renderer repeats an identity string with different live timeline bytes | Main canonical parsing/hash rejects the changed snapshot |
+| Project changes while Save waits behind an existing mutation | Final publication guard rejects the changed baseline |
+| Cancellation before final publication | No replacement of project.json; temporary preparation files are cleaned |
+| Cancellation races the rename/publication call | Await the real storage promise and readback; distinguish persisted-after-cancel from unknown outcome |
+| Successful disk write followed by late cancel, UI timeout or window loss | Preserve confirmed persisted receipt; never report a failed save or retry the write merely because UI observation failed |
+| Live editor changes while the approved snapshot is being saved | Persisted and current revisions remain distinct; current edits stay dirty and Undo history survives |
+| Wrong, late or replayed ready/commit acknowledgement | Cannot grant authority, change the stored receipt or clear another revision's dirty state |
+| Concurrent duplicate approval/dispatch | At most one publication; return the existing settled receipt or an explicit replay refusal |
+| Fresh explicit observation after input | New content identity is bound before the Save proposal; never rebind an old approved input frame |
+
+“No publication” means the authoritative project file is unchanged. An approved operation may have prepared a temporary file before its final guard; that must not be described as literally zero filesystem writes. Pointer and Save time limits remain separate, main-owned and finite; waiting for UI acknowledgement or a storage queue cannot reset either clock.
