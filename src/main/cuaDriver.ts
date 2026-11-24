@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import type { BrowserWindow, KeyboardInputEvent, MouseInputEvent } from 'electron';
-import { CUA_KEYS, type CuaActionRequest, type CuaFrame, type CuaPoint, type CuaRect, type CuaState, type CuaSurfaceSnapshot } from '../shared/cua';
+import { CUA_KEYS, type CuaActionRequest, type CuaCancelAck, type CuaFrame, type CuaPoint, type CuaRect, type CuaState, type CuaSurfaceSnapshot } from '../shared/cua';
 
 export interface CuaDriverDependencies {
   readonly consumePermit: (request: CuaActionRequest, permit: unknown) => void;
@@ -33,10 +33,11 @@ export class CuaDriver {
   private cancellation: Promise<CuaState> | null = null;
   private injecting = false;
   private cleanupFailureLatched = false;
+  private cancelAck: { token: string; runId: string; resolve: () => void } | null = null;
   private state: CuaState;
 
   constructor(private readonly window: BrowserWindow, private readonly dependencies: CuaDriverDependencies) {
-    this.state = { sessionId: null, runId: null, windowId: window.id, phase: 'idle', cursor: null, dragStart: null, target: null, label: null, error: null, cleanupComplete: true, releaseFailures: [] };
+    this.state = { cancelToken: null, targetGone: false, sessionId: null, runId: null, windowId: window.id, phase: 'idle', cursor: null, dragStart: null, target: null, label: null, error: null, cleanupComplete: true, releaseFailures: [] };
     window.on('blur', () => { void this.cancel('blur'); });
     window.on('resize', () => { void this.cancel('resize'); });
     window.on('closed', () => { void this.cancel('closed'); });
@@ -54,6 +55,10 @@ export class CuaDriver {
     });
   }
   getState(): CuaState { return structuredClone(this.state); }
+  acknowledgeCancel(ack: CuaCancelAck): boolean {
+    if (!ack || this.state.phase !== 'stopping' || !this.cancelAck || ack.runId !== this.cancelAck.runId || ack.cancelToken !== this.cancelAck.token) return false;
+    const pending = this.cancelAck; this.cancelAck = null; pending.resolve(); return true;
+  }
   setExecutionBlocked(blocked: boolean): void { this.executionBlocked = blocked; }
   private publish(patch: Partial<CuaState>): void {
     this.state = { ...this.state, ...patch };
@@ -127,8 +132,32 @@ export class CuaDriver {
     try { this.window.webContents.sendInputEvent(event); }
     finally { this.injecting = false; }
   }
+  private async verifyDom(request: CuaActionRequest, points: readonly CuaPoint[]): Promise<void> {
+    const surface = this.surface;
+    if (!surface?.safeSurface) throw new Error('CUA_UNSAFE_SURFACE');
+    // Fixed read-only program, never caller-supplied JS. Independently verifies
+    // renderer-reported geometry/focus against the bound app document.
+    const expected = JSON.stringify({ viewport: surface.viewport, safe: surface.safeSurface, points, key: request.action.kind === 'key' });
+    const valid: unknown = await this.window.webContents.executeJavaScript(`(() => {
+      const expected = ${expected};
+      const close = (a,b) => Math.abs(a-b) <= 0.5;
+      if (!close(innerWidth,expected.viewport.width) || !close(innerHeight,expected.viewport.height)) return false;
+      if (document.querySelector('[role="dialog"][aria-modal="true"],dialog[open],[role="menu"]')) return false;
+      const safe = [...document.querySelectorAll('[data-cua-safe-surface]')].find(e => e.getAttribute('data-cua-safe-surface') === expected.safe.kind && e.getBoundingClientRect().width > 0);
+      if (!safe || safe.closest('[inert],[hidden],[aria-hidden="true"]')) return false;
+      const r = safe.getBoundingClientRect(), want = expected.safe.rect;
+      if (!['x','y','width','height'].every(k => close(r[k],want[k]))) return false;
+      const forbidden = '[data-cua-protected],[role="dialog"],[role="menu"],.oc-editor-host__header';
+      if (expected.key && (!document.activeElement || !safe.contains(document.activeElement) || document.activeElement.closest(forbidden))) return false;
+      return expected.points.every(p => { const e = document.elementFromPoint(p.x,p.y); return e && safe.contains(e) && !e.closest(forbidden); });
+    })()`);
+    if (valid !== true) throw new Error('CUA_UNSAFE_DOCUMENT');
+  }
   async execute(request: CuaActionRequest, permit: unknown, signal?: AbortSignal): Promise<CuaState> {
-    const points = this.validate(request);
+    let points = this.validate(request);
+    await this.verifyDom(request, points);
+    // DOM reading is asynchronous: repeat all mutable checks immediately before consume.
+    points = this.validate(request);
     if (signal?.aborted) throw new Error('CUA_CANCELLED');
     this.dependencies.consumePermit(request, permit); // No await between validation, one-use consume and first input.
     const generation = this.generation;
@@ -172,15 +201,31 @@ export class CuaDriver {
     // Assign the promise before callbacks so recursive cancellation is idempotent.
     let settle!: (state: CuaState) => void;
     this.cancellation = new Promise(resolve => { settle = resolve; });
-    this.publish({ phase: 'stopping', error: reason, cleanupComplete: false });
+    const needsAck = this.heldMouse !== null && this.state.dragStart !== null && this.state.runId !== null;
+    let ackReceived = false;
+    let resolveAck!: () => void;
+    const ackPromise = new Promise<void>(resolve => { resolveAck = resolve; });
+    const token = needsAck ? randomUUID() : null;
+    if (token && this.state.runId) this.cancelAck = { token, runId: this.state.runId, resolve: () => { ackReceived = true; resolveAck(); } };
     let revokeFailed = false;
     try { this.dependencies.onCancel?.({ sessionId: this.state.sessionId, runId: this.state.runId, reason }); }
     catch { reason += ':authority-revoke-failed'; revokeFailed = true; }
-    const failures = this.release();
-    if (revokeFailed) failures.push('authority-revoke');
-    if (failures.length) this.cleanupFailureLatched = true;
-    this.publish({ phase: this.cleanupFailureLatched ? 'cleanup-failed' : 'stopped', error: reason, cleanupComplete: !this.cleanupFailureLatched, releaseFailures: failures.length ? failures : this.state.releaseFailures, dragStart: null });
-    settle(this.getState());
+    this.publish({ phase: 'stopping', error: reason, cleanupComplete: false, cancelToken: token });
+    void (async () => {
+      if (needsAck) {
+        let timeout!: ReturnType<typeof setTimeout>;
+        await Promise.race([ackPromise, new Promise<void>(resolve => { timeout = setTimeout(resolve, 200); })]);
+        clearTimeout(timeout);
+      }
+      this.cancelAck = null;
+      const failures = this.release(); // Always attempt physical release, even without rollback ack.
+      if (needsAck && !ackReceived) failures.push('renderer-rollback-unconfirmed');
+      if (revokeFailed) failures.push('authority-revoke');
+      if (failures.length) this.cleanupFailureLatched = true;
+      const targetGone = this.window.isDestroyed() || this.window.webContents.isDestroyed();
+      this.publish({ phase: this.cleanupFailureLatched ? 'cleanup-failed' : 'stopped', targetGone, error: reason, cleanupComplete: !this.cleanupFailureLatched, releaseFailures: failures.length ? failures : this.state.releaseFailures, dragStart: null, cancelToken: null });
+      settle(this.getState());
+    })();
     return this.cancellation;
   }
 }

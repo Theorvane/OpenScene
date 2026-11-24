@@ -7,12 +7,15 @@ import { cuaBitmapPointToViewport, type CuaActionRequest, type CuaSurfaceSnapsho
 function fixture() {
   const contents = Object.assign(new EventEmitter(), {
     isDestroyed: vi.fn(() => false), isFocused: vi.fn(() => true), getZoomFactor: () => 1,
+    executeJavaScript: vi.fn(async () => true),
     capturePage: vi.fn(async () => ({ getSize: () => ({ width: 800, height: 600 }), isEmpty: () => false, toDataURL: () => 'data:image/png;base64,test' })),
     sendInputEvent: vi.fn((input: MouseInputEvent) => contents.emit(input.type.startsWith('mouse') ? 'before-mouse-event' : 'before-input-event', {}, input))
   });
   const window = Object.assign(new EventEmitter(), { id: 7, webContents: contents, isDestroyed: vi.fn(() => false), isFocused: vi.fn(() => true) });
   const consumePermit = vi.fn(); const onCancel = vi.fn();
-  const driver = new CuaDriver(window as unknown as BrowserWindow, { consumePermit, onCancel });
+  const driver = new CuaDriver(window as unknown as BrowserWindow, { consumePermit, onCancel, onState: state => {
+    if (state.phase === 'stopping' && state.cancelToken && state.runId) driver.acknowledgeCancel({ runId: state.runId, cancelToken: state.cancelToken });
+  } });
   const surface: CuaSurfaceSnapshot = { executionBlocked: false, blockReason: null, layoutRevision: 1, viewport: { width: 800, height: 600 }, safeSurface: { kind: 'timeline', rect: { x: 0, y: 0, width: 800, height: 600 }, interactive: true }, protectedRects: [], focusedInSafeSurface: true, focusedTestId: null };
   driver.reportSurface(surface); driver.setExecutionBlocked(false);
   const observe = async (): Promise<CuaActionRequest> => {
@@ -56,6 +59,7 @@ describe('self-window CUA safety', () => {
   it('releases a held drag on stop and sends no subsequent moves', async () => {
     const f = fixture(), r = await f.observe();
     const execution = f.driver.execute({ ...r, action: { kind: 'drag', from: { x: 20, y: 20 }, to: { x: 200, y: 20 }, durationMs: 3000 } }, 'p');
+    await Promise.resolve(); await Promise.resolve();
     const rejected = expect(execution).rejects.toThrow('CANCELLED');
     const cancelled = f.driver.cancel('user-stop');
     expect(f.driver.cancel()).toBe(cancelled);
@@ -69,6 +73,7 @@ describe('self-window CUA safety', () => {
   it('cancels real input during drag but ignores synchronous injected events', async () => {
     const f = fixture(), r = await f.observe();
     const execution = f.driver.execute({ ...r, action: { kind: 'drag', from: { x: 20, y: 20 }, to: { x: 200, y: 20 }, durationMs: 100 } }, 'p');
+    await Promise.resolve(); await Promise.resolve();
     expect(f.driver.getState().phase).toBe('acting');
     f.contents.emit('before-input-event', {}, { type: 'keyDown', key: 'Escape' });
     await expect(execution).rejects.toThrow('CANCELLED');
@@ -78,6 +83,7 @@ describe('self-window CUA safety', () => {
   it('does not report clean stop if held input release throws', async () => {
     const f = fixture(), r = await f.observe();
     const execution = f.driver.execute({ ...r, action: { kind: 'drag', from: { x: 20, y: 20 }, to: { x: 200, y: 20 }, durationMs: 100 } }, 'p');
+    await Promise.resolve(); await Promise.resolve();
     f.contents.sendInputEvent.mockImplementation(() => { throw new Error('closed'); });
     const stopped = await f.driver.cancel('closed');
     expect(stopped.phase).toBe('cleanup-failed');
