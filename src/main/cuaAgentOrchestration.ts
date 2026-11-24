@@ -193,6 +193,21 @@ export class CuaAgentOrchestrator {
       && !run.controller.signal.aborted && run.observation !== null;
   }
 
+  /** Main-only readback; never captures, grants authority, or extends freshness. */
+  getObservationBinding(conversationId: string): Readonly<{
+    frame: Omit<CuaFrame, 'pngDataUrl'>; signal: AbortSignal;
+  }> | null {
+    const run = this.byConversation.get(conversationId);
+    if (!run || this.runs.get(run.runId) !== run || run.controller.signal.aborted
+      || run.pending || run.observation || !run.frame
+      || run.frame.sessionId !== this.sessionId || run.frame.runId !== run.runId) return null;
+    try { this.authority.assertRunAllowed(run.runId); } catch { return null; }
+    const { pngDataUrl: _png, ...metadata } = run.frame;
+    const frame = structuredClone(metadata);
+    Object.freeze(frame.viewport); Object.freeze(frame.bitmap); Object.freeze(frame);
+    return Object.freeze({ frame, signal: run.controller.signal });
+  }
+
   async observe(conversationId: string, projectId?: string): Promise<{ success: true; summary: string; frame: CuaFrame }> {
     let run = this.byConversation.get(conversationId);
     if (run?.controller.signal.aborted) throw new CuaApprovalError('CUA_CANCELLED');
