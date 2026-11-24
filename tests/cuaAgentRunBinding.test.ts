@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { CuaAgentOrchestrator, CuaApprovalAuthority, type CuaAgentDriver } from '../src/main/cuaAgentOrchestration';
 import type { CuaActionRequest, CuaFrame, CuaState } from '../src/shared/cua';
+import { AIMessage, type BaseMessage } from '@langchain/core/messages';
+import { buildAgentChatGraph, isToolMessage } from '../src/main/agentChatGraph';
+import { createCuaAgentChatTools, AGENT_CHAT_CUA_PER_CALL_TOOL_NAMES } from '../src/main/agentChatTools';
+import { AgentChatSessionManager } from '../src/main/agentChatSession';
 
 function fixture() {
   let state: CuaState = { sessionId: null, runId: null, windowId: 7, phase: 'idle', cursor: null,
-    dragStart: null, target: null, label: null, error: null, cleanupComplete: true, releaseFailures: [] };
+    dragStart: null, target: null, label: null, error: null, cleanupComplete: true, releaseFailures: [], cancelToken: null, targetGone: false };
   let frameNumber = 0;
   let inputs = 0;
   let cancellations = 0;
@@ -36,6 +40,36 @@ function fixture() {
 }
 
 describe('CUA immutable run binding and dispatch', () => {
+  it('carries PNG evidence to a synthetic model, displays exact approval, then reobserves without transcript base64', async () => {
+    const f = fixture();
+    let step = 0;
+    let seen: BaseMessage[] = [];
+    const bundle = buildAgentChatGraph({ tools: createCuaAgentChatTools(f.orchestrator), cua: f.orchestrator,
+      mutatingToolNames: new Set(['executeCuaAction']), perCallApprovalToolNames: AGENT_CHAT_CUA_PER_CALL_TOOL_NAMES,
+      createModel: () => ({ invoke: async (messages) => {
+        seen = messages;
+        if (step++ === 0) return new AIMessage({ content: '', tool_calls: [{ id: 'observe', name: 'observeEditorWindow', args: {} }] });
+        if (step === 2) {
+          const observation = messages.find((message) => isToolMessage(message) && message.name === 'observeEditorWindow');
+          const metadata = JSON.parse(String(observation!.content).split('\n').at(-1)!) as CuaFrame;
+          return new AIMessage({ content: '', tool_calls: [{ id: 'action', name: 'executeCuaAction', args: { ...f.requestFor(metadata) } }] });
+        }
+        return new AIMessage('Action observed; inspect project timeline next.');
+      } })
+    });
+    const session = new AgentChatSessionManager(bundle, { cancelCua: (id) => f.orchestrator.cancelConversation(id) });
+    const pending = await session.sendMessage({ conversationId: 'a', text: 'click', modelId: 'qwen2.5-coder' });
+    expect(pending.pendingApproval?.cuaApproval?.frameId).toBe('frame-1');
+    expect(pending.pendingApproval?.cuaApproval?.coords).toEqual({ x: 10, y: 20 });
+    expect(f.inputs()).toBe(0);
+    const done = await session.respondToApproval({ conversationId: 'a', toolCallId: 'action', decision: 'approve' });
+    expect(done.status).toBe('idle');
+    expect(f.inputs()).toBe(1);
+    expect(done.messages.some((message) => message.text.includes('base64'))).toBe(false);
+    expect(seen.some((message) => Array.isArray(message.content) && message.content.some((block) => block.type === 'image_url'))).toBe(true);
+    expect(done.messages.some((message) => message.text.includes('frame-2'))).toBe(true);
+  });
+
   it('preserves the original frame through prompt replay and runs the approved action once', async () => {
     const f = fixture();
     const observed = await f.orchestrator.observe('a');

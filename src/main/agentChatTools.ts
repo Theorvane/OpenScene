@@ -58,8 +58,8 @@ export const CUA_ACTION_TOOL_SCHEMA = z.object({
   frameId: z.string().min(1), layoutRevision: z.number().int().nonnegative(),
   action: z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('click'), point }).strict(),
-    z.object({ kind: z.literal('drag'), from: point, to: point, durationMs: z.number().int().min(1).max(3000) }).strict(),
-    z.object({ kind: z.literal('key'), key: z.enum(CUA_KEYS), modifiers: z.array(z.enum(['shift', 'control', 'meta', 'alt'])).max(4) }).strict()
+    z.object({ kind: z.literal('drag'), from: point, to: point, durationMs: z.number().int().min(100).max(3000) }).strict(),
+    z.object({ kind: z.literal('key'), key: z.enum(CUA_KEYS), modifiers: z.array(z.enum(['shift', 'control', 'meta', 'alt'])).max(1) }).strict()
   ])
 }).strict();
 

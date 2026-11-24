@@ -243,6 +243,7 @@ export class CuaAgentOrchestrator {
     const run = this.runs.get(runId);
     if (!run) return;
     this.authority.revokeRun(runId);
+    if (run.controller.signal.aborted) return;
     run.controller.abort();
     this.options.onAbortConversation(run.conversationId);
   }
@@ -252,7 +253,7 @@ export class CuaAgentOrchestrator {
     if (state.sessionId !== this.sessionId || !state.runId) return;
     const run = this.runs.get(state.runId);
     if (!run) return;
-    if (state.phase === 'cleanup-failed') this.authority.recordCleanupFailure();
+    if (state.phase === 'cleanup-failed' || (state.phase === 'stopped' && !state.cleanupComplete)) this.authority.recordCleanupFailure();
     if (state.phase !== 'stopped' && state.phase !== 'cleanup-failed') return;
     this.abortRun(run.runId);
     this.runs.delete(run.runId);
