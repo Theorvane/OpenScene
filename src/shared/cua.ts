@@ -2,6 +2,8 @@
 export interface CuaPoint { readonly x: number; readonly y: number }
 export interface CuaRect extends CuaPoint { readonly width: number; readonly height: number }
 export interface CuaSurfaceSnapshot {
+  readonly executionBlocked: boolean;
+  readonly blockReason: string | null;
   readonly layoutRevision: number;
   readonly viewport: { readonly width: number; readonly height: number };
   readonly safeSurface: { readonly kind: 'timeline' | 'canvas' | 'shorts-review'; readonly rect: CuaRect; readonly interactive: boolean } | null;
