@@ -10,6 +10,8 @@ import {
   type BaseMessage
 } from '@langchain/core/messages';
 import type { DynamicStructuredTool } from '@langchain/core/tools';
+import type { CuaAgentOrchestrator } from './cuaAgentOrchestration';
+import { CUA_ACTION_TOOL_SCHEMA } from './agentChatTools';
 import { Annotation, END, MemorySaver, START, StateGraph, interrupt } from '@langchain/langgraph';
 import { FFMPEG_EDITING_WORKFLOW } from '../shared/ffmpegEditingWorkflow';
 import { AGENT_SCOPE_POLICY } from '../shared/agentScope';
@@ -145,6 +147,23 @@ function buildWatchFramesMessage(toolName: string, payload: WatchFramesPayload):
   });
 }
 
+function cuaVisualEvidence(output: unknown): { summary: string; image: HumanMessage } | null {
+  let value = output;
+  if (typeof value === 'string') {
+    try { value = JSON.parse(value); } catch { return null; }
+  }
+  if (!value || typeof value !== 'object') return null;
+  const candidate = value as { success?: unknown; summary?: unknown; frame?: { pngDataUrl?: unknown; frameId?: unknown } };
+  if (candidate.success !== true || typeof candidate.summary !== 'string'
+    || typeof candidate.frame?.pngDataUrl !== 'string' || !candidate.frame.pngDataUrl.startsWith('data:image/png;base64,')) return null;
+  const { pngDataUrl, ...metadata } = candidate.frame;
+  const summary = `${candidate.summary}\n${JSON.stringify(metadata)}`;
+  return { summary, image: new HumanMessage({ content: [
+    { type: 'text', text: `[OpenScene self-window evidence] ${summary}` },
+    { type: 'image_url', image_url: { url: pngDataUrl } }
+  ] }) };
+}
+
 export interface AgentChatModelHandle {
   invoke(messages: BaseMessage[], options?: { signal?: AbortSignal }): Promise<AIMessage>;
 }
@@ -174,6 +193,10 @@ const AgentChatState = Annotation.Root({
   toolDecisions: Annotation<Record<string, AgentToolApprovalDecision>>({
     reducer: (current, update) => ({ ...current, ...update }),
     default: () => ({})
+  }),
+  executedPerCallIds: Annotation<string[]>({
+    reducer: (current, update) => [...new Set([...current, ...update])],
+    default: () => []
   })
 });
 
@@ -182,6 +205,9 @@ export interface BuildAgentChatGraphOptions {
   readonly mutatingToolNames: ReadonlySet<string>;
   /** Charges the user's provider account; never auto-approved by "always". */
   readonly spendToolNames?: ReadonlySet<string>;
+  /** Exact-action approval; an "always" answer covers this call only. */
+  readonly perCallApprovalToolNames?: ReadonlySet<string>;
+  readonly cua?: CuaAgentOrchestrator;
   readonly createModel: AgentChatModelFactory;
 }
 
@@ -206,32 +232,44 @@ export function buildAgentChatGraph(options: BuildAgentChatGraphOptions) {
         ? state.messages
         : [new SystemMessage(buildAgentSystemPrompt(getEditAssetContext(configurable.editAssetContext), getEditProjectContext(configurable.editProjectContext))), ...state.messages];
 
-      const response = await model.invoke(messages);
+      const response = await model.invoke(messages, config.signal ? { signal: config.signal } : undefined);
+      if ((response.tool_calls?.length ?? 0) > 16) throw new Error('CUA_BUDGET_EXCEEDED: At most 16 tool calls per model step.');
       return { messages: [response] };
     })
-    .addNode('checkApproval', async (state) => {
+    .addNode('checkApproval', async (state, config) => {
       const last = state.messages[state.messages.length - 1];
       if (!last || !isAiLike(last) || !last.tool_calls || last.tool_calls.length === 0) {
         return {};
       }
 
       const decisions: Record<string, AgentToolApprovalDecision> = {};
+      if (options.cua && (last.tool_calls?.filter((call) => call.name === 'executeCuaAction').length ?? 0) > 1) {
+        throw new Error('CUA_BUDGET_EXCEEDED: Propose one observed CUA action at a time.');
+      }
       for (const call of last.tool_calls) {
-        if (!call.id || !options.mutatingToolNames.has(call.name) || state.toolDecisions[call.id]) {
+        if (!call.id || (!options.mutatingToolNames.has(call.name)
+          && !options.perCallApprovalToolNames?.has(call.name)) || state.toolDecisions[call.id]) {
           continue;
         }
         // A spend tool re-asks even after "always": that answer was given about
         // one charge, and cannot stand in for consent to every later one.
-        const spends = options.spendToolNames?.has(call.name) ?? false;
+        const spends = (options.spendToolNames?.has(call.name) ?? false)
+          || (options.perCallApprovalToolNames?.has(call.name) ?? false);
         if (!spends && state.alwaysAllowedTools.includes(call.name)) {
           decisions[call.id] = 'approve';
           continue;
         }
-        const proposal: AgentToolCallProposal = {
+        let proposal: AgentToolCallProposal = {
           toolCallId: call.id,
           toolName: call.name,
           args: (call.args ?? {}) as Record<string, unknown>
         };
+        if (options.cua && call.name === 'executeCuaAction') {
+          const conversationId = config.configurable?.thread_id;
+          if (typeof conversationId !== 'string') throw new Error('CUA_SCOPE_CHANGED');
+          const request = CUA_ACTION_TOOL_SCHEMA.parse(call.args);
+          proposal = { ...proposal, cuaApproval: options.cua.prepareApproval(conversationId, call.id, request) };
+        }
         decisions[call.id] = interrupt<AgentToolCallProposal, AgentToolApprovalDecision>(proposal);
       }
       const alwaysAllowedTools = Object.entries(decisions)
@@ -240,7 +278,8 @@ export function buildAgentChatGraph(options: BuildAgentChatGraphOptions) {
         .filter((name): name is string => name !== undefined)
         // Recording a spend tool here would make the next charge silent even
         // though this pass correctly stopped to ask about this one.
-        .filter((name) => !(options.spendToolNames?.has(name) ?? false));
+        .filter((name) => !(options.spendToolNames?.has(name) ?? false)
+          && !(options.perCallApprovalToolNames?.has(name) ?? false));
       return { toolDecisions: decisions, alwaysAllowedTools };
     })
     .addNode('executeTools', async (state, config) => {
@@ -250,19 +289,29 @@ export function buildAgentChatGraph(options: BuildAgentChatGraphOptions) {
       }
 
       const results: BaseMessage[] = [];
+      const executedPerCallIds: string[] = [];
       const visualEvidence: HumanMessage[] = [];
       const modelId = config?.configurable?.modelId;
       const model = typeof modelId === 'string' ? getLlmModel(modelId) : undefined;
       for (const call of last.tool_calls) {
         if (!call.id) continue;
+        const perCall = options.perCallApprovalToolNames?.has(call.name) ?? false;
+        if (perCall && (state.executedPerCallIds.includes(call.id) || executedPerCallIds.includes(call.id))) {
+          results.push(new ToolMessage({ content: 'CUA_ACTION_REPLAYED: This action call has already settled. Observe again and propose a new action.', tool_call_id: call.id, name: call.name }));
+          continue;
+        }
 
         if (call.name === 'watchProjectVideo' && model !== undefined && model.vision !== true) {
           results.push(new ToolMessage({ content: 'This model cannot inspect video frames. Switch to a vision model or use speech inspection.', tool_call_id: call.id, name: call.name }));
           continue;
         }
 
-        const decision = options.mutatingToolNames.has(call.name) ? state.toolDecisions[call.id] : 'approve';
+        const decision = (perCall || options.mutatingToolNames.has(call.name)) ? state.toolDecisions[call.id] : 'approve';
+        if (perCall) executedPerCallIds.push(call.id);
         if (decision !== 'approve' && decision !== 'always') {
+          if (options.cua && call.name === 'executeCuaAction') {
+            options.cua.deny(String(config.configurable?.thread_id), call.id);
+          }
           // A denial with feedback reads as a correction, so the model can act
           // on the reason instead of only learning that it was refused.
           const feedback = state.toolFeedback[call.id];
@@ -280,7 +329,16 @@ export function buildAgentChatGraph(options: BuildAgentChatGraphOptions) {
         }
 
         try {
-          const output: unknown = await tool.invoke(call.args ?? {});
+          config.signal?.throwIfAborted();
+          const output: unknown = options.cua && call.name === 'executeCuaAction'
+            ? await options.cua.executeApproved(String(config.configurable?.thread_id), call.id, CUA_ACTION_TOOL_SCHEMA.parse(call.args))
+            : await tool.invoke(call.args ?? {}, config);
+          const cuaEvidence = cuaVisualEvidence(output);
+          if (cuaEvidence) {
+            results.push(new ToolMessage({ content: cuaEvidence.summary, tool_call_id: call.id, name: call.name }));
+            visualEvidence.push(cuaEvidence.image);
+            continue;
+          }
           const framesPayload = parseWatchFramesPayload(output);
           if (framesPayload !== null) {
             results.push(new ToolMessage({ content: framesPayload.summary, tool_call_id: call.id, name: call.name }));
@@ -294,7 +352,7 @@ export function buildAgentChatGraph(options: BuildAgentChatGraphOptions) {
           results.push(new ToolMessage({ content: `Tool "${call.name}" failed: ${detail}`, tool_call_id: call.id, name: call.name }));
         }
       }
-      return { messages: [...results, ...visualEvidence] };
+      return { messages: [...results, ...visualEvidence], executedPerCallIds };
     })
     .addEdge(START, 'agent')
     .addConditionalEdges('agent', (state) => {
