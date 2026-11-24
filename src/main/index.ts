@@ -40,6 +40,8 @@ import { ChatGptCodexAdapter } from './chatGptCodexAdapter';
 import { ChatGptOAuthService } from './chatGptOAuthService';
 import { CredentialStore } from './credentialStore';
 import { createJevService, registerJevCredentialIpc } from './jevCredentialService';
+import { JevConfigStore } from './jevConfigStore';
+import { registerJevConfigIpc } from './jevConfigIpc';
 import { LlmExecutionAdapter } from './llmAdapter';
 import { LlmPromptRouter } from './llmPromptRouter';
 import { getOpenVideoMcpDefinition, OpenVideoMcpServer } from './openVideoMcpServer';
@@ -74,6 +76,7 @@ const audioDetachService = new AudioDetachService({ projects: projectStore, asse
 const exportJobStore = new ExportJobStore();
 const credentialStore = new CredentialStore(app.getPath('userData'));
 const jevService = createJevService({ store: credentialStore });
+const jevConfigStore = new JevConfigStore(app.getPath('userData'));
 let jevCredentialWindow: BrowserWindow | null = null;
 const updaterController = setupUpdater();
 const updaterPromptIo = {
@@ -354,6 +357,7 @@ async function installIpcHandlers(): Promise<void> {
   });
 
   registerJevCredentialIpc({ ipcMain, getOwnWindow: () => jevCredentialWindow, service: jevService });
+  registerJevConfigIpc({ ipcMain, getOwnWindow: () => jevCredentialWindow, store: jevConfigStore });
 
   ipcMain.handle(IPC_CHANNELS.getProviderCredentials, async () => {
     try {
@@ -420,6 +424,7 @@ app.setAboutPanelOptions({
 });
 
 app.whenReady().then(async () => {
+  await jevConfigStore.load();
   installApplicationMenu(() => {
     // The user asked, so an up-to-date or failed answer is reported here where
     // the startup path stays quiet about both.
