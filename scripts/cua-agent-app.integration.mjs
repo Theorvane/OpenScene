@@ -295,7 +295,7 @@ try {
   if (process.env.CUA_AGENT_REMAP_SAVE_PROBE === '1') {
     // Isolated-profile preference fixture only; editor/timeline state is untouched.
     // Set before the editor mounts and reads its persisted shortcut preferences.
-    await js(`localStorage.setItem('window-loom-editor-shortcuts', JSON.stringify({schemaVersion:1,overrides:{saveTimeline:{key:'ArrowUp',modifiers:[]}}}))`);
+    await js(`localStorage.setItem('window-loom-editor-shortcuts', JSON.stringify({schemaVersion:1,overrides:{saveTimeline:'ArrowUp'}}))`);
     evidence.shortcutFixture = { storageKey: 'window-loom-editor-shortcuts', action: 'saveTimeline', key: 'ArrowUp' };
   }
   await click('.projects-home__project');
