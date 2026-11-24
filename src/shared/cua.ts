@@ -2,6 +2,7 @@
 export interface CuaPoint { readonly x: number; readonly y: number }
 export interface CuaRect extends CuaPoint { readonly width: number; readonly height: number }
 export interface CuaSurfaceSnapshot {
+  readonly contentRevision: number;
   readonly executionBlocked: boolean;
   readonly blockReason: string | null;
   readonly layoutRevision: number;
@@ -12,6 +13,7 @@ export interface CuaSurfaceSnapshot {
   readonly focusedTestId: string | null;
 }
 export interface CuaFrame {
+  readonly contentRevision: number;
   readonly sessionId: string;
   readonly runId: string;
   readonly windowId: number;
@@ -32,6 +34,7 @@ export type CuaAction =
   | { readonly kind: 'key'; readonly key: CuaKey; readonly modifiers: readonly ('shift' | 'control' | 'meta' | 'alt')[] };
 /** Main-only approval issuer binds a one-use permit to this exact request. */
 export interface CuaActionRequest {
+  readonly contentRevision: number;
   readonly sessionId: string;
   readonly runId: string;
   readonly windowId: number;
@@ -39,8 +42,10 @@ export interface CuaActionRequest {
   readonly layoutRevision: number;
   readonly action: CuaAction;
 }
-export type CuaPhase = 'idle' | 'ready' | 'acting' | 'stopping' | 'stopped' | 'cleanup-failed';
+export type CuaPhase = 'idle' | 'ready' | 'preparing' | 'acting' | 'stopping' | 'stopped' | 'cleanup-failed';
 export interface CuaState {
+  /** Input-free preparation, bound to an already approved main-only permit. */
+  readonly prepareToken: string | null;
   /** Present only while a held drag awaits synchronous renderer rollback. */
   readonly cancelToken: string | null;
   readonly targetGone: boolean;
@@ -58,6 +63,7 @@ export interface CuaState {
 }
 export interface CuaStopResult { readonly accepted: boolean }
 export interface CuaCancelAck { readonly runId: string; readonly cancelToken: string }
+export interface CuaPrepareAck { readonly runId: string; readonly prepareToken: string }
 
 /** Pixel conversion uses the actual returned bitmap, never DPR alone. */
 export function cuaBitmapPointToViewport(frame: Pick<CuaFrame, 'bitmap' | 'viewport'>, point: CuaPoint): CuaPoint {
