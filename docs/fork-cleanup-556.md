@@ -33,6 +33,11 @@ The FFmpeg skill manifest retains all source-file SHA-256 checksums.
 The URL, requested/fetched SHA and command output are preserved in
 [`direct-fetch.json`](evidence/fork-cleanup-556/direct-fetch.json).
 
+These are the repository's only three gitlinks. Root and mobile dependency
+manifests use registry packages; every resolved dependency URL in both lockfiles
+is on `registry.npmjs.org`. No additional fork Git dependency was found.
+`@theorvane/type-mcp` is a registry dependency, not a URL to either retiring fork.
+
 ## Asset inventory and preservation
 
 The read-only inventory used task-scoped `sjungwon03` authentication. It queried
@@ -88,5 +93,10 @@ retained all three gitlinks. Existing shared Git configuration still contained
 the old clone URLs; it was not changed across other worktrees. This preparation
 run therefore does not replace the required fresh clone from the final commit,
 nor the final integrated HEAD's checks and package/LICENSE inspection.
+An independent clone of preparation commit
+`4ba2b3d64a47fa260b07488a9ae17376d8d4f543` subsequently initialized all three
+submodules with the expected upstream URLs and original pins. Every FFmpeg
+manifest file and all three LICENSE hashes were verified; see
+[`fresh-clone.json`](evidence/fork-cleanup-556/fresh-clone.json).
 No editing rule or screen changes are introduced, so no development-client
 screen exercise is applicable to this URL/provenance-only migration.
