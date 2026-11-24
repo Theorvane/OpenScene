@@ -100,7 +100,7 @@ async function mcp(name, args) {
   assert.equal(result?.success, true, `${name}: ${JSON.stringify(result)}`);
   return result;
 }
-async function pointFor(selector, text) {
+async function pointFor(selector, text, requireHit = true) {
   return js(`(() => {
     const element = [...document.querySelectorAll(${JSON.stringify(selector)})].find(e => {
       const r=e.getBoundingClientRect();return r.width>0&&r.height>0&&${text === undefined ? 'true' : `e.textContent.trim()===${JSON.stringify(text)}`};
@@ -116,7 +116,7 @@ async function pointFor(selector, text) {
     if(right<=left||bottom<=top)return null;
     const point={x:left+Math.min(right-left,160)/2,y:(top+bottom)/2};
     const hit=document.elementFromPoint(point.x,point.y);
-    return hit&&(hit===element||element.contains(hit))?point:null;
+    return ${requireHit ? 'hit&&(hit===element||element.contains(hit))' : 'true'}?point:null;
   })()`);
 }
 function input(event) {
@@ -166,7 +166,7 @@ ChatOllama.prototype.invoke = async function(messages, options) {
   if (scenario.stage === 2) {
     const frame = lastFrame(messages);
     if (!frame) return new AIMessage('Synthetic planner stopped after the actual observation tool refused. No input was requested.');
-    const point = await pointFor('.timeline-clip');
+    const point = await pointFor('.timeline-clip', undefined, false);
     assert.ok(point, 'Fixture clip is visible to the deterministic synthetic planner');
     const action = ['move', 'cancel'].includes(scenario.kind)
       ? { kind: 'drag', from: point, to: { x: point.x + 65, y: point.y }, durationMs: scenario.kind === 'cancel' ? 1800 : 600 }
@@ -190,7 +190,9 @@ ChatOllama.prototype.invoke = async function(messages, options) {
 async function prompt(kind) {
   scenario = { kind, stage: 0 };
   await click('[aria-label="Edit Agent prompt"]');
-  target.webContents.insertText(`CUA integration scenario ${kind}`);
+  const text = `CUA integration scenario ${kind}`;
+  for (const keyCode of text) input({ type: 'char', keyCode });
+  await until('actual prompt character input', () => js(`document.querySelector('[aria-label="Edit Agent prompt"]')?.value===${JSON.stringify(text)}`));
   await click('[aria-label="Send Edit Agent prompt"]');
 }
 async function waitIdle() {

@@ -39,7 +39,15 @@ Local evidence: `/tmp/openscene-cua-agent-app-initial4/evidence.json`, `00-actua
 
 At pushed agent HEAD `58a25f499cdc85233b66a170c133c7043ad55323`, root typecheck, 219 test files / 1,387 tests, build and mobile typecheck passed locally. Its `verify`, `ios-module`, `android-module` and `ios-export` CI checks passed; automatic review was skipped for Draft. Later dependency merges and the E2E script require fresh exact-HEAD verification and independent review. The PR must stay Draft until coordinator authorization; no readiness or merge is implied by these intermediate checks.
 
-## Explicit Save follow-up test plan
+## Explicit interaction mode
+
+The default is `Project tools`. Window control requires the user to select `Window CUA (desktop)`, which waits for the previous conversation's cancellation/storage settlement before starting a new conversation. Busy/pending approval blocks a mode change. Restored history and new ordinary sessions never opt into window control automatically. The main session fixes mode and project identity; model clients bind tools per invocation, and project mode also rejects fabricated CUA tool calls at dispatch.
+
+In explicit self-window mode, the real send/approval preparation functions do not invoke legacy project saving. Live project identity still follows the existing context bridge. Dirty or unspecified live state blocks saved-project and unknown tools by default; only the pure editing capability catalog and the observed CUA/explicit Save capabilities are allowed. Successful input conservatively marks the UI unsaved. A confirmed Save receipt must match disk and the current UI acknowledgement before saved-project tools are released. Driver frame/content checks remain independent of any client clean flag.
+
+Intermediate actual-app evidence at `/tmp/openscene-cua-agent-dirty-mode-e604-char/evidence.json` records an actual user-role fixture drag from 0 to 115 ms while the saved MCP timeline stayed at 0 ms. Native UI mode selection then sent `interactionMode=self-window` and `hasUnsavedTimeline=true`; legacy Save request count was zero and the live UI remained dirty after the real observation tool refused with `CUA_NOT_FOCUSED`. Product input count and held inputs were zero. Source HEAD was `e604fe1ff8057b94d7ae6ace3e92784f72e99e91`; only the test harness character-input fix was uncommitted, with its exact SHA-256 recorded in the artifact. This is evidence of first-turn dirty preservation and a genuine focus refusal, not a completed guarded CUA edit. No user focus-wait run was started.
+
+## Pending Save acceptance cases
 
 The Save DTO and runtime are still being coordinated. These are acceptance cases for the separately approved capability, not claims of implemented or passing tests:
 
