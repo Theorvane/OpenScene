@@ -238,7 +238,20 @@ export class AgentChatSessionManager {
     let settle!: () => void;
     const settled = new Promise<void>((resolve) => { settle = resolve; });
     this.activeTurns.set(conversationId, { controller, settled });
-    try { return await run(); }
+    try {
+      const result = await run();
+      // LangGraph may reject on AbortSignal before an invoked tool's promise
+      // settles. Driver-originated Stop must obey the same physical-release
+      // boundary as explicit cancel IPC; never return a terminal turn early.
+      if (controller.signal.aborted) {
+        try { await this.lifecycle.cancelCua?.(conversationId); }
+        catch (error) {
+          this.cleanupLocked.add(conversationId);
+          return { ...await this.errorState(conversationId, error), errorCode: 'CUA_CLEANUP_FAILED' };
+        }
+      }
+      return result;
+    }
     finally { this.activeTurns.delete(conversationId); settle(); }
   }
 

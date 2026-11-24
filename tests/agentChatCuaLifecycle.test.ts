@@ -141,6 +141,34 @@ describe('CUA graph approval and cancellation lifecycle', () => {
     expect(settled).toBe(true);
   });
 
+  it('does not return an aborted active tool turn before its actual release settles', async () => {
+    let entered!: () => void;
+    let release!: () => void;
+    let held = 0;
+    const started = new Promise<void>((resolve) => { entered = resolve; });
+    const released = new Promise<void>((resolve) => { release = resolve; });
+    let modelStep = 0;
+    const bundle = buildAgentChatGraph({
+      tools: [tool(async () => { held = 1; entered(); await released; held = 0; throw new Error('CUA_CANCELLED'); }, {
+        name: 'cuaAction', description: 'delayed held input', schema: z.object({})
+      })], mutatingToolNames: new Set(['cuaAction']), perCallApprovalToolNames: new Set(['cuaAction']),
+      createModel: () => ({ invoke: async () => modelStep++ === 0 ? call('active') : new AIMessage('Done') })
+    });
+    const session = new AgentChatSessionManager(bundle, { cancelCua: async () => { await released; held = 0; } });
+    await session.sendMessage(send);
+    const turn = session.respondToApproval({ conversationId: send.conversationId, toolCallId: 'active', decision: 'approve' });
+    await started;
+    session.abortConversation(send.conversationId); // Trusted driver callback, no recursive cancel.
+    let settled = false;
+    void turn.then(() => { settled = true; });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(settled).toBe(false);
+    expect(held).toBe(1);
+    release();
+    await turn;
+    expect(held).toBe(0);
+  });
+
   it('reports failed release and does not delete the pending checkpoint as success', async () => {
     const { session } = fixture([call('one')], { cancelCua: async () => { throw new Error('release failed'); } });
     await session.sendMessage(send);
