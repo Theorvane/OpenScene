@@ -170,17 +170,43 @@ describe('cuaSurfaceSnapshot', () => {
     expect(focused.snapshot.layoutRevision).toBe(3);
     expect(focused.snapshot.focusedTestId).toBe('timeline-clip-clip-1');
 
-    // Focus shift caused by CUA's own mousedown while cuaActing === true does not self-cancel mid-drag
-    const focusedMidActing = tracker.next(
+    // Intra-safe-surface focus shift (clip-1 -> clip-2) NEVER bumps layoutRevision,
+    // even when not acting, while still reporting the updated focusedTestId.
+    const focusedSiblingClip = tracker.next(
       makeMeasured({
         scrollStates: [{ id: 'timeline-stack', scrollLeft: 180, scrollTop: 0 }],
         focusedInSafeSurface: true,
         focusedTestId: 'timeline-clip-clip-2',
+        cuaActing: false
+      })
+    );
+    expect(focusedSiblingClip.revisionChanged).toBe(false);
+    expect(focusedSiblingClip.snapshot.layoutRevision).toBe(3);
+    expect(focusedSiblingClip.snapshot.focusedTestId).toBe('timeline-clip-clip-2');
+
+    // Focus leaving safe surface (entering protected/outside area) ALWAYS bumps layoutRevision.
+    const focusLeft = tracker.next(
+      makeMeasured({
+        scrollStates: [{ id: 'timeline-stack', scrollLeft: 180, scrollTop: 0 }],
+        focusedInSafeSurface: false,
+        focusedTestId: null,
         cuaActing: true
       })
     );
-    expect(focusedMidActing.snapshot.layoutRevision).toBe(3);
-    expect(focusedMidActing.snapshot.focusedTestId).toBe('timeline-clip-clip-2');
+    expect(focusLeft.revisionChanged).toBe(true);
+    expect(focusLeft.snapshot.layoutRevision).toBe(4);
+
+    // CUA's own mousedown focusing into safeSurface during acting does not self-cancel mid-drag.
+    const focusReenteredActing = tracker.next(
+      makeMeasured({
+        scrollStates: [{ id: 'timeline-stack', scrollLeft: 180, scrollTop: 0 }],
+        focusedInSafeSurface: true,
+        focusedTestId: 'timeline-clip-clip-1',
+        cuaActing: true
+      })
+    );
+    expect(focusReenteredActing.revisionChanged).toBe(false);
+    expect(focusReenteredActing.snapshot.layoutRevision).toBe(4);
 
     expect(
       tracker.next(
@@ -191,7 +217,7 @@ describe('cuaSurfaceSnapshot', () => {
           focusedTestId: null
         })
       ).snapshot.layoutRevision
-    ).toBe(4);
+    ).toBe(5);
 
     const withModal = tracker.next(
       makeMeasured({
@@ -205,7 +231,7 @@ describe('cuaSurfaceSnapshot', () => {
         ]
       })
     );
-    expect(withModal.snapshot.layoutRevision).toBe(5);
+    expect(withModal.snapshot.layoutRevision).toBe(6);
     expect(withModal.snapshot.safeSurface).toBeNull();
     expect(withModal.snapshot.executionBlocked).toBe(true);
   });

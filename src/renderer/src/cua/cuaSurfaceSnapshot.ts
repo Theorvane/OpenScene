@@ -246,9 +246,10 @@ export function buildSurfaceGeometryKey(measured: MeasuredSurfaceState): string 
 }
 
 export function buildSurfaceFocusKey(measured: MeasuredSurfaceState): string {
-  return measured.focusedInSafeSurface
-    ? `in:${measured.focusedTestId ?? ''}`
-    : 'out';
+  // Track only safe-surface containment (not intra-safe-surface focusedTestId)
+  // so clicking/focusing different clips inside the same safe surface does not
+  // bump layoutRevision while leaving the safe surface always bumps it.
+  return measured.focusedInSafeSurface ? 'in' : 'out';
 }
 
 export function buildSurfaceRevisionKey(measured: MeasuredSurfaceState): string {
@@ -276,23 +277,27 @@ export function buildSnapshotDeliveryKey(snapshot: CuaSurfaceSnapshot): string {
 export class CuaSurfaceRevisionTracker {
   private revision = 0;
   private lastGeometryKey: string | null = null;
-  private lastFocusKey: string | null = null;
+  private lastFocusedInSafeSurface: boolean | null = null;
   private lastDeliveryKey: string | null = null;
 
   next(measured: MeasuredSurfaceState): { readonly snapshot: CuaSurfaceSnapshot; readonly changed: boolean; readonly revisionChanged: boolean } {
     const geometryKey = buildSurfaceGeometryKey(measured);
-    const focusKey = buildSurfaceFocusKey(measured);
     const geometryChanged = this.lastGeometryKey === null || this.lastGeometryKey !== geometryKey;
-    const focusChanged = this.lastFocusKey === null || this.lastFocusKey !== focusKey;
-    // During CUA acting, synthetic mousedown naturally focuses the clicked clip/element;
-    // do not bump layoutRevision for focus-only transitions mid-action, while still
-    // bumping immediately for any real geometry/scroll/modal/protectedRect change.
-    const revisionChanged = geometryChanged || (focusChanged && measured.cuaActing !== true);
+    const focusLeftSafeSurface = this.lastFocusedInSafeSurface === true && !measured.focusedInSafeSurface;
+    const focusEnteredSafeSurfaceIdle =
+      this.lastFocusedInSafeSurface === false &&
+      measured.focusedInSafeSurface &&
+      measured.cuaActing !== true;
+    // - Geometry / scroll / modal / view / protectedRects changes ALWAYS bump revision.
+    // - Focus leaving the safe surface (into protected or outside area) ALWAYS bumps revision.
+    // - Intra-safe-surface focus moves (clip A -> clip B, lane -> clip) NEVER bump revision.
+    // - CUA's own mousedown focusing into safeSurface during acting does not self-cancel mid-drag.
+    const revisionChanged = geometryChanged || focusLeftSafeSurface || focusEnteredSafeSurfaceIdle;
     if (revisionChanged) {
       this.revision += 1;
     }
     this.lastGeometryKey = geometryKey;
-    this.lastFocusKey = focusKey;
+    this.lastFocusedInSafeSurface = measured.focusedInSafeSurface;
 
     const snapshot: CuaSurfaceSnapshot = {
       executionBlocked: measured.executionBlocked,

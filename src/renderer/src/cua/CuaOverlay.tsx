@@ -45,15 +45,12 @@ export function getCuaCleanupStatusText(state: CuaState, stopPending: boolean): 
   return null;
 }
 
-export function CuaOverlay({ state, stopPending, stopError, agentBusy = false, onStop }: CuaOverlayProps): ReactElement | null {
-  const visible = state.phase !== 'idle' || stopPending || agentBusy;
-  if (!visible) return null;
-
+export function CuaOverlay({ state, stopPending, stopError, agentBusy = false, onStop }: CuaOverlayProps): ReactElement {
+  const isActive = state.phase !== 'idle' || stopPending || agentBusy;
   const cursorMode = getCuaCursorMode(state, stopPending);
   const isStoppingDisplay = stopPending || state.phase === 'stopping';
   const isCleanupFailed = state.phase === 'cleanup-failed';
   const canClickStop = agentBusy || isCuaStoppablePhase(state.phase);
-  const showStopButton = visible;
   const showHudBanner = state.phase !== 'idle' || stopPending;
   const stopButtonLabel = isStoppingDisplay
     ? 'Stopping…'
@@ -66,14 +63,15 @@ export function CuaOverlay({ state, stopPending, stopError, agentBusy = false, o
   const effectiveError = stopError ?? state.error;
 
   const phaseText = isStoppingDisplay ? 'Stopping CUA…' : PHASE_LABELS[state.phase];
-  const cursor = state.cursor;
-  const dragStart = state.dragStart;
-  const target = state.target;
+  const cursor = isActive ? state.cursor : null;
+  const dragStart = isActive ? state.dragStart : null;
+  const target = isActive ? state.target : null;
 
   return (
     <div
-      className={`cua-overlay cua-overlay--${state.phase}${stopPending ? ' cua-overlay--stop-pending' : ''}`}
+      className={`cua-overlay cua-overlay--${state.phase}${stopPending ? ' cua-overlay--stop-pending' : ''}${isActive ? '' : ' cua-overlay--idle'}`}
       data-testid="cua-overlay"
+      data-cua-active={isActive ? 'true' : 'false'}
       data-cua-phase={state.phase}
       data-cua-cleanup-complete={state.cleanupComplete ? 'true' : 'false'}
       data-cua-stop-pending={stopPending ? 'true' : 'false'}
@@ -157,23 +155,24 @@ export function CuaOverlay({ state, stopPending, stopError, agentBusy = false, o
         </div>
       )}
 
-      {/* Fixed-geometry user-only Stop button: pinned at immutable viewport coords
-          so changing HUD label/phase text never shifts its protectedRect mid-action. */}
-      {showStopButton && (
-        <button
-          type="button"
-          className="cua-stop-btn"
-          data-testid="cua-stop-btn"
-          data-cua-protected="stop-button"
-          data-cua-protected-id="cua-stop-btn"
-          aria-label="Stop CUA control"
-          aria-busy={isStoppingDisplay}
-          disabled={isStoppingDisplay || !canClickStop}
-          onClick={onStop}
-        >
-          {stopButtonLabel}
-        </button>
-      )}
+      {/* Always-mounted fixed-geometry user-only Stop button: stays at immutable
+          viewport coords even in phase === 'idle' (opacity: 0; pointer-events: none)
+          so idle -> ready -> acting -> stopping -> stopped NEVER shifts protectedRects. */}
+      <button
+        type="button"
+        className={`cua-stop-btn${isActive ? '' : ' cua-stop-btn--idle'}`}
+        data-testid="cua-stop-btn"
+        data-cua-protected="stop-button"
+        data-cua-protected-id="cua-stop-btn"
+        aria-label="Stop CUA control"
+        aria-hidden={isActive ? undefined : true}
+        aria-busy={isStoppingDisplay}
+        tabIndex={isActive ? 0 : -1}
+        disabled={!isActive || isStoppingDisplay || !canClickStop}
+        onClick={onStop}
+      >
+        {stopButtonLabel}
+      </button>
 
       {/* Top HUD banner (status badge, label, cleanup/error/targetGone/lock warnings) */}
       {showHudBanner && <div className="cua-hud" data-testid="cua-hud" role="status">

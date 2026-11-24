@@ -34,7 +34,7 @@ function makeState(overrides: Partial<CuaState> = {}): CuaState {
 }
 
 describe('CuaOverlay', () => {
-  it('renders nothing when phase is idle, no stop is pending, and agent is not busy', async () => {
+  it('keeps the fixed-footprint stop button mounted but hidden/inert-disabled when phase is idle', async () => {
     const { CuaOverlay } = await loadCuaOverlayModule();
     const html = renderToStaticMarkup(
       createElement(CuaOverlay, {
@@ -44,10 +44,19 @@ describe('CuaOverlay', () => {
         onStop: () => undefined
       })
     );
-    expect(html).toBe('');
+    expect(html).toContain('data-testid="cua-overlay"');
+    expect(html).toContain('data-cua-active="false"');
+    expect(html).toContain('data-testid="cua-stop-btn"');
+    expect(html).toContain('data-cua-protected="stop-button"');
+    expect(html).toContain('cua-stop-btn--idle');
+    expect(html).toContain('aria-hidden="true"');
+    expect(html).toContain('tabindex="-1"');
+    expect(html).toContain('disabled=""');
+    expect(html).not.toContain('data-testid="cua-hud"');
+    expect(html).not.toContain('data-testid="cua-cursor"');
   });
 
-  it('pre-mounts only the fixed stop button while agentBusy is true in idle phase', async () => {
+  it('activates the always-mounted stop button while agentBusy is true in idle phase without showing HUD', async () => {
     const { CuaOverlay } = await loadCuaOverlayModule();
     const html = renderToStaticMarkup(
       createElement(CuaOverlay, {
@@ -58,7 +67,9 @@ describe('CuaOverlay', () => {
         onStop: () => undefined
       })
     );
+    expect(html).toContain('data-cua-active="true"');
     expect(html).toContain('data-testid="cua-stop-btn"');
+    expect(html).not.toContain('cua-stop-btn--idle');
     expect(html).not.toContain('data-testid="cua-hud"');
   });
 

@@ -33,11 +33,12 @@ export {
   isCuaStoppablePhase
 } from './cuaSurfaceSnapshot';
 
-function isElementVisible(element: Element): boolean {
+function isElementVisible(element: Element, allowOpacityZero = false): boolean {
   if (!(element instanceof HTMLElement)) return false;
   if (element.hidden || element.closest('[hidden]') !== null) return false;
   const style = window.getComputedStyle(element);
-  if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+  if (style.display === 'none' || style.visibility === 'hidden') return false;
+  if (!allowOpacityZero && style.opacity === '0') return false;
   const rect = element.getBoundingClientRect();
   return rect.width > 0 && rect.height > 0;
 }
@@ -83,7 +84,9 @@ export function collectDomSurfaceState(options: CollectDomSurfaceOptions): Measu
   const countByPrefix = new Map<string, number>();
 
   const addProtected = (element: Element, kind: CuaProtectedKind, fallbackId?: string): void => {
-    if (seenElements.has(element) || !isElementVisible(element)) return;
+    // Always keep the fixed-footprint stop-button in protectedRects even when
+    // visually idle (opacity: 0) so idle -> ready -> acting never alters protectedRects.
+    if (seenElements.has(element) || !isElementVisible(element, kind === 'stop-button')) return;
     const clipped = clipRectToViewport(roundRect(element.getBoundingClientRect()), viewport);
     if (clipped === null) return;
     seenElements.add(element);
