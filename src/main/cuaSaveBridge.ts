@@ -6,12 +6,9 @@ import type { LocalProjectSnapshot, TimelineDocument } from '../shared/timelineT
 import { parseTimelineDocument } from '../shared/timelineValidators';
 import { IPC_CHANNELS } from '../shared/ipc';
 import type { ProjectStore } from './projectStore';
+import { isCuaSaveErrorCode, normalizeCuaSaveError } from './cuaSaveErrors';
 
 const ACK_TIMEOUT_MS = 500;
-function safeErrorCode(error: unknown): string {
-  const message = error instanceof Error ? error.message : '';
-  return /^CUA_[A-Z0-9_]{1,80}$/.test(message) ? message : 'CUA_SAVE_FAILED';
-}
 function canonical(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonical);
   if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value)
@@ -59,7 +56,7 @@ export class CuaSaveBridge {
     if (!scope || !['projectId', 'sessionId', 'runId', 'frameId'].every(k => typeof scope[k as keyof CuaSaveScope] === 'string' && String(scope[k as keyof CuaSaveScope]).length > 0)
       || !['windowId', 'layoutRevision', 'contentRevision'].every(k => Number.isSafeInteger(scope[k as keyof CuaSaveScope]) && Number(scope[k as keyof CuaSaveScope]) >= 0)
       || scope.windowId !== this.window.id || this.revokedRuns.has(scope.runId)) throw new Error('CUA_SAVE_SCOPE_CHANGED');
-    this.dependencies.assertScope(scope);
+    try { this.dependencies.assertScope(scope); } catch (error) { throw new Error(normalizeCuaSaveError(error)); }
   }
   private assertEntry(entry: Entry): void {
     if (entry.cancelled) throw new Error('CUA_SAVE_CANCELLED');
@@ -119,7 +116,7 @@ export class CuaSaveBridge {
     };
     this.entries.set(proposal.proposalId, { createdAt: performance.now(), completed: false, proposal: structuredClone(proposal), timeline: structuredClone(timeline), baselineDigest: cuaSaveDigest(baseline), cancelled: false });
     return structuredClone(proposal);
-    } catch (error) { throw new Error(safeErrorCode(error)); }
+    } catch (error) { throw new Error(normalizeCuaSaveError(error)); }
     finally { this.preparingScope = null; this.prune(); }
   }
   reportSnapshot(report: CuaSaveSnapshotReport): boolean {
@@ -134,7 +131,8 @@ export class CuaSaveBridge {
   ackReady(ack: CuaSaveReadyAck): boolean {
     const pending = this.ready, proposal = pending?.entry.proposal;
     if (!ack || !pending || !proposal || ack.saveToken !== pending.token || ack.runId !== proposal.scope.runId || ack.projectId !== proposal.scope.projectId
-      || ack.contentRevision !== proposal.scope.contentRevision || ack.snapshotId !== proposal.snapshotId || ack.timelineDigest !== proposal.timelineDigest || typeof ack.ready !== 'boolean') return false;
+      || ack.contentRevision !== proposal.scope.contentRevision || ack.snapshotId !== proposal.snapshotId || ack.timelineDigest !== proposal.timelineDigest || typeof ack.ready !== 'boolean'
+      || (ack.errorCode !== undefined && !isCuaSaveErrorCode(ack.errorCode))) return false;
     this.assertEntry(pending.entry);
     this.ready = null; pending.resolve(structuredClone(ack)); return true;
   }
@@ -149,7 +147,7 @@ export class CuaSaveBridge {
     if (!entry) return Promise.reject(new Error('CUA_SAVE_PROPOSAL_NOT_FOUND'));
     if (entry.execution) return entry.execution.permit === permit ? entry.execution.promise : Promise.reject(new Error('CUA_SAVE_ALREADY_EXECUTED'));
     try { this.assertEntry(entry); this.dependencies.checkPermit(entry.proposal, permit); }
-    catch (error) { return Promise.reject(error); }
+    catch (error) { return Promise.reject(new Error(normalizeCuaSaveError(error))); }
     if (this.ready || this.writes.size) return Promise.reject(new Error('CUA_SAVE_BUSY'));
     // Publish the idempotency record before starting callbacks or async work.
     const promise = Promise.resolve().then(() => this.perform(entry, permit));
@@ -170,7 +168,7 @@ export class CuaSaveBridge {
       const ready = await this.bounded(readyPromise);
       if (this.ready?.token === saveToken) this.ready = null;
       this.assertEntry(entry);
-      if (!ready?.ready) throw new Error(ready?.errorCode ?? 'CUA_SAVE_READY_TIMEOUT');
+      if (!ready?.ready) throw new Error(ready ? ready.errorCode ?? 'CUA_SAVE_RENDERER_NOT_READY' : 'CUA_SAVE_READY_TIMEOUT');
       const diskBefore = await this.dependencies.projects.open(scope.projectId);
       this.assertEntry(entry);
       if (!diskBefore || cuaSaveDigest(diskBefore) !== entry.baselineDigest) throw new Error('CUA_SAVE_BASELINE_CHANGED');
@@ -194,7 +192,7 @@ export class CuaSaveBridge {
       } catch { result = { ...result, errorCode: 'CUA_SAVE_READBACK_FAILED' }; }
     } catch (error) {
       result = { ...result, status: persisted ? (entry.cancelled ? 'persisted-after-cancel' : 'persisted') : publishStarted ? 'write-outcome-unknown' : 'not-written',
-        persistedUpdatedAt: persisted?.updatedAt ?? null, errorCode: safeErrorCode(error) };
+        persistedUpdatedAt: persisted?.updatedAt ?? null, errorCode: normalizeCuaSaveError(error) };
     } finally { if (this.ready?.token === saveToken) this.ready = null; }
     const written = result.status === 'persisted' || result.status === 'persisted-after-cancel' || result.status === 'already-clean';
     const commitPromise = written ? new Promise<CuaSaveCommitAck | null>(resolve => { this.commit = { token: saveToken, entry, resolve }; }) : null;

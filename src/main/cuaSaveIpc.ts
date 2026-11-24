@@ -3,6 +3,7 @@ import { IPC_CHANNELS } from '../shared/ipc';
 import type { CuaSaveCommitAck, CuaSaveReadyAck, CuaSaveSnapshotReport } from '../shared/cuaSave';
 import type { CuaSaveBridge } from './cuaSaveBridge';
 import { fail, ok } from './ipcResponses';
+import { normalizeCuaSaveError } from './cuaSaveErrors';
 
 export function registerCuaSaveIpc(ipc: IpcMain, getTarget: () => { window: BrowserWindow; save: CuaSaveBridge } | null): void {
   const own = (event: IpcMainInvokeEvent): CuaSaveBridge => {
@@ -11,12 +12,12 @@ export function registerCuaSaveIpc(ipc: IpcMain, getTarget: () => { window: Brow
     return target.save;
   };
   ipc.handle(IPC_CHANNELS.cuaReportSaveSnapshot, (event, report: CuaSaveSnapshotReport) => {
-    try { return ok({ accepted: own(event).reportSnapshot(report) }); } catch (e) { return fail('UNKNOWN_ERROR', String(e)); }
+    try { return ok({ accepted: own(event).reportSnapshot(report) }); } catch (e) { return fail('UNKNOWN_ERROR', normalizeCuaSaveError(e)); }
   });
   ipc.handle(IPC_CHANNELS.cuaAckSaveReady, (event, ack: CuaSaveReadyAck) => {
-    try { return ok({ accepted: own(event).ackReady(ack) }); } catch (e) { return fail('UNKNOWN_ERROR', String(e)); }
+    try { return ok({ accepted: own(event).ackReady(ack) }); } catch (e) { return fail('UNKNOWN_ERROR', normalizeCuaSaveError(e)); }
   });
   ipc.handle(IPC_CHANNELS.cuaAckSaveCommit, (event, ack: CuaSaveCommitAck) => {
-    try { return ok({ accepted: own(event).ackCommit(ack) }); } catch (e) { return fail('UNKNOWN_ERROR', String(e)); }
+    try { return ok({ accepted: own(event).ackCommit(ack) }); } catch (e) { return fail('UNKNOWN_ERROR', normalizeCuaSaveError(e)); }
   });
 }

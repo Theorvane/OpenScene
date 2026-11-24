@@ -17,4 +17,10 @@ it('accepts Save reports only from the bound app top frame and exposes no execut
     expect(handler({ sender: {}, senderFrame: mainFrame } as IpcMainInvokeEvent, {})).toMatchObject({ ok: false });
   }
   expect(save.reportSnapshot).not.toHaveBeenCalled(); expect(save.ackReady).not.toHaveBeenCalled(); expect(save.ackCommit).not.toHaveBeenCalled();
+  for (const method of [save.reportSnapshot, save.ackReady, save.ackCommit]) method.mockImplementation(() => { throw new Error('open: /private/user-secret/project.json'); });
+  for (const handler of handlers.values()) {
+    const response = handler({ sender: contents, senderFrame: mainFrame } as IpcMainInvokeEvent, {});
+    expect(response).toMatchObject({ ok: false, error: { message: 'CUA_SAVE_FAILED' } });
+    expect(JSON.stringify(response)).not.toContain('/private');
+  }
 });
