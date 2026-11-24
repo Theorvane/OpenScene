@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import type { AgentChatContextUsage, AgentChatDisplayMessage, AgentChatHistoryEntry, AgentChatStatus, AgentCuaErrorCode, AgentToolApprovalDecision, AgentToolCallProposal, AgentChatInteractionMode } from '../../shared/agentChat';
+import type { CuaSaveResult } from '../../shared/cuaSave';
 import { prepareAgentInteractionModeChange, prepareProjectForAgentApproval, prepareProjectForAgentSend } from '../../shared/agentChat';
 import type { EditAgentProjectContext } from '../../shared/editAgentContext';
 import type { AiDomainModelConfig } from '../../shared/aiDomainModels';
@@ -42,6 +43,7 @@ interface AgentChatController {
   readonly status: AgentChatStatus;
   readonly error: string | undefined;
   readonly errorCode: AgentCuaErrorCode | undefined;
+  readonly cuaSaveResult: CuaSaveResult | undefined;
   readonly isBusy: boolean;
   readonly activeProject: EditAgentProjectContext | null;
   /** Context window consumed by the conversation, when a turn reported it. */
@@ -89,6 +91,7 @@ export function AgentChatProvider({ activeProject, prepareProject, hasUnsavedTim
   const [status, setStatus] = useState<AgentChatStatus>('idle');
   const [error, setError] = useState<string | undefined>(undefined);
   const [errorCode, setErrorCode] = useState<AgentCuaErrorCode | undefined>(undefined);
+  const [cuaSaveResult, setCuaSaveResult] = useState<CuaSaveResult | undefined>(undefined);
   const [isBusy, setIsBusy] = useState(false);
   const [contextUsage, setContextUsage] = useState<AgentChatContextUsage | undefined>(undefined);
   const [historyEntries, setHistoryEntries] = useState<readonly AgentChatHistoryEntry[]>([]);
@@ -98,6 +101,7 @@ export function AgentChatProvider({ activeProject, prepareProject, hasUnsavedTim
   // Transcript restored from history: sent along with the next message so the
   // main process can re-seed an empty (e.g. post-relaunch) conversation thread.
   const restoredSeedRef = useRef<readonly AgentChatDisplayMessage[] | null>(null);
+  const cancelInFlightRef = useRef<Promise<void> | null>(null);
   // Effort is stored per model, so switching models keeps each choice.
   const [reasoningEfforts, setReasoningEfforts] = useState<Readonly<Record<string, ReasoningEffort>>>(() => {
     if (typeof window === 'undefined') return {};
@@ -143,6 +147,7 @@ export function AgentChatProvider({ activeProject, prepareProject, hasUnsavedTim
     setStatus('idle');
     setError(undefined);
     setErrorCode(undefined);
+    setCuaSaveResult(undefined);
     setInput('');
     onRestoreHandled?.();
   }, [restoreRequest, onRestoreHandled]);
@@ -178,6 +183,7 @@ export function AgentChatProvider({ activeProject, prepareProject, hasUnsavedTim
     setStatus('idle');
     setError(undefined);
     setErrorCode(undefined);
+    setCuaSaveResult(undefined);
     setInput('');
     setContextUsage(undefined);
     setHistoryRevision((revision) => revision + 1);
@@ -204,6 +210,7 @@ export function AgentChatProvider({ activeProject, prepareProject, hasUnsavedTim
     setStatus('idle');
     setError(undefined);
     setErrorCode(undefined);
+    setCuaSaveResult(undefined);
     setInput('');
   };
 
@@ -222,6 +229,7 @@ export function AgentChatProvider({ activeProject, prepareProject, hasUnsavedTim
     setIsBusy(true);
     setError(undefined);
     setErrorCode(undefined);
+    setCuaSaveResult(undefined);
     setStatus('thinking');
     setInput('');
 
@@ -255,6 +263,7 @@ export function AgentChatProvider({ activeProject, prepareProject, hasUnsavedTim
         setStatus(response.value.status);
         setError(response.value.error);
         setErrorCode(response.value.errorCode);
+        setCuaSaveResult(response.value.cuaSaveResult);
       } else {
         // The echoed turn stays on screen so the error reads as a reply to it.
         setStatus('error');
@@ -273,7 +282,6 @@ export function AgentChatProvider({ activeProject, prepareProject, hasUnsavedTim
   const respondToApproval = async (decision: AgentToolApprovalDecision, feedback?: string): Promise<void> => {
     if (!pendingApproval || isBusy) return;
 
-    const executingApproved = decision !== 'deny';
     setIsBusy(true);
     setError(undefined);
     setErrorCode(undefined);
@@ -295,6 +303,7 @@ export function AgentChatProvider({ activeProject, prepareProject, hasUnsavedTim
         setStatus(response.value.status);
         setError(response.value.error);
         setErrorCode(response.value.errorCode);
+        setCuaSaveResult(response.value.cuaSaveResult);
       } else {
         setStatus('error');
         setError(response.error.message);
@@ -311,19 +320,29 @@ export function AgentChatProvider({ activeProject, prepareProject, hasUnsavedTim
 
   const cancelConversation = async (): Promise<void> => {
     if (typeof window.videoTool?.agentChatCancel !== 'function') return;
-    try {
-      const response = await window.videoTool.agentChatCancel({ conversationId: conversationIdRef.current });
-      if (response.ok) {
-        setContextUsage(response.value.contextUsage);
-        setMessages(response.value.messages);
-        setPendingApproval(response.value.pendingApproval);
-        setStatus(response.value.status);
-        setError(response.value.error);
-        setErrorCode(response.value.errorCode);
+    if (cancelInFlightRef.current !== null) return cancelInFlightRef.current;
+    const promise = (async () => {
+      try {
+        const response = await window.videoTool.agentChatCancel({ conversationId: conversationIdRef.current });
+        if (response.ok) {
+          setContextUsage(response.value.contextUsage);
+          setMessages(response.value.messages);
+          setPendingApproval(response.value.pendingApproval);
+          setStatus(response.value.status);
+          setError(response.value.error);
+          setErrorCode(response.value.errorCode);
+          if (response.value.cuaSaveResult !== undefined) {
+            setCuaSaveResult(response.value.cuaSaveResult);
+          }
+        }
+      } catch {
+        // Driver stop path handles cancellation when chat cancel IPC is unavailable.
+      } finally {
+        cancelInFlightRef.current = null;
       }
-    } catch {
-      // Driver stop path handles cancellation when chat cancel IPC is unavailable.
-    }
+    })();
+    cancelInFlightRef.current = promise;
+    return promise;
   };
 
   const compactConversation = async (): Promise<void> => {
@@ -372,6 +391,7 @@ export function AgentChatProvider({ activeProject, prepareProject, hasUnsavedTim
       setStatus('idle');
       setError(undefined);
       setErrorCode(undefined);
+      setCuaSaveResult(undefined);
     } catch (cause) {
       setStatus('error');
       setError(cause instanceof Error ? cause.message : 'Could not reset the agent conversation.');
@@ -403,7 +423,7 @@ export function AgentChatProvider({ activeProject, prepareProject, hasUnsavedTim
         setActiveConversationId(conversationIdRef.current);
         restoredSeedRef.current = null;
         setMessages([]); setPendingApproval(null); setInput(''); setStatus('idle');
-        setError(undefined); setErrorCode(undefined); setContextUsage(undefined);
+        setError(undefined); setErrorCode(undefined); setCuaSaveResult(undefined); setContextUsage(undefined);
         setInteractionMode(mode);
         setHistoryRevision((revision) => revision + 1);
       } catch (cause) { setError(cause instanceof Error ? cause.message : 'Mode change failed.'); }
@@ -421,6 +441,7 @@ export function AgentChatProvider({ activeProject, prepareProject, hasUnsavedTim
     status,
     error,
     errorCode,
+    cuaSaveResult,
     isBusy,
     activeProject,
     contextUsage,

@@ -11,6 +11,7 @@ import {
 } from '@langchain/core/messages';
 import type { DynamicStructuredTool } from '@langchain/core/tools';
 import type { CuaAgentOrchestrator } from './cuaAgentOrchestration';
+import type { JevObservationHook } from './jevObservationJudgment';
 import { CUA_ACTION_TOOL_SCHEMA, CUA_SAVE_TOOL_SCHEMA } from './agentChatTools';
 import type { CuaAgentSaveOrchestrator } from './cuaAgentSaveOrchestration';
 import { Annotation, END, MemorySaver, START, StateGraph, interrupt } from '@langchain/langgraph';
@@ -218,6 +219,8 @@ export interface BuildAgentChatGraphOptions {
   readonly perCallApprovalToolNames?: ReadonlySet<string>;
   readonly cua?: CuaAgentOrchestrator;
   readonly cuaSave?: CuaAgentSaveOrchestrator;
+  /** Main-only, read-only advisory after an explicit observation has completed. */
+  readonly jevObservationHook?: JevObservationHook;
   readonly createModel: AgentChatModelFactory;
 }
 
@@ -397,9 +400,27 @@ export function buildAgentChatGraph(options: BuildAgentChatGraphOptions) {
             const saved = output as { status?: string; diskMatches?: boolean; uiApplied?: boolean };
             if (['persisted', 'persisted-after-cancel', 'already-clean'].includes(saved.status ?? '') && saved.diskMatches === true && saved.uiApplied === true) selfWindowUnsaved = false;
           }
+          let jevAnnotation: string | null = null;
+          let requestExplicitObservation = false;
+          if (call.name === 'observeEditorWindow' && options.jevObservationHook) {
+            try {
+              const advisory = await options.jevObservationHook({
+                conversationId: String(config.configurable?.thread_id), output: structuredClone(output),
+                ...(config.signal ? { signal: config.signal } : {})
+              });
+              if (advisory !== null) {
+                requestExplicitObservation = advisory.kind === 'reobserve' && advisory.selectedId === 'reobserve';
+                jevAnnotation = `Read-only typed judgment (model probability, not verified accuracy): ${JSON.stringify(advisory)}. This supplies no action, coordinates, approval, Save or cancellation authority. A reobserve recommendation requires a separate explicit observeEditorWindow call; never retry previous input.`;
+              }
+            } catch { /* Advisory failure preserves the original observation and LLM path. */ }
+          }
           const cuaEvidence = cuaVisualEvidence(output);
           if (cuaEvidence) {
-            results.push(new ToolMessage({ content: cuaEvidence.summary, tool_call_id: call.id, name: call.name }));
+            results.push(new ToolMessage({ content: cuaEvidence.summary + (jevAnnotation ? `\n${jevAnnotation}` : ''), tool_call_id: call.id, name: call.name }));
+            if (requestExplicitObservation) {
+              results.push(new HumanMessage('The typed evidence router requests a separate explicit observeEditorWindow call before choosing a target from this observation. The current image is withheld from target selection. This is a bounded information-sufficiency judgment, not a verified visual result or authorization; do not retry earlier input.'));
+              continue;
+            }
             visualEvidence.push(cuaEvidence.image);
             continue;
           }
