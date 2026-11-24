@@ -38,6 +38,7 @@ export class CuaDriver {
   private cleanupFailureLatched = false;
   private cancelAck: { token: string; runId: string; resolve: () => void } | null = null;
   private trustedApprovalPanel: CuaRect | null = null;
+  private observing = false;
   private state: CuaState;
 
   constructor(private readonly window: BrowserWindow, private readonly dependencies: CuaDriverDependencies) {
@@ -89,26 +90,34 @@ export class CuaDriver {
       && p.rect.x >= panel.x && p.rect.y >= panel.y
       && p.rect.x + p.rect.width <= panel.x + panel.width && p.rect.y + p.rect.height <= panel.y + panel.height)));
   }
+  private invalidSurface(): never {
+    this.surface = null; this.frame = null;
+    if (['ready', 'acting'].includes(this.state.phase)) void this.cancel('invalid-surface');
+    throw new Error('CUA_INVALID_SURFACE');
+  }
   reportSurface(snapshot: CuaSurfaceSnapshot): void {
     // Runtime validation is mandatory: the bridge does not make renderer data trusted.
     if (!snapshot || !Number.isSafeInteger(snapshot.layoutRevision) || snapshot.layoutRevision < 0
       || typeof snapshot.executionBlocked !== 'boolean' || typeof snapshot.focusedInSafeSurface !== 'boolean'
       || !snapshot.viewport || ![snapshot.viewport.width, snapshot.viewport.height].every(n => Number.isFinite(n) && n > 0 && n < 32768)
-      || !Array.isArray(snapshot.protectedRects) || snapshot.protectedRects.length > 256) throw new Error('CUA_INVALID_SURFACE');
+      || !Array.isArray(snapshot.protectedRects) || snapshot.protectedRects.length > 256) this.invalidSurface();
     const validRect = (r: CuaRect): boolean => !!r && [r.x, r.y, r.width, r.height].every(Number.isFinite) && r.width >= 0 && r.height >= 0;
-    if (snapshot.protectedRects.some(p => !p || !validRect(p.rect)) || (snapshot.safeSurface !== null && (!validRect(snapshot.safeSurface.rect) || typeof snapshot.safeSurface.interactive !== 'boolean'))) throw new Error('CUA_INVALID_SURFACE');
+    if (snapshot.protectedRects.some(p => !p || !validRect(p.rect)) || (snapshot.safeSurface !== null && (!validRect(snapshot.safeSurface.rect) || typeof snapshot.safeSurface.interactive !== 'boolean'))) this.invalidSurface();
     if (this.surface && snapshot.layoutRevision < this.surface.layoutRevision) throw new Error('CUA_STALE_SURFACE');
     const changed = this.surface !== null && (snapshot.layoutRevision !== this.surface.layoutRevision
       || JSON.stringify(snapshot.viewport) !== JSON.stringify(this.surface.viewport)
       || JSON.stringify(snapshot.safeSurface) !== JSON.stringify(this.surface.safeSurface)
       || this.protectedGeometry(snapshot) !== this.protectedGeometry(this.surface));
     this.surface = structuredClone(snapshot);
-    if (changed) { this.frame = null; if (this.state.phase === 'acting') void this.cancel('surface-changed'); }
+    if (changed) { this.frame = null; if (['ready', 'acting'].includes(this.state.phase)) void this.cancel('surface-changed'); }
   }
   async observe(context: { sessionId: string; runId: string }): Promise<CuaFrame> {
     this.live();
-    if (this.state.phase === 'acting' || this.state.phase === 'stopping' || this.cleanupFailureLatched) throw new Error('CUA_BUSY');
+    if (this.observing || this.state.phase === 'acting' || this.state.phase === 'stopping' || this.cleanupFailureLatched) throw new Error('CUA_BUSY');
     if (!context.sessionId || !context.runId || !this.surface?.safeSurface?.interactive) throw new Error('CUA_UNSAFE_SURFACE');
+    this.observing = true;
+    this.frame = null;
+    try {
     const snapshot = structuredClone(this.surface);
     const revision = this.generation;
     const panel: unknown = await this.window.webContents.executeJavaScript(`(() => {
@@ -138,10 +147,11 @@ export class CuaDriver {
     this.frame = frame; this.frameTime = performance.now(); this.cancellation = null;
     this.publish({ ...context, phase: 'ready', error: null, cleanupComplete: true, releaseFailures: [] });
     return frame;
+    } finally { this.observing = false; }
   }
   private validate(request: CuaActionRequest): CuaPoint[] {
     this.live();
-    if (this.state.phase !== 'ready') throw new Error('CUA_BUSY');
+    if (this.observing || this.state.phase !== 'ready') throw new Error('CUA_BUSY');
     const f = this.frame, s = this.surface;
     if (!f || !s || request.sessionId !== f.sessionId || request.runId !== f.runId || request.windowId !== this.window.id || request.frameId !== f.frameId || request.layoutRevision !== f.layoutRevision || s.layoutRevision !== f.layoutRevision || performance.now() - this.frameTime > 120000 || this.window.webContents.getZoomFactor() !== f.zoomFactor
       || (this.dependencies.getDeviceScaleFactor?.() ?? 1) !== f.deviceScaleFactor) throw new Error('CUA_STALE_FRAME');
