@@ -1,6 +1,7 @@
 import type { CuaPhase, CuaRect, CuaState, CuaSurfaceSnapshot } from '../../../shared/cua';
 
 export const INITIAL_CUA_STATE: CuaState = {
+  prepareToken: null,
   cancelToken: null,
   targetGone: false,
   sessionId: null,
@@ -300,14 +301,17 @@ export class CuaSurfaceRevisionTracker {
     this.lastFocusedInSafeSurface = measured.focusedInSafeSurface;
 
     const snapshot: CuaSurfaceSnapshot = {
-      executionBlocked: measured.executionBlocked,
-      blockReason: measured.blockReason,
+      // Temporary compatibility only: this older FE has no committed-content
+      // counter. Never substitute layout revision or authorize a live surface.
+      contentRevision: 0,
+      executionBlocked: true,
+      blockReason: 'content-revision-unavailable',
       layoutRevision: this.revision,
       viewport: {
         width: Math.max(0, Math.round(measured.viewport.width)),
         height: Math.max(0, Math.round(measured.viewport.height))
       },
-      safeSurface: measured.safeSurface,
+      safeSurface: null,
       protectedRects: measured.protectedRects,
       focusedInSafeSurface: measured.focusedInSafeSurface,
       focusedTestId: measured.focusedInSafeSurface ? measured.focusedTestId : null
@@ -343,6 +347,7 @@ export class CuaSurfaceRevisionTracker {
 
 export function createFailClosedSnapshot(layoutRevision: number, viewport = { width: 1, height: 1 }, blockReason = 'unmounted'): CuaSurfaceSnapshot {
   return {
+    contentRevision: 0,
     executionBlocked: true,
     blockReason,
     layoutRevision,
