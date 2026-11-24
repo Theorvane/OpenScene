@@ -26,7 +26,7 @@ function fixture() {
   const getApiKey = vi.fn(async () => 'fake-key-for-test-only');
   const release = vi.fn();
   const hook = createJevObservationHook({ getConfig: () => config, getApiKey,
-    getObservationContext: () => context, acquireJudgmentLease: () => ({ frame, signal: run.signal,
+    getObservationContext: () => context, acquireJudgmentLease: () => ({ frame: context!.currentFrame!, signal: run.signal,
       getCurrentFrame: () => context?.currentFrame ?? null, release }), fetch, now: () => 101 });
   return { hook, fetch, getApiKey, run, release, call: () => hook({ conversationId: 'c', output: { success: true, frame } }),
     setConfig: (value: Partial<typeof config>) => { config = { ...config, ...value }; },
@@ -37,6 +37,16 @@ describe('Jev explicit observation advisory', () => {
   it('defaults off and reads neither key nor network', async () => {
     const f = fixture(); f.setConfig({ enabled: false });
     expect(await f.call()).toBeNull(); expect(f.getApiKey).not.toHaveBeenCalled(); expect(f.fetch).not.toHaveBeenCalled();
+  });
+  it('bounds repeated explicit observations to three requests per run then falls back', async () => {
+    const f = fixture();
+    for (let index = 0; index < 5; index++) {
+      const fresh = { ...frame, frameId: `fresh-${index}` };
+      f.setContext({ currentFrame: fresh });
+      const result = await f.hook({ conversationId: 'c', output: { success: true, frame: fresh } });
+      expect(result !== null).toBe(index < 3);
+    }
+    expect(f.fetch).toHaveBeenCalledTimes(3);
   });
   it('sends the official pinned image/choice contract once with no redirect or retries', async () => {
     const f = fixture();
@@ -107,12 +117,16 @@ describe('Jev explicit observation advisory', () => {
 });
 
 describe('Jev graph observation contact', () => {
-  it.each(['advisory', 'failure', 'absent'] as const)('preserves explicit observation and existing model with %s', async mode => {
+  it.each(['reobserve', 'sufficient', 'uncertain', 'failure', 'absent', 'disabled'] as const)('routes explicit evidence while preserving existing model with %s', async mode => {
     const f = fixture();
+    if (mode === 'disabled') f.setConfig({ enabled: false });
+    if (mode === 'sufficient') f.fetch.mockImplementation(async () => { const value = answer(); value.answers.judgment.choice = 'sufficient'; value.answers.judgment.probabilities = { reobserve: 0.01, sufficient: 0.99 }; return Response.json(value); });
+    if (mode === 'uncertain') f.fetch.mockImplementation(async () => { const value = answer(); value.answers.judgment.probabilities = { reobserve: 0.6, sufficient: 0.4 }; return Response.json(value); });
     // The actual registered CUA tool returns a JSON string, not an object.
     const observe = vi.fn(async () => JSON.stringify({ success: true, summary: 'Explicit editor observation.', frame }));
     let step = 0;
     let observedContent = '';
+    let imageCount = 0;
     const bundle = buildAgentChatGraph({
       tools: [tool(observe, { name: 'observeEditorWindow', description: 'Observe editor', schema: z.object({}) })],
       mutatingToolNames: new Set(),
@@ -121,6 +135,7 @@ describe('Jev graph observation contact', () => {
         if (step++ === 0) return new AIMessage({ content: '', tool_calls: [{ id: 'observation', name: 'observeEditorWindow', args: {} }] });
         const message = messages.find(m => isToolMessage(m) && m.name === 'observeEditorWindow');
         observedContent = String(message?.content);
+        imageCount = messages.filter(m => Array.isArray(m.content) && m.content.some(part => typeof part === 'object' && part !== null && part.type === 'image_url')).length;
         return new AIMessage('Existing model continues.');
       } })
     });
@@ -128,8 +143,9 @@ describe('Jev graph observation contact', () => {
     expect(result.status).toBe('idle');
     expect(observe).toHaveBeenCalledTimes(1);
     expect(observedContent).toContain('Explicit editor observation.');
-    expect(observedContent.includes('jev-advisory')).toBe(mode === 'advisory');
-    expect(f.fetch).toHaveBeenCalledTimes(mode === 'advisory' ? 1 : 0);
+    expect(observedContent.includes('jev-advisory')).toBe(mode === 'reobserve' || mode === 'sufficient');
+    expect(f.fetch).toHaveBeenCalledTimes(['reobserve', 'sufficient', 'uncertain'].includes(mode) ? 1 : 0);
+    expect(imageCount).toBe(mode === 'reobserve' ? 0 : 1);
     expect(observedContent).not.toContain('fake-key');
   });
 });

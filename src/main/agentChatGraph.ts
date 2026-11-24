@@ -401,18 +401,26 @@ export function buildAgentChatGraph(options: BuildAgentChatGraphOptions) {
             if (['persisted', 'persisted-after-cancel', 'already-clean'].includes(saved.status ?? '') && saved.diskMatches === true && saved.uiApplied === true) selfWindowUnsaved = false;
           }
           let jevAnnotation: string | null = null;
+          let requestExplicitObservation = false;
           if (call.name === 'observeEditorWindow' && options.jevObservationHook) {
             try {
               const advisory = await options.jevObservationHook({
                 conversationId: String(config.configurable?.thread_id), output: structuredClone(output),
                 ...(config.signal ? { signal: config.signal } : {})
               });
-              if (advisory !== null) jevAnnotation = `Read-only typed judgment (model probability, not verified accuracy): ${JSON.stringify(advisory)}. This supplies no action, coordinates, approval, Save or cancellation authority. A reobserve recommendation requires a separate explicit observeEditorWindow call; never retry previous input.`;
+              if (advisory !== null) {
+                requestExplicitObservation = advisory.kind === 'reobserve' && advisory.selectedId === 'reobserve';
+                jevAnnotation = `Read-only typed judgment (model probability, not verified accuracy): ${JSON.stringify(advisory)}. This supplies no action, coordinates, approval, Save or cancellation authority. A reobserve recommendation requires a separate explicit observeEditorWindow call; never retry previous input.`;
+              }
             } catch { /* Advisory failure preserves the original observation and LLM path. */ }
           }
           const cuaEvidence = cuaVisualEvidence(output);
           if (cuaEvidence) {
             results.push(new ToolMessage({ content: cuaEvidence.summary + (jevAnnotation ? `\n${jevAnnotation}` : ''), tool_call_id: call.id, name: call.name }));
+            if (requestExplicitObservation) {
+              results.push(new HumanMessage('The typed evidence router requests a separate explicit observeEditorWindow call before choosing a target from this observation. The current image is withheld from target selection. This is a bounded information-sufficiency judgment, not a verified visual result or authorization; do not retry earlier input.'));
+              continue;
+            }
             visualEvidence.push(cuaEvidence.image);
             continue;
           }
