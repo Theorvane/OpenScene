@@ -85,7 +85,10 @@ function AppShellContent({ activePage, children, hasActiveProject, onPageChange,
     contentRevision,
     isAgentBusy: isBusy,
     hasPendingApproval: pendingApproval !== null,
-    activePageId: activePage.id
+    activePageId: activePage.id,
+    onStopRequested: () => {
+      if (isBusy || pendingApproval !== null) void cancelConversation();
+    }
   });
   const workspaceInert = cua.isWorkspaceInert;
   const { layoutPreference, updateLayoutPreference } = useAgentChatLayoutPreference();
@@ -241,7 +244,7 @@ function AppShellContent({ activePage, children, hasActiveProject, onPageChange,
       <div ref={shellBodyRef} className="app-shell__body">
         <div id="app-shell-workspace" className="agent-workspace-lock" aria-busy={isBusy} inert={workspaceInert}>
           <div className="agent-workspace-lock__content">{children}</div>
-          {isBusy && !cua.isActing && !cua.isPreparing && (
+          {isBusy && !cua.isActing && !cua.isPreparing && cua.state.phase !== 'ready' && (
             <div aria-live="polite">
               <div className="agent-workspace-lock__message" aria-hidden="true">
                 Edit Agent is updating your workspace...
@@ -281,8 +284,7 @@ function AppShellContent({ activePage, children, hasActiveProject, onPageChange,
         stopError={cua.stopError}
         agentBusy={isBusy}
         onStop={() => {
-          void cua.requestStop();
-          if (isBusy) void cancelConversation();
+          void cua.triggerStop();
         }}
       />
     </main>

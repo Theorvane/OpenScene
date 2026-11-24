@@ -34,9 +34,13 @@ export function computeWorkspaceInert(input: {
   readonly hasPendingApproval: boolean;
   readonly cuaPhase: CuaPhase;
 }): boolean {
-  // Deterministic prepareAck handshake: unlock workspace only when main explicitly
-  // enters `preparing` (bound to an approved main-only permit) or `acting`.
-  if (input.cuaPhase === 'preparing' || input.cuaPhase === 'acting') return false;
+  // Keep workspace non-inert across active CUA lifecycle phases (`ready`,
+  // `preparing`, `acting`) so `acting -> ready` never re-attaches `inert` and
+  // triggers Chromium `focusout` -> `layoutRevision` / `surface-changed` cancel
+  // loops, and real DOM focus is preserved naturally for multi-step key actions.
+  // During `ready`, main-process `executionBlocked` + `before-input-event` /
+  // `before-mouse-event` guards remain active and cancel on any user input.
+  if (input.cuaPhase === 'ready' || input.cuaPhase === 'preparing' || input.cuaPhase === 'acting') return false;
   return input.hasPendingApproval || input.isAgentBusy;
 }
 
