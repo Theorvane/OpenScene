@@ -16,6 +16,8 @@ Both initial probes reported window/content focus false even after win.focus. Ac
 
 The zoom-2 probe records a CSS viewport of 350×184, PNG bitmap 700×368 and devicePixelRatio 2. Electron input (40,30) arrives at DOM CSS (20,15): input uses window DIP and must multiply CSS coordinates by zoomFactor. PNG dimensions and device display scale are measured separately; DPR alone cannot supply both conversions. `/tmp/openscene-cua-zoom-probe/input.json` and `capture.png` retain the evidence.
 
+An explicitly authorized, initial-only test-entry selection (`CUA_PROBE_INITIAL_FOCUS=1`) called app.focus({ steal: true }), win.focus and webContents.focus with a separate temporary userData profile. On this host the resulting window ID 1, title `OpenScene CUA Input Probe`, still reported both focus flags false. `/tmp/openscene-cua-focused-isolated-probe/input.json` and `capture.png` retain this result, including all 29 injected mouse/key before-events observed synchronously inside sendInputEvent. No production focus guard was relaxed and the test never refocused mid-run. Orca's native provider reports `windows.focus: false`; its availability does not establish that this Electron window can become focused.
+
 Raw initial evidence: `/tmp/openscene-cua-probe/input.json`, `/tmp/openscene-cua-probe/capture.png`, `/tmp/openscene-cua-pointer-probe/input.json`, `/tmp/openscene-cua-pointer-probe/capture.png`. These are local experimental artifacts, not the required full application evidence.
 
 ## Remaining integration evidence
