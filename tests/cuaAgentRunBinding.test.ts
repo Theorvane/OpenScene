@@ -139,4 +139,37 @@ describe('CUA immutable run binding and dispatch', () => {
     await expect(f.orchestrator.executeApproved('a', 'one', request)).rejects.toThrow('CUA_APPROVAL_MISMATCH');
     expect(f.inputs()).toBe(0);
   });
+
+  it('awaits the entire rollback/physical-release promise before cancellation completes', async () => {
+    const f = fixture();
+    await f.orchestrator.observe('a');
+    let release!: () => void;
+    let held = 1;
+    let settled = false;
+    const released = new Promise<void>((resolve) => { release = resolve; });
+    f.driver.cancel = async () => {
+      await released;
+      held = 0;
+      return { ...f.driver.getState(), phase: 'stopped', cleanupComplete: true };
+    };
+    const stop = f.orchestrator.cancelConversation('a');
+    void stop.then(() => { settled = true; });
+    expect(f.orchestrator.cancelConversation('a')).toBe(stop);
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    expect(held).toBe(1);
+    release();
+    await stop;
+    expect(held).toBe(0);
+    expect(settled).toBe(true);
+  });
+
+  it('latches failed rollback even when physical held input is zero', async () => {
+    const f = fixture();
+    await f.orchestrator.observe('a');
+    f.driver.cancel = async () => ({ ...f.driver.getState(), phase: 'cleanup-failed', cleanupComplete: false,
+      releaseFailures: ['renderer-rollback-unconfirmed'] });
+    await expect(f.orchestrator.cancelConversation('a')).rejects.toThrow('CUA_CLEANUP_FAILED');
+    await expect(f.orchestrator.observe('b')).rejects.toThrow('CUA_CLEANUP_FAILED');
+  });
 });

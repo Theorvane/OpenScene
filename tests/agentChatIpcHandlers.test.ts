@@ -20,6 +20,29 @@ function createFakeIpcMain(): { ipcMain: IpcMain; handlers: Map<string, Listener
 const RESET_STATE: AgentChatTurnState = { conversationId: 'c1', messages: [], pendingApproval: null, status: 'idle' };
 
 describe('registerAgentChatIpcHandlers', () => {
+  it('checks trusted ownership before cancel or approval and awaits cancellation settlement', async () => {
+    const { ipcMain, handlers } = createFakeIpcMain();
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => { release = resolve; });
+    const cancelConversation = vi.fn(async () => { await released; return RESET_STATE; });
+    const respondToApproval = vi.fn();
+    const sessions = { cancelConversation, respondToApproval } as unknown as AgentChatSessionManager;
+    const trusted = {};
+    registerAgentChatIpcHandlers(ipcMain, sessions, null, { cancelChannel: 'test:cancel', isTrustedSender: (event) => event === trusted });
+    const cancel = handlers.get('test:cancel')!;
+    expect(await cancel({}, { conversationId: 'c1' })).toMatchObject({ ok: false });
+    expect(await cancel(trusted, { conversationId: '' })).toMatchObject({ ok: false });
+    expect(await handlers.get(IPC_CHANNELS.agentChatApprove)!({}, {})).toMatchObject({ ok: false });
+    expect(respondToApproval).not.toHaveBeenCalled();
+    expect(cancelConversation).not.toHaveBeenCalled();
+    let settled = false;
+    const result = Promise.resolve(cancel(trusted, { conversationId: 'c1' })).then((response) => { settled = true; return response; });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    release();
+    expect(await result).toEqual({ ok: true, value: RESET_STATE });
+  });
+
   it('resolves the resetConversation promise before wrapping it in ok() for the reset channel', async () => {
     const { ipcMain, handlers } = createFakeIpcMain();
     const sessions = {
