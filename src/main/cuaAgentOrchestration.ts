@@ -25,7 +25,7 @@ function digest(request: CuaActionRequest): string {
       : ['key', action.key, [...action.modifiers].sort()];
   return createHash('sha256').update(JSON.stringify([
     request.sessionId, request.runId, request.windowId, request.frameId,
-    request.layoutRevision, canonicalAction
+    request.layoutRevision, request.contentRevision, canonicalAction
   ])).digest('hex');
 }
 
@@ -90,13 +90,13 @@ export class CuaApprovalAuthority {
 
   getPendingApproval(): Readonly<{
     conversationId: string; toolCallId: string; sessionId: string; runId: string;
-    windowId: number; frameId: string; layoutRevision: number;
+    windowId: number; frameId: string; layoutRevision: number; contentRevision: number;
   }> | null {
     const pending = this.pending;
     if (!pending) return null;
-    const { sessionId, runId, windowId, frameId, layoutRevision } = pending.request;
+    const { sessionId, runId, windowId, frameId, layoutRevision, contentRevision } = pending.request;
     return Object.freeze({ conversationId: pending.conversationId, toolCallId: pending.toolCallId,
-      sessionId, runId, windowId, frameId, layoutRevision });
+      sessionId, runId, windowId, frameId, layoutRevision, contentRevision });
   }
 
   /** Non-consuming preflight. It never extends time or changes approved scope. */
@@ -192,13 +192,14 @@ export class CuaAgentOrchestrator {
     run.controller.signal.throwIfAborted();
     if (frame.sessionId !== this.sessionId || frame.runId !== run.runId) throw new CuaApprovalError('CUA_SCOPE_CHANGED');
     run.frame = structuredClone(frame);
-    return { success: true, summary: `Self-window observation frameId=${frame.frameId}, layoutRevision=${frame.layoutRevision}; CSS viewport ${frame.viewport.width}×${frame.viewport.height}.`, frame };
+    return { success: true, summary: `Self-window observation frameId=${frame.frameId}, layoutRevision=${frame.layoutRevision}, contentRevision=${frame.contentRevision}; CSS viewport ${frame.viewport.width}×${frame.viewport.height}.`, frame };
   }
 
   prepareApproval(conversationId: string, toolCallId: string, request: CuaActionRequest): AgentCuaApprovalSummary {
     const run = this.requireRun(conversationId, request);
     const frame = run.frame;
-    if (!frame || frame.frameId !== request.frameId || frame.layoutRevision !== request.layoutRevision) {
+    if (!frame || frame.frameId !== request.frameId || frame.layoutRevision !== request.layoutRevision
+      || frame.contentRevision !== request.contentRevision) {
       throw new CuaApprovalError('CUA_FRAME_STALE');
     }
     this.options.driver.setExecutionBlocked(true);
@@ -213,7 +214,7 @@ export class CuaAgentOrchestrator {
     }
     const action = request.action;
     return { actionKind: action.kind, actionLabel: action.kind === 'key' ? `Press ${action.modifiers.join('+')}${action.modifiers.length ? '+' : ''}${action.key}` : action.kind === 'drag' ? `Drag for ${action.durationMs} ms` : 'Click',
-      frameId: request.frameId, scopeRevision: request.layoutRevision, coordinateSpace: 'css',
+      frameId: request.frameId, scopeRevision: request.layoutRevision, contentRevision: request.contentRevision, coordinateSpace: 'css',
       ...(action.kind === 'click' ? { coords: action.point } : action.kind === 'drag' ? { coords: action.from, dragTo: action.to } : {}) };
   }
 

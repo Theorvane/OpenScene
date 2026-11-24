@@ -117,6 +117,14 @@ describe('CUA immutable run binding and dispatch', () => {
     expect(f.inputs()).toBe(0);
   });
 
+  it('rejects an altered content revision even when frame and layout IDs match', async () => {
+    const f = fixture();
+    const request = f.requestFor((await f.orchestrator.observe('a')).frame);
+    expect(() => f.orchestrator.prepareApproval('a', 'one', { ...request, contentRevision: request.contentRevision + 1 })).toThrow('CUA_FRAME_STALE');
+    expect(f.authority.getPendingApproval()).toBeNull();
+    expect(f.inputs()).toBe(0);
+  });
+
   it('cannot cancel the active run through another conversation ID', async () => {
     const f = fixture();
     await f.orchestrator.observe('a');

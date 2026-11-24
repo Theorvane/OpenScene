@@ -28,6 +28,7 @@ export interface AgentCuaApprovalSummary {
   readonly actionLabel: string;
   readonly frameId: string;
   readonly scopeRevision: string | number;
+  readonly contentRevision: number;
   readonly coordinateSpace?: 'css' | 'bitmap' | undefined;
   readonly coords?: { readonly x: number; readonly y: number } | undefined;
   readonly dragTo?: { readonly x: number; readonly y: number } | undefined;
