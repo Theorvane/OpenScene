@@ -283,9 +283,10 @@ describe('cuaSurfaceSnapshot', () => {
     expect(s3.changed).toBe(false);
   });
 
-  it('coordinates workspace inertness and executionBlocked across pendingApproval, preparing, and CUA acting', () => {
+  it('coordinates workspace inertness and executionBlocked across idle, ready, preparing, and CUA acting', () => {
     expect(computeWorkspaceInert({ isAgentBusy: false, hasPendingApproval: true, cuaPhase: 'idle' })).toBe(true);
-    expect(computeWorkspaceInert({ isAgentBusy: false, hasPendingApproval: true, cuaPhase: 'ready' })).toBe(true);
+    expect(computeWorkspaceInert({ isAgentBusy: false, hasPendingApproval: true, cuaPhase: 'ready' })).toBe(false);
+    expect(computeWorkspaceInert({ isAgentBusy: true, hasPendingApproval: false, cuaPhase: 'ready' })).toBe(false);
     expect(computeWorkspaceInert({ isAgentBusy: true, hasPendingApproval: true, cuaPhase: 'preparing' })).toBe(false);
     expect(computeWorkspaceInert({ isAgentBusy: true, hasPendingApproval: false, cuaPhase: 'acting' })).toBe(false);
     expect(computeWorkspaceInert({ isAgentBusy: true, hasPendingApproval: false, cuaPhase: 'idle' })).toBe(true);

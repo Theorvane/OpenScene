@@ -49,6 +49,7 @@ export function AgentChatPanel({ width, onCollapse }: AgentChatPanelProps): Reac
     status,
     error,
     errorCode,
+    cuaSaveResult,
     isBusy,
     interactionMode,
     changeInteractionMode,
@@ -209,6 +210,20 @@ export function AgentChatPanel({ width, onCollapse }: AgentChatPanelProps): Reac
                     <dt>Scope revision</dt>
                     <dd data-testid="agent-cua-approval-revision">{String(pendingApproval.cuaApproval.scopeRevision)}</dd>
                   </div>
+                  <div>
+                    <dt>Content revision</dt>
+                    <dd data-testid="agent-cua-approval-content-revision">{String(pendingApproval.cuaApproval.contentRevision)}</dd>
+                  </div>
+                  {pendingApproval.cuaApproval.actionKind === 'save' && (
+                    <>
+                      <div>
+                        <dt>Snapshot</dt>
+                        <dd data-testid="agent-cua-approval-save-digest" title={pendingApproval.cuaApproval.timelineDigest}>
+                          {pendingApproval.cuaApproval.timelineDigest.slice(0, 12)}… · {pendingApproval.cuaApproval.clipCount} clips, {pendingApproval.cuaApproval.titleCount} titles ({pendingApproval.cuaApproval.dirty ? 'unsaved' : 'clean'})
+                        </dd>
+                      </div>
+                    </>
+                  )}
                   {pendingApproval.cuaApproval.coords !== undefined && (
                     <div>
                       <dt>Coordinates ({pendingApproval.cuaApproval.coordinateSpace ?? 'css'})</dt>
@@ -263,6 +278,22 @@ export function AgentChatPanel({ width, onCollapse }: AgentChatPanelProps): Reac
           )}
 
           {status === 'thinking' && <p className="agent-chat-status">Working through OpenScene…</p>}
+          {cuaSaveResult !== undefined && (
+            <div
+              className={`status-card${cuaSaveResult.status === 'write-outcome-unknown' || (cuaSaveResult.diskMatches === false) ? ' status-card--danger' : ''}`}
+              role="status"
+              data-testid="agent-cua-save-result"
+              data-save-status={cuaSaveResult.status}
+              data-disk-matches={cuaSaveResult.diskMatches === null ? 'null' : String(cuaSaveResult.diskMatches)}
+              data-ui-applied={String(cuaSaveResult.uiApplied)}
+            >
+              <p>
+                <strong>Save receipt:</strong> {cuaSaveResult.status} · disk verified:{' '}
+                {cuaSaveResult.diskMatches === true ? 'yes' : cuaSaveResult.diskMatches === false ? 'mismatch' : 'unverified'} · UI clean applied:{' '}
+                {cuaSaveResult.uiApplied ? 'yes' : 'no (newer edits or unverified)'}
+              </p>
+            </div>
+          )}
           {(error !== undefined || errorCode !== undefined) && (
             <div
               className="status-card status-card--danger"

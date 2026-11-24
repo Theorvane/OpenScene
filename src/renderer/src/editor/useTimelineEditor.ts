@@ -44,6 +44,12 @@ import { applyCanvasBlock } from '../../../shared/videoCanvasBlocks';
 import { EMPTY_CANVAS_GRAPH, parseVideoCanvasGraph, type VideoCanvasGraph } from '../../../shared/videoCanvasGraph';
 import { applyEditorOperations } from '../../../shared/editorOperations';
 import { errorMessage, type StatusMessage } from '../appTypes';
+import { hasActiveTimelineDrag } from '../cua/cuaDragGuard';
+import {
+  buildCuaSaveSnapshotReport,
+  evaluateCuaSaveFinished,
+  evaluateCuaSaveReadyRequest
+} from '../cua/cuaSaveClient';
 import { createTimelineHistory, pushTimelineHistory, redoTimelineHistory, undoTimelineHistory, type TimelineHistory } from './editorTimelineHistory';
 import { findClipSelection, findFirstCompatibleTrack, insertionStartForTrack, mediaAssetReady, nextTrackName, placeReadyAssetOnTimeline } from './editorTimelineView';
 import { metadataProbeFailureMessage } from './mediaLoadFailures';
@@ -69,12 +75,25 @@ export function useTimelineEditor() {
   const [isBusy, setIsBusy] = useState(false);
   const [hasUnsavedTimeline, setHasUnsavedTimeline] = useState(false);
   const [isSavingTimeline, setIsSavingTimeline] = useState(false);
+  const [isCuaSaveFrozen, setIsCuaSaveFrozen] = useState(false);
   const [timelineSaveError, setTimelineSaveError] = useState<string | null>(null);
   const [hasSavedTimelineOnce, setHasSavedTimelineOnce] = useState(false);
   const [metadataProbeFailuresByAssetId, setMetadataProbeFailuresByAssetId] = useState<Readonly<Record<string, string>>>({});
   const [metadataProbeRetryRevisionsByAssetId, setMetadataProbeRetryRevisionsByAssetId] = useState<Readonly<Record<string, number>>>({});
   const [statusMessage, setStatusMessage] = useState<StatusMessage>({ tone: 'neutral', text: 'Create or open a project to start editing locally.' });
   const projectRef = useRef<LocalProjectSnapshot | null>(null);
+  const cuaSaveFreezeTokenRef = useRef<string | null>(null);
+  const liveSaveStateRef = useRef<{
+    project: LocalProjectSnapshot | null;
+    contentRevision: number;
+    hasUnsavedTimeline: boolean;
+    isSavingTimeline: boolean;
+  }>({
+    project: null,
+    contentRevision: 0,
+    hasUnsavedTimeline: false,
+    isSavingTimeline: false
+  });
   // Monotonic committed content revision for CUA stale-content invalidation.
   // Increments ONLY when committed project/timeline/assets content actually changes
   // (never on selection, focus, playhead, uncommitted drag preview, HUD changes, or
@@ -111,6 +130,12 @@ export function useTimelineEditor() {
     contentRevisionRef.current.assets = nextAssets;
   }
   const contentRevision = contentRevisionRef.current.revision;
+  liveSaveStateRef.current = {
+    project,
+    contentRevision,
+    hasUnsavedTimeline,
+    isSavingTimeline
+  };
 
   useEffect(() => {
     projectRef.current = project;
@@ -188,6 +213,7 @@ export function useTimelineEditor() {
   }, []);
 
   const openProject = useCallback(async (projectId: string): Promise<boolean> => {
+    if (cuaSaveFreezeTokenRef.current !== null) return false;
     const response = await invokeWhileBusy(() => window.videoTool.openProject({ projectId }), 'The project could not be opened.');
     if (response === null) return false;
     if (response.ok) {
@@ -245,7 +271,7 @@ export function useTimelineEditor() {
   }, [invokeWhileBusy, refreshProjects, setLoadedProject]);
 
   const deleteCurrentProject = useCallback(async () => {
-    if (project === null) return;
+    if (project === null || cuaSaveFreezeTokenRef.current !== null) return;
     const response = await invokeWhileBusy(() => window.videoTool.deleteProject({ projectId: project.id }), 'The project could not be deleted.');
     if (response === null) return;
     if (response.ok) {
@@ -263,7 +289,7 @@ export function useTimelineEditor() {
   const { importAssets, importRecordingResult } = useProjectAssetImports({ project, setIsBusy, setProject, setSelectedAssetId, setStatusMessage });
 
   const replaceTimeline = useCallback((update: TimelineUpdate, successText: string, rejectionText?: string): TimelineDocument | null => {
-    if (project === null) return null;
+    if (project === null || cuaSaveFreezeTokenRef.current !== null) return null;
     const timeline = update(project.timeline);
     if (timeline === null) {
       // The generic message is right for clip edits, where the rule broken is
@@ -583,6 +609,7 @@ export function useTimelineEditor() {
   }, [replaceTimeline, selectedClip]);
 
   const detachSelectedClipAudio = useCallback(async (): Promise<void> => {
+    if (cuaSaveFreezeTokenRef.current !== null) return;
     const sourceProject = projectRef.current;
     const sourceSelection = selectedClip;
     if (sourceProject === null || sourceSelection?.asset?.kind !== 'video') return;
@@ -644,7 +671,7 @@ export function useTimelineEditor() {
   }, [invokeWhileBusy, playback, selectedClip]);
 
   const undoTimeline = useCallback(() => {
-    if (timelineHistory === null) return;
+    if (timelineHistory === null || cuaSaveFreezeTokenRef.current !== null) return;
     const next = undoTimelineHistory(timelineHistory);
     if (next === null) return;
     setTimelineHistory(next);
@@ -655,7 +682,7 @@ export function useTimelineEditor() {
   }, [playback, timelineHistory]);
 
   const redoTimeline = useCallback(() => {
-    if (timelineHistory === null) return;
+    if (timelineHistory === null || cuaSaveFreezeTokenRef.current !== null) return;
     const next = redoTimelineHistory(timelineHistory);
     if (next === null) return;
     setTimelineHistory(next);
@@ -666,7 +693,7 @@ export function useTimelineEditor() {
   }, [playback, timelineHistory]);
 
   const updateAssetMetadata = useCallback(async (assetId: string, metadata: { readonly durationMs: number; readonly width?: number; readonly height?: number }): Promise<boolean> => {
-    if (project === null) return false;
+    if (project === null || cuaSaveFreezeTokenRef.current !== null) return false;
     const response = await window.videoTool.updateAssetMetadata({ projectId: project.id, assetId, ...metadata });
     if (response.ok) {
       setProject((current) => current === null ? current : { ...current, assets: current.assets.map((asset) => asset.id === response.value.id ? response.value : asset) });
@@ -712,7 +739,7 @@ export function useTimelineEditor() {
   }, [hasUnsavedTimeline, playback, project?.id, setLoadedProject]);
 
   const renameProject = useCallback(async (name: string): Promise<boolean> => {
-    if (project === null) return false;
+    if (project === null || cuaSaveFreezeTokenRef.current !== null) return false;
     const response = await window.videoTool.renameProject({ projectId: project.id, name });
     if (!response.ok) {
       setStatusMessage({ tone: 'danger', text: errorMessage(response.error) });
@@ -726,7 +753,7 @@ export function useTimelineEditor() {
   }, [project, refreshProjects]);
 
   const saveTimeline = useCallback(async (): Promise<boolean> => {
-    if (project === null) return false;
+    if (project === null || cuaSaveFreezeTokenRef.current !== null) return false;
     setIsSavingTimeline(true);
     setTimelineSaveError(null);
     try {
@@ -757,7 +784,82 @@ export function useTimelineEditor() {
     }
   }, [invokeWhileBusy, project]);
 
-  const timelineSaveStatus: 'clean' | 'dirty' | 'saving' | 'saved' | 'error' = isSavingTimeline
+  // Explicit live timeline Save bridge (`CuaSaveBridge` in main process):
+  // 1) `onCuaSaveSnapshotRequested`: report readonly live timeline + dirty + contentRevision.
+  // 2) `onCuaSaveRequested`: synchronously freeze local edits & acknowledge ready/not-ready.
+  // 3) `onCuaSaveFinished`: always release freeze; mark clean only when diskMatches===true
+  //    and live (projectId, contentRevision) still match expectedContentRevision.
+  useEffect(() => {
+    const api = typeof window === 'undefined' ? undefined : window.videoTool;
+    if (
+      typeof api?.onCuaSaveSnapshotRequested !== 'function' ||
+      typeof api?.onCuaSaveRequested !== 'function' ||
+      typeof api?.onCuaSaveFinished !== 'function'
+    ) {
+      return;
+    }
+
+    const readLiveState = () => ({
+      ...liveSaveStateRef.current,
+      cuaSaveFreezeToken: cuaSaveFreezeTokenRef.current,
+      hasActiveDrag: hasActiveTimelineDrag()
+    });
+
+    const unsubSnapshot = api.onCuaSaveSnapshotRequested((request) => {
+      const report = buildCuaSaveSnapshotReport(request, readLiveState());
+      if (report !== null && typeof api.cuaReportSaveSnapshot === 'function') {
+        void api.cuaReportSaveSnapshot(report).catch(() => undefined);
+      }
+    });
+
+    const unsubReady = api.onCuaSaveRequested((request) => {
+      const { freezeToken, ack } = evaluateCuaSaveReadyRequest(request, readLiveState());
+      if (freezeToken !== null) {
+        cuaSaveFreezeTokenRef.current = freezeToken;
+        setIsCuaSaveFrozen(true);
+      }
+      if (typeof api.cuaAckSaveReady === 'function') {
+        void api.cuaAckSaveReady(ack).catch(() => undefined);
+      }
+    });
+
+    const unsubFinished = api.onCuaSaveFinished((result) => {
+      const decision = evaluateCuaSaveFinished(result, readLiveState());
+      if (decision.releaseFreeze) {
+        cuaSaveFreezeTokenRef.current = null;
+        setIsCuaSaveFrozen(false);
+      }
+      if (decision.applyCleanUi) {
+        if (result.persistedUpdatedAt !== null) {
+          setProject((current) =>
+            current === null || current.id !== result.projectId
+              ? current
+              : { ...current, updatedAt: result.persistedUpdatedAt! }
+          );
+        }
+        setHasUnsavedTimeline(false);
+        setTimelineSaveError(null);
+        setHasSavedTimelineOnce(true);
+        setStatusMessage({ tone: 'success', text: 'Timeline saved locally.' });
+      } else if (decision.saveError !== null) {
+        setTimelineSaveError(decision.saveError);
+      }
+      if (decision.commitAck !== null && typeof api.cuaAckSaveCommit === 'function') {
+        void api.cuaAckSaveCommit(decision.commitAck).catch(() => undefined);
+      }
+    });
+
+    return () => {
+      unsubSnapshot();
+      unsubReady();
+      unsubFinished();
+      cuaSaveFreezeTokenRef.current = null;
+      setIsCuaSaveFrozen(false);
+    };
+  }, []);
+
+  const effectiveIsSavingTimeline = isSavingTimeline || isCuaSaveFrozen;
+  const timelineSaveStatus: 'clean' | 'dirty' | 'saving' | 'saved' | 'error' = effectiveIsSavingTimeline
     ? 'saving'
     : timelineSaveError !== null
       ? 'error'
@@ -768,7 +870,7 @@ export function useTimelineEditor() {
           : 'clean';
 
   const saveAiProjectDocument = useCallback(async (ai: AiProjectDocument): Promise<boolean> => {
-    if (project === null) return false;
+    if (project === null || cuaSaveFreezeTokenRef.current !== null) return false;
     const response = await window.videoTool.saveAiProjectDocument({ projectId: project.id, ai });
     if (!response.ok) {
       setStatusMessage({ tone: 'danger', text: errorMessage(response.error) });
@@ -816,7 +918,7 @@ export function useTimelineEditor() {
       'Connected clips. The video track now plays continuously in the new order.'
     ),
     addTimelineTrack, removeTimelineTrack, renameTimelineTrack, insertTimelineTrack, contentRevision, createProject, deleteCurrentProject, deleteSelectedClip, duplicateSelectedClip, hasUnsavedTimeline, importAssets,
-    isSavingTimeline, timelineSaveError, timelineSaveStatus,
+    isSavingTimeline: effectiveIsSavingTimeline, isCuaSaveFrozen, timelineSaveError, timelineSaveStatus,
     importRecordingResult, isBusy, metadataProbeFailuresByAssetId, metadataProbeRetryRevisionsByAssetId, moveSelectedClip, newProjectName,
     cutAtPlayhead, transitionAtPlayhead, setTransitionAtPlayhead, removeTransitionAtPlayhead,
     addTitleAtPlayhead, editTitle, deleteTitle, applyTitleStyleToAutomaticCaptions, titleAtPlayhead, applyNarrationSubtitles, applyTranscriptionSubtitles,

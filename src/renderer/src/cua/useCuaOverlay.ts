@@ -219,6 +219,7 @@ export interface CuaOverlayController {
   readonly isPreparing: boolean;
   readonly isWorkspaceInert: boolean;
   readonly requestStop: () => Promise<void>;
+  readonly triggerStop: () => Promise<void>;
   readonly refreshSnapshot: () => void;
 }
 
@@ -229,6 +230,7 @@ export function useCuaOverlayState(options: {
   readonly isAgentBusy: boolean;
   readonly hasPendingApproval: boolean;
   readonly activePageId: string;
+  readonly onStopRequested?: () => void;
 }): CuaOverlayController {
   const [state, setState] = useState<CuaState>(INITIAL_CUA_STATE);
   const [stopPending, setStopPending] = useState(false);
@@ -348,6 +350,28 @@ export function useCuaOverlayState(options: {
     }
   }, []);
 
+  // Unified Stop entrypoint shared by BOTH [data-testid="cua-stop-btn"] click and Escape key:
+  // 1) synchronously rolls back any active timeline drag,
+  // 2) cancels the active agent conversation / pendingApproval checkpoint when isAgentBusy || hasPendingApproval,
+  // 3) stops the CUA driver when in a stoppable phase (preserving cleanup-failed lock/warning).
+  const triggerStop = useCallback(async (): Promise<void> => {
+    const current = stateRef.current;
+    const currentOpts = optionsRef.current;
+    const hasActiveDriver = isCuaStoppablePhase(current.phase);
+    const hasAgentWork = currentOpts.isAgentBusy || currentOpts.hasPendingApproval;
+    if (!hasActiveDriver && !hasAgentWork && !stopPendingRef.current) return;
+
+    abortActiveTimelineDragSync();
+
+    if (hasAgentWork) {
+      currentOpts.onStopRequested?.();
+    }
+
+    if (hasActiveDriver && !stopPendingRef.current) {
+      await requestStop();
+    }
+  }, [requestStop]);
+
   // Subscribe to main-process CUA state and load initial state.
   useEffect(() => {
     const api = typeof window === 'undefined' ? undefined : window.videoTool;
@@ -381,19 +405,22 @@ export function useCuaOverlayState(options: {
     };
   }, [applyCuaState]);
 
-  // Global capture-phase Escape shortcut for immediate user stop.
+  // Global capture-phase Escape shortcut routed through the exact same unified triggerStop path as cua-stop-btn.
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (typeof window === 'undefined' || typeof document === 'undefined') return;
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key !== 'Escape') return;
-      if (!isCuaStoppablePhase(stateRef.current.phase)) return;
+      const stoppable = isCuaStoppablePhase(stateRef.current.phase);
+      const hasModal = document.querySelector('[role="dialog"][aria-modal="true"], dialog[open]') !== null;
+      const cancelPending = !hasModal && optionsRef.current.hasPendingApproval;
+      if (!stoppable && !cancelPending) return;
       event.preventDefault();
       event.stopImmediatePropagation();
-      void requestStop();
+      void triggerStop();
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [requestStop]);
+  }, [triggerStop]);
 
   // Report fail-closed immediately on mount, then observe layout, scroll, DOM, and focus changes.
   useEffect(() => {
@@ -546,9 +573,10 @@ export function useCuaOverlayState(options: {
       isPreparing: state.phase === 'preparing',
       isWorkspaceInert,
       requestStop,
+      triggerStop,
       refreshSnapshot: flushSnapshot
     }),
-    [flushSnapshot, isWorkspaceInert, requestStop, snapshot, state, stopError, stopPending]
+    [flushSnapshot, isWorkspaceInert, requestStop, snapshot, state, stopError, stopPending, triggerStop]
   );
 }
 
@@ -567,5 +595,6 @@ export function useCuaOverlay(): CuaOverlayController | null {
 }
 
 export function useCuaActing(): boolean {
-  return useContext(CuaOverlayContext)?.isActing ?? false;
+  const cua = useContext(CuaOverlayContext);
+  return cua !== null && (cua.isActing || cua.isPreparing);
 }
