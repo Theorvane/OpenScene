@@ -1,6 +1,8 @@
 import type { CuaPhase, CuaRect, CuaState, CuaSurfaceSnapshot } from '../../../shared/cua';
 
 export const INITIAL_CUA_STATE: CuaState = {
+  cancelToken: null,
+  targetGone: false,
   sessionId: null,
   runId: null,
   windowId: 0,
@@ -29,14 +31,46 @@ export function isCuaStopSettled(state: CuaState): boolean {
 export function computeWorkspaceInert(input: {
   readonly isAgentBusy: boolean;
   readonly hasPendingApproval: boolean;
+  readonly approvalInFlight?: boolean;
   readonly cuaPhase: CuaPhase;
 }): boolean {
-  // While CUA is actively executing an approved action, unlock the workspace so
-  // webContents.sendInputEvent reaches the editor even while agentChatApprove is
-  // still in flight (where isAgentBusy is true and pendingApproval remains set
-  // until the approval IPC resolves).
-  if (input.cuaPhase === 'acting') return false;
+  // While CUA is executing an approved action (or immediately after the user
+  // approves a CUA action so main's verifyDom sees a non-inert safe surface
+  // before publishing phase === 'acting'), unlock the workspace.
+  if (input.cuaPhase === 'acting' || input.approvalInFlight === true) return false;
   return input.hasPendingApproval || input.isAgentBusy;
+}
+
+export function computeExecutionBlockState(input: {
+  readonly isAgentBusy: boolean;
+  readonly hasPendingApproval: boolean;
+  readonly approvalInFlight?: boolean;
+  readonly hasBlockingOverlay: boolean;
+  readonly hasSafeSurface: boolean;
+  readonly cuaPhase: CuaPhase;
+}): { readonly executionBlocked: boolean; readonly blockReason: string | null } {
+  if (input.hasBlockingOverlay) {
+    return { executionBlocked: true, blockReason: 'blocking-overlay' };
+  }
+  if (!input.hasSafeSurface) {
+    return { executionBlocked: true, blockReason: 'no-safe-surface' };
+  }
+  if (input.cuaPhase === 'cleanup-failed') {
+    return { executionBlocked: true, blockReason: 'cleanup-failed' };
+  }
+  if (input.cuaPhase === 'stopping') {
+    return { executionBlocked: true, blockReason: 'stopping' };
+  }
+  if (input.cuaPhase === 'acting' || input.approvalInFlight === true) {
+    return { executionBlocked: false, blockReason: null };
+  }
+  if (input.hasPendingApproval) {
+    return { executionBlocked: true, blockReason: 'pending-approval' };
+  }
+  if (input.isAgentBusy) {
+    return { executionBlocked: true, blockReason: 'agent-busy' };
+  }
+  return { executionBlocked: false, blockReason: null };
 }
 
 export type CuaSafeSurfaceKind = NonNullable<CuaSurfaceSnapshot['safeSurface']>['kind'];
@@ -50,6 +84,8 @@ export interface SurfaceScrollState {
 }
 
 export interface MeasuredSurfaceState {
+  readonly executionBlocked: boolean;
+  readonly blockReason: string | null;
   readonly viewport: { readonly width: number; readonly height: number };
   readonly safeSurface: CuaSurfaceSnapshot['safeSurface'];
   readonly protectedRects: readonly CuaProtectedRectEntry[];
@@ -57,6 +93,8 @@ export interface MeasuredSurfaceState {
   readonly focusedTestId: string | null;
   readonly scrollStates: readonly SurfaceScrollState[];
   readonly hasBlockingOverlay: boolean;
+  /** True while CUA driver is actively injecting pointer/key events so its own mousedown focus does not self-cancel mid-drag. */
+  readonly cuaActing?: boolean;
 }
 
 const VALID_SAFE_KINDS = new Set<CuaSafeSurfaceKind>(['timeline', 'canvas', 'shorts-review']);
@@ -69,11 +107,15 @@ const VALID_PROTECTED_KINDS = new Set<CuaProtectedKind>([
   'modal'
 ]);
 
+function precision2(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
 export function roundRect(rect: { readonly x?: number; readonly left?: number; readonly y?: number; readonly top?: number; readonly width: number; readonly height: number }): CuaRect {
-  const x = Math.round(rect.x ?? rect.left ?? 0);
-  const y = Math.round(rect.y ?? rect.top ?? 0);
-  const width = Math.max(0, Math.round(rect.width));
-  const height = Math.max(0, Math.round(rect.height));
+  const x = precision2(rect.x ?? rect.left ?? 0);
+  const y = precision2(rect.y ?? rect.top ?? 0);
+  const width = Math.max(0, precision2(rect.width));
+  const height = Math.max(0, precision2(rect.height));
   return { x, y, width, height };
 }
 
@@ -82,10 +124,10 @@ export function clipRectToViewport(rect: CuaRect, viewport: { readonly width: nu
   const top = Math.max(0, rect.y);
   const right = Math.min(viewport.width, rect.x + rect.width);
   const bottom = Math.min(viewport.height, rect.y + rect.height);
-  const width = Math.round(right - left);
-  const height = Math.round(bottom - top);
+  const width = precision2(right - left);
+  const height = precision2(bottom - top);
   if (width <= 0 || height <= 0) return null;
-  return { x: Math.round(left), y: Math.round(top), width, height };
+  return { x: precision2(left), y: precision2(top), width, height };
 }
 
 export function rectContains(outer: CuaRect, inner: CuaRect, tolerancePx = 1): boolean {
@@ -133,7 +175,6 @@ export function excludeProtectedFromSafeSurface(
       return null;
     }
 
-    // If a protected panel/chrome spans across the right edge, trim right boundary.
     const coversHeight = rect.y <= top + 2 && rect.y + rect.height >= bottom - 2;
     const coversWidth = rect.x <= left + 2 && rect.x + rect.width >= right - 2;
     if (coversHeight && rect.x > left && rect.x < right) {
@@ -147,14 +188,14 @@ export function excludeProtectedFromSafeSurface(
     }
   }
 
-  const width = Math.round(right - left);
-  const height = Math.round(bottom - top);
+  const width = precision2(right - left);
+  const height = precision2(bottom - top);
   if (width <= 0 || height <= 0) return null;
-  return { x: Math.round(left), y: Math.round(top), width, height };
+  return { x: precision2(left), y: precision2(top), width, height };
 }
 
 function serializeRect(rect: CuaRect): string {
-  return `${rect.x},${rect.y},${rect.width},${rect.height}`;
+  return `${Math.round(rect.x)},${Math.round(rect.y)},${Math.round(rect.width)},${Math.round(rect.height)}`;
 }
 
 /**
@@ -165,20 +206,20 @@ function serializeRect(rect: CuaRect): string {
  * - Opening an approval card (`approval-ui`) strictly inside a fixed-width,
  *   non-overlapping `agent-panel` does NOT change the effective editor or
  *   protected geometry, so `layoutRevision` remains unchanged.
+ * - Changing `executionBlocked`/`blockReason` alone does NOT increment
+ *   `layoutRevision` (mirrors `CuaDriver.reportSurface` which keeps the bound
+ *   frame across `executionBlocked` transitions).
  * - Changing `agent-panel` width/position, overlapping the safe surface,
  *   resizing the viewport, scrolling inside the safe surface, switching views,
  *   opening/closing modals, or changing focus within the safe surface DOES
  *   change the fingerprint and immediately increments `layoutRevision`.
  */
-export function buildSurfaceRevisionKey(measured: MeasuredSurfaceState): string {
+export function buildSurfaceGeometryKey(measured: MeasuredSurfaceState): string {
   const agentPanels = measured.protectedRects.filter((entry) => entry.kind === 'agent-panel');
 
   const layoutRelevantProtected = measured.protectedRects
     .filter((entry) => {
       if (entry.kind !== 'approval-ui') return true;
-      // If approval-ui is completely contained inside an already-protected agent-panel
-      // and does not overlap safeSurface, its appearance inside the fixed-width sidebar
-      // does not alter editor/protected geometry.
       const containedInAgentPanel = agentPanels.some((panel) => rectContains(panel.rect, entry.rect));
       const overlapsSafe = measured.safeSurface !== null && rectsOverlap(measured.safeSurface.rect, entry.rect);
       return !containedInAgentPanel || overlapsSafe;
@@ -195,18 +236,23 @@ export function buildSurfaceRevisionKey(measured: MeasuredSurfaceState): string 
     .sort()
     .join('|');
 
-  const focusPart = measured.focusedInSafeSurface
-    ? `in:${measured.focusedTestId ?? ''}`
-    : 'out';
-
   return [
     `vp:${Math.round(measured.viewport.width)}x${Math.round(measured.viewport.height)}`,
     `modal:${measured.hasBlockingOverlay ? '1' : '0'}`,
     `safe:${safePart}`,
     `prot:${layoutRelevantProtected.join('|')}`,
-    `scroll:${scrollPart}`,
-    `focus:${focusPart}`
+    `scroll:${scrollPart}`
   ].join(';');
+}
+
+export function buildSurfaceFocusKey(measured: MeasuredSurfaceState): string {
+  return measured.focusedInSafeSurface
+    ? `in:${measured.focusedTestId ?? ''}`
+    : 'out';
+}
+
+export function buildSurfaceRevisionKey(measured: MeasuredSurfaceState): string {
+  return `${buildSurfaceGeometryKey(measured)};focus:${buildSurfaceFocusKey(measured)}`;
 }
 
 export function buildSnapshotDeliveryKey(snapshot: CuaSurfaceSnapshot): string {
@@ -219,6 +265,7 @@ export function buildSnapshotDeliveryKey(snapshot: CuaSurfaceSnapshot): string {
     .join('|');
   return [
     `rev:${snapshot.layoutRevision}`,
+    `blk:${snapshot.executionBlocked ? '1' : '0'}:${snapshot.blockReason ?? ''}`,
     `vp:${snapshot.viewport.width}x${snapshot.viewport.height}`,
     `safe:${safePart}`,
     `prot:${protPart}`,
@@ -228,18 +275,28 @@ export function buildSnapshotDeliveryKey(snapshot: CuaSurfaceSnapshot): string {
 
 export class CuaSurfaceRevisionTracker {
   private revision = 0;
-  private lastRevisionKey: string | null = null;
+  private lastGeometryKey: string | null = null;
+  private lastFocusKey: string | null = null;
   private lastDeliveryKey: string | null = null;
 
   next(measured: MeasuredSurfaceState): { readonly snapshot: CuaSurfaceSnapshot; readonly changed: boolean; readonly revisionChanged: boolean } {
-    const revisionKey = buildSurfaceRevisionKey(measured);
-    const revisionChanged = this.lastRevisionKey === null || this.lastRevisionKey !== revisionKey;
+    const geometryKey = buildSurfaceGeometryKey(measured);
+    const focusKey = buildSurfaceFocusKey(measured);
+    const geometryChanged = this.lastGeometryKey === null || this.lastGeometryKey !== geometryKey;
+    const focusChanged = this.lastFocusKey === null || this.lastFocusKey !== focusKey;
+    // During CUA acting, synthetic mousedown naturally focuses the clicked clip/element;
+    // do not bump layoutRevision for focus-only transitions mid-action, while still
+    // bumping immediately for any real geometry/scroll/modal/protectedRect change.
+    const revisionChanged = geometryChanged || (focusChanged && measured.cuaActing !== true);
     if (revisionChanged) {
       this.revision += 1;
-      this.lastRevisionKey = revisionKey;
     }
+    this.lastGeometryKey = geometryKey;
+    this.lastFocusKey = focusKey;
 
     const snapshot: CuaSurfaceSnapshot = {
+      executionBlocked: measured.executionBlocked,
+      blockReason: measured.blockReason,
       layoutRevision: this.revision,
       viewport: {
         width: Math.max(0, Math.round(measured.viewport.width)),
@@ -260,8 +317,10 @@ export class CuaSurfaceRevisionTracker {
     return { snapshot, changed, revisionChanged };
   }
 
-  failClosed(viewport: { readonly width: number; readonly height: number }): CuaSurfaceSnapshot {
+  failClosed(viewport: { readonly width: number; readonly height: number }, blockReason = 'surface-unavailable'): CuaSurfaceSnapshot {
     return this.next({
+      executionBlocked: true,
+      blockReason,
       viewport,
       safeSurface: null,
       protectedRects: [],
@@ -277,12 +336,14 @@ export class CuaSurfaceRevisionTracker {
   }
 }
 
-export function createFailClosedSnapshot(layoutRevision: number, viewport = { width: 0, height: 0 }): CuaSurfaceSnapshot {
+export function createFailClosedSnapshot(layoutRevision: number, viewport = { width: 1, height: 1 }, blockReason = 'unmounted'): CuaSurfaceSnapshot {
   return {
+    executionBlocked: true,
+    blockReason,
     layoutRevision,
     viewport: {
-      width: Math.max(0, Math.round(viewport.width)),
-      height: Math.max(0, Math.round(viewport.height))
+      width: Math.max(1, Math.round(viewport.width)),
+      height: Math.max(1, Math.round(viewport.height))
     },
     safeSurface: null,
     protectedRects: [],
@@ -293,4 +354,3 @@ export function createFailClosedSnapshot(layoutRevision: number, viewport = { wi
 
 export const CUA_VALID_SAFE_KINDS: ReadonlySet<CuaSafeSurfaceKind> = VALID_SAFE_KINDS;
 export const CUA_VALID_PROTECTED_KINDS: ReadonlySet<CuaProtectedKind> = VALID_PROTECTED_KINDS;
-

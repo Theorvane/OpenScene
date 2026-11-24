@@ -4,6 +4,7 @@ import {
   CuaSurfaceRevisionTracker,
   buildSurfaceRevisionKey,
   clipRectToViewport,
+  computeExecutionBlockState,
   computeWorkspaceInert,
   createFailClosedSnapshot,
   excludeProtectedFromSafeSurface,
@@ -24,6 +25,8 @@ function makeMeasured(overrides: Partial<MeasuredSurfaceState> = {}): MeasuredSu
     rect: { x: 0, y: 0, width: 1400, height: 40 }
   };
   return {
+    executionBlocked: false,
+    blockReason: null,
     viewport: { width: 1400, height: 900 },
     safeSurface: {
       kind: 'timeline',
@@ -40,28 +43,34 @@ function makeMeasured(overrides: Partial<MeasuredSurfaceState> = {}): MeasuredSu
 }
 
 describe('cuaSurfaceSnapshot', () => {
-  it('starts fail-closed with safeSurface: null and produces fail-closed snapshots on unmount', () => {
+  it('starts fail-closed with safeSurface: null, executionBlocked: true and fails closed on unmount', () => {
     const initial = createFailClosedSnapshot(0);
     expect(initial.safeSurface).toBeNull();
+    expect(initial.executionBlocked).toBe(true);
+    expect(initial.blockReason).toBe('unmounted');
     expect(initial.focusedInSafeSurface).toBe(false);
     expect(initial.focusedTestId).toBeNull();
 
     const tracker = new CuaSurfaceRevisionTracker();
-    const first = tracker.failClosed({ width: 1400, height: 900 });
+    const first = tracker.failClosed({ width: 1400, height: 900 }, 'initializing');
     expect(first.layoutRevision).toBe(1);
     expect(first.safeSurface).toBeNull();
+    expect(first.executionBlocked).toBe(true);
+    expect(first.blockReason).toBe('initializing');
 
     const mounted = tracker.next(makeMeasured());
     expect(mounted.revisionChanged).toBe(true);
     expect(mounted.snapshot.layoutRevision).toBe(2);
     expect(mounted.snapshot.safeSurface?.kind).toBe('timeline');
+    expect(mounted.snapshot.executionBlocked).toBe(false);
 
-    const unmounted = tracker.failClosed({ width: 1400, height: 900 });
+    const unmounted = tracker.failClosed({ width: 1400, height: 900 }, 'unmounted');
     expect(unmounted.layoutRevision).toBe(3);
     expect(unmounted.safeSurface).toBeNull();
+    expect(unmounted.executionBlocked).toBe(true);
   });
 
-  it('keeps layoutRevision unchanged when an approval card opens inside a fixed-width non-overlapping AgentChatPanel', () => {
+  it('keeps layoutRevision and safeSurface unchanged when an approval card opens inside a fixed-width non-overlapping AgentChatPanel', () => {
     const tracker = new CuaSurfaceRevisionTracker();
     const base = tracker.next(makeMeasured());
     expect(base.snapshot.layoutRevision).toBe(1);
@@ -74,10 +83,12 @@ describe('cuaSurfaceSnapshot', () => {
 
     const withApproval = tracker.next(
       makeMeasured({
+        executionBlocked: true,
+        blockReason: 'pending-approval',
         safeSurface: {
           kind: 'timeline',
           rect: { x: 0, y: 480, width: 1032, height: 420 },
-          interactive: false
+          interactive: true
         },
         protectedRects: [...makeMeasured().protectedRects, approvalInsideChat],
         focusedInSafeSurface: false,
@@ -87,9 +98,12 @@ describe('cuaSurfaceSnapshot', () => {
 
     expect(withApproval.revisionChanged).toBe(false);
     expect(withApproval.snapshot.layoutRevision).toBe(1);
+    expect(withApproval.snapshot.executionBlocked).toBe(true);
+    expect(withApproval.snapshot.blockReason).toBe('pending-approval');
+    expect(withApproval.snapshot.safeSurface).toEqual(base.snapshot.safeSurface);
     expect(withApproval.snapshot.protectedRects.some((r) => r.kind === 'approval-ui')).toBe(true);
     expect(withApproval.snapshot.focusedTestId).toBeNull();
-    // Delivery still notifies backend of updated interactive/protectedRects state.
+    // Delivery still notifies backend of updated executionBlocked/protectedRects state.
     expect(withApproval.changed).toBe(true);
   });
 
@@ -98,7 +112,6 @@ describe('cuaSurfaceSnapshot', () => {
     const r1 = tracker.next(makeMeasured());
     expect(r1.snapshot.layoutRevision).toBe(1);
 
-    // Resizing AgentChatPanel changes both agent-panel and safeSurface rects.
     const r2 = tracker.next(
       makeMeasured({
         safeSurface: {
@@ -115,7 +128,6 @@ describe('cuaSurfaceSnapshot', () => {
     expect(r2.revisionChanged).toBe(true);
     expect(r2.snapshot.layoutRevision).toBe(2);
 
-    // Floating approval-ui overlapping outside agent-panel bumps layoutRevision.
     const floatingApproval: CuaProtectedRectEntry = {
       id: 'floating-approval',
       kind: 'approval-ui',
@@ -143,12 +155,11 @@ describe('cuaSurfaceSnapshot', () => {
     const tracker = new CuaSurfaceRevisionTracker();
     expect(tracker.next(makeMeasured()).snapshot.layoutRevision).toBe(1);
 
-    // Timeline scroll
     expect(
       tracker.next(makeMeasured({ scrollStates: [{ id: 'timeline-stack', scrollLeft: 180, scrollTop: 0 }] })).snapshot.layoutRevision
     ).toBe(2);
 
-    // Safe focus enters clip
+    // Safe focus enters clip when idle -> bumps revision
     const focused = tracker.next(
       makeMeasured({
         scrollStates: [{ id: 'timeline-stack', scrollLeft: 180, scrollTop: 0 }],
@@ -159,7 +170,18 @@ describe('cuaSurfaceSnapshot', () => {
     expect(focused.snapshot.layoutRevision).toBe(3);
     expect(focused.snapshot.focusedTestId).toBe('timeline-clip-clip-1');
 
-    // View switch to canvas
+    // Focus shift caused by CUA's own mousedown while cuaActing === true does not self-cancel mid-drag
+    const focusedMidActing = tracker.next(
+      makeMeasured({
+        scrollStates: [{ id: 'timeline-stack', scrollLeft: 180, scrollTop: 0 }],
+        focusedInSafeSurface: true,
+        focusedTestId: 'timeline-clip-clip-2',
+        cuaActing: true
+      })
+    );
+    expect(focusedMidActing.snapshot.layoutRevision).toBe(3);
+    expect(focusedMidActing.snapshot.focusedTestId).toBe('timeline-clip-clip-2');
+
     expect(
       tracker.next(
         makeMeasured({
@@ -171,9 +193,10 @@ describe('cuaSurfaceSnapshot', () => {
       ).snapshot.layoutRevision
     ).toBe(4);
 
-    // Modal opens -> fail-closed safeSurface: null
     const withModal = tracker.next(
       makeMeasured({
+        executionBlocked: true,
+        blockReason: 'blocking-overlay',
         safeSurface: null,
         hasBlockingOverlay: true,
         protectedRects: [
@@ -184,6 +207,7 @@ describe('cuaSurfaceSnapshot', () => {
     );
     expect(withModal.snapshot.layoutRevision).toBe(5);
     expect(withModal.snapshot.safeSurface).toBeNull();
+    expect(withModal.snapshot.executionBlocked).toBe(true);
   });
 
   it('excludes overlapping protected panels and returns null when modals or settings are visible', () => {
@@ -214,23 +238,45 @@ describe('cuaSurfaceSnapshot', () => {
     expect(buildSurfaceRevisionKey(makeMeasured())).toBe(buildSurfaceRevisionKey(makeMeasured()));
   });
 
-  it('coordinates workspace inertness across pendingApproval, CUA acting, and normal agent turns', () => {
-    // Pending approval keeps workspace inert while waiting for the user's decision.
+  it('coordinates workspace inertness and executionBlocked across pendingApproval, approvalInFlight, and CUA acting', () => {
     expect(computeWorkspaceInert({ isAgentBusy: false, hasPendingApproval: true, cuaPhase: 'idle' })).toBe(true);
     expect(computeWorkspaceInert({ isAgentBusy: false, hasPendingApproval: true, cuaPhase: 'ready' })).toBe(true);
-
-    // CUA acting unlocks workspace so webContents.sendInputEvent can reach the timeline,
-    // even while agentChatApprove is in flight (isAgentBusy: true, pendingApproval still set).
+    expect(computeWorkspaceInert({ isAgentBusy: true, hasPendingApproval: true, approvalInFlight: true, cuaPhase: 'ready' })).toBe(false);
     expect(computeWorkspaceInert({ isAgentBusy: true, hasPendingApproval: false, cuaPhase: 'acting' })).toBe(false);
-    expect(computeWorkspaceInert({ isAgentBusy: true, hasPendingApproval: true, cuaPhase: 'acting' })).toBe(false);
-
-    // Non-acting busy agent turn keeps workspace inert.
     expect(computeWorkspaceInert({ isAgentBusy: true, hasPendingApproval: false, cuaPhase: 'idle' })).toBe(true);
-    expect(computeWorkspaceInert({ isAgentBusy: true, hasPendingApproval: false, cuaPhase: 'ready' })).toBe(true);
-    expect(computeWorkspaceInert({ isAgentBusy: true, hasPendingApproval: false, cuaPhase: 'stopping' })).toBe(true);
-
-    // Idle without pending approval is unlocked.
     expect(computeWorkspaceInert({ isAgentBusy: false, hasPendingApproval: false, cuaPhase: 'idle' })).toBe(false);
-    expect(computeWorkspaceInert({ isAgentBusy: false, hasPendingApproval: false, cuaPhase: 'stopped' })).toBe(false);
+
+    expect(
+      computeExecutionBlockState({
+        isAgentBusy: false,
+        hasPendingApproval: true,
+        approvalInFlight: false,
+        hasBlockingOverlay: false,
+        hasSafeSurface: true,
+        cuaPhase: 'ready'
+      })
+    ).toEqual({ executionBlocked: true, blockReason: 'pending-approval' });
+
+    expect(
+      computeExecutionBlockState({
+        isAgentBusy: true,
+        hasPendingApproval: true,
+        approvalInFlight: true,
+        hasBlockingOverlay: false,
+        hasSafeSurface: true,
+        cuaPhase: 'ready'
+      })
+    ).toEqual({ executionBlocked: false, blockReason: null });
+
+    expect(
+      computeExecutionBlockState({
+        isAgentBusy: false,
+        hasPendingApproval: false,
+        approvalInFlight: false,
+        hasBlockingOverlay: true,
+        hasSafeSurface: false,
+        cuaPhase: 'acting'
+      })
+    ).toEqual({ executionBlocked: true, blockReason: 'blocking-overlay' });
   });
 });

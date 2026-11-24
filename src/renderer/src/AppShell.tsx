@@ -78,10 +78,11 @@ function FolderIcon(): ReactElement {
 }
 
 function AppShellContent({ activePage, children, hasActiveProject, onPageChange, activeProjectContext, studioLayout = false, projectTabs = [], activeProjectId = null, onSelectProjectTab, onCloseProjectTab, chatRestoreRequest = null, canNavigateBack = false, onNavigateBack }: AppShellProps): ReactElement {
-  const { isBusy, pendingApproval } = useAgentChat();
+  const { isBusy, pendingApproval, approvalInFlight, cancelConversation } = useAgentChat();
   const cua = useCuaOverlayState({
     isAgentBusy: isBusy,
     hasPendingApproval: pendingApproval !== null,
+    approvalInFlight,
     activePageId: activePage.id
   });
   const workspaceInert = cua.isWorkspaceInert;
@@ -238,7 +239,7 @@ function AppShellContent({ activePage, children, hasActiveProject, onPageChange,
       <div ref={shellBodyRef} className="app-shell__body">
         <div id="app-shell-workspace" className="agent-workspace-lock" aria-busy={isBusy} inert={workspaceInert}>
           <div className="agent-workspace-lock__content">{children}</div>
-          {isBusy && !cua.isActing && (
+          {isBusy && !cua.isActing && !approvalInFlight && (
             <div aria-live="polite">
               <div className="agent-workspace-lock__message" aria-hidden="true">
                 Edit Agent is updating your workspace...
@@ -258,7 +259,7 @@ function AppShellContent({ activePage, children, hasActiveProject, onPageChange,
               aria-valuenow={chatPanelWidth}
               aria-valuetext={`Edit Agent chat ${chatPanelWidth} pixels`}
               className="agent-chat-resize-splitter"
-              data-cua-protected="agent-panel"
+              data-cua-protected="chrome-menu"
               data-cua-protected-id="agent-chat-splitter"
               onKeyDown={onChatSplitterKeyDown}
               onPointerDown={onChatSplitterPointerDown}
@@ -276,7 +277,11 @@ function AppShellContent({ activePage, children, hasActiveProject, onPageChange,
         state={cua.state}
         stopPending={cua.stopPending}
         stopError={cua.stopError}
-        onStop={() => { void cua.requestStop(); }}
+        agentBusy={isBusy}
+        onStop={() => {
+          void cua.requestStop();
+          if (isBusy) void cancelConversation();
+        }}
       />
     </main>
     </CuaOverlayProvider>

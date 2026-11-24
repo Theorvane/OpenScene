@@ -1,12 +1,17 @@
 import { createContext, createElement, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react';
 
-import type { CuaState, CuaSurfaceSnapshot } from '../../../shared/cua';
+import type { CuaPhase, CuaState, CuaSurfaceSnapshot } from '../../../shared/cua';
+import {
+  abortActiveTimelineDragSync,
+  handleCuaStateRollbackAndAckSync
+} from './cuaDragGuard';
 import {
   CUA_VALID_PROTECTED_KINDS,
   CUA_VALID_SAFE_KINDS,
   CuaSurfaceRevisionTracker,
   INITIAL_CUA_STATE,
   clipRectToViewport,
+  computeExecutionBlockState,
   computeWorkspaceInert,
   createFailClosedSnapshot,
   excludeProtectedFromSafeSurface,
@@ -22,6 +27,7 @@ import {
 
 export {
   INITIAL_CUA_STATE,
+  computeExecutionBlockState,
   computeWorkspaceInert,
   isCuaStopSettled,
   isCuaStoppablePhase
@@ -45,7 +51,10 @@ function getElementProtectedId(element: HTMLElement, kind: CuaProtectedKind, kin
 }
 
 export interface CollectDomSurfaceOptions {
-  readonly isWorkspaceInert: boolean;
+  readonly isAgentBusy: boolean;
+  readonly hasPendingApproval: boolean;
+  readonly approvalInFlight: boolean;
+  readonly cuaPhase: CuaPhase;
   readonly isUpdating?: boolean;
 }
 
@@ -57,6 +66,8 @@ export function collectDomSurfaceState(options: CollectDomSurfaceOptions): Measu
 
   if (options.isUpdating === true || viewport.width <= 0 || viewport.height <= 0) {
     return {
+      executionBlocked: true,
+      blockReason: 'updating',
       viewport,
       safeSurface: null,
       protectedRects: [],
@@ -129,11 +140,13 @@ export function collectDomSurfaceState(options: CollectDomSurfaceOptions): Measu
       const safeRect = excludeProtectedFromSafeSurface(clipped, protectedRects);
       if (safeRect === null) continue;
       safeSurfaceElement = candidate as HTMLElement;
-      const elementInert = options.isWorkspaceInert || candidate.closest('[inert]') !== null;
+      // safeSurface.interactive stays true while the editor surface is valid so
+      // toggling executionBlocked/workspaceInert during approval does not alter
+      // JSON.stringify(safeSurface) and invalidate the bound CuaFrame.
       safeSurface = {
         kind,
         rect: safeRect,
-        interactive: !elementInert
+        interactive: true
       };
       break;
     }
@@ -164,19 +177,32 @@ export function collectDomSurfaceState(options: CollectDomSurfaceOptions): Measu
   const focusedInSafeSurface =
     safeSurfaceElement !== null &&
     activeElement instanceof HTMLElement &&
-    safeSurfaceElement.contains(activeElement);
+    safeSurfaceElement.contains(activeElement) &&
+    activeElement.closest('[data-cua-protected],[role="dialog"],[role="menu"],.oc-editor-host__header') === null;
   const focusedTestId = focusedInSafeSurface
     ? (activeElement.getAttribute('data-testid') ?? activeElement.closest('[data-testid]')?.getAttribute('data-testid') ?? null)
     : null;
 
+  const { executionBlocked, blockReason } = computeExecutionBlockState({
+    isAgentBusy: options.isAgentBusy,
+    hasPendingApproval: options.hasPendingApproval,
+    approvalInFlight: options.approvalInFlight,
+    hasBlockingOverlay,
+    hasSafeSurface: safeSurface !== null,
+    cuaPhase: options.cuaPhase
+  });
+
   return {
+    executionBlocked,
+    blockReason,
     viewport,
     safeSurface,
     protectedRects,
     focusedInSafeSurface,
     focusedTestId,
     scrollStates,
-    hasBlockingOverlay
+    hasBlockingOverlay,
+    cuaActing: options.cuaPhase === 'acting'
   };
 }
 
@@ -196,6 +222,7 @@ const CuaOverlayContext = createContext<CuaOverlayController | null>(null);
 export function useCuaOverlayState(options: {
   readonly isAgentBusy: boolean;
   readonly hasPendingApproval: boolean;
+  readonly approvalInFlight: boolean;
   readonly activePageId: string;
 }): CuaOverlayController {
   const [state, setState] = useState<CuaState>(INITIAL_CUA_STATE);
@@ -206,21 +233,23 @@ export function useCuaOverlayState(options: {
   const isWorkspaceInert = computeWorkspaceInert({
     isAgentBusy: options.isAgentBusy,
     hasPendingApproval: options.hasPendingApproval,
+    approvalInFlight: options.approvalInFlight,
     cuaPhase: state.phase
   });
   const stateRef = useRef<CuaState>(state);
   const stopPendingRef = useRef<boolean>(stopPending);
-  const workspaceInertRef = useRef<boolean>(isWorkspaceInert);
+  const optionsRef = useRef(options);
   const rafIdRef = useRef<number | null>(null);
 
   stateRef.current = state;
   stopPendingRef.current = stopPending;
-  workspaceInertRef.current = isWorkspaceInert;
+  optionsRef.current = options;
 
   const reportSnapshot = useCallback((nextSnapshot: CuaSurfaceSnapshot): void => {
     setSnapshot(nextSnapshot);
     const api = typeof window === 'undefined' ? undefined : window.videoTool;
     if (typeof api?.cuaReportSurfaceSnapshot !== 'function') return;
+    if (nextSnapshot.viewport.width <= 0 || nextSnapshot.viewport.height <= 0) return;
     void api.cuaReportSurfaceSnapshot(nextSnapshot).catch(() => {
       // Main-process CUA runtime may not be registered yet in contract-only builds.
     });
@@ -228,7 +257,13 @@ export function useCuaOverlayState(options: {
 
   const flushSnapshot = useCallback((): void => {
     if (typeof window === 'undefined' || typeof document === 'undefined') return;
-    const measured = collectDomSurfaceState({ isWorkspaceInert: workspaceInertRef.current });
+    const currentOpts = optionsRef.current;
+    const measured = collectDomSurfaceState({
+      isAgentBusy: currentOpts.isAgentBusy,
+      hasPendingApproval: currentOpts.hasPendingApproval,
+      approvalInFlight: currentOpts.approvalInFlight,
+      cuaPhase: stateRef.current.phase
+    });
     const { snapshot: nextSnapshot, changed } = trackerRef.current.next(measured);
     if (changed) {
       reportSnapshot(nextSnapshot);
@@ -245,6 +280,7 @@ export function useCuaOverlayState(options: {
   }, [flushSnapshot]);
 
   const applyCuaState = useCallback((nextState: CuaState): void => {
+    stateRef.current = nextState;
     setState(nextState);
     if (isCuaStopSettled(nextState)) {
       setStopPending(false);
@@ -258,6 +294,10 @@ export function useCuaOverlayState(options: {
     const current = stateRef.current;
     if (!isCuaStoppablePhase(current.phase) && !stopPendingRef.current) return;
     if (stopPendingRef.current) return;
+
+    // Synchronously roll back any active timeline drag BEFORE calling cuaStop()
+    // so the driver's synthetic mouseUp release cannot commit a partial drag.
+    abortActiveTimelineDragSync();
 
     // Immediately show stop-in-progress; never declare stopped until main pushes
     // phase === 'stopped' && cleanupComplete === true.
@@ -279,7 +319,6 @@ export function useCuaOverlayState(options: {
         return;
       }
       if (!response.value.accepted) {
-        // Stop was not accepted; only clear pending if main is already settled.
         if (isCuaStopSettled(stateRef.current)) {
           setStopPending(false);
         } else {
@@ -301,6 +340,9 @@ export function useCuaOverlayState(options: {
 
     const unsubscribe = typeof api?.onCuaStateChanged === 'function'
       ? api.onCuaStateChanged((nextState) => {
+          // MUST run synchronously BEFORE React setState: abort any held drag
+          // and immediately acknowledge cancelToken via cuaAckCancel.
+          handleCuaStateRollbackAndAckSync(nextState, api.cuaAckCancel);
           if (active) applyCuaState(nextState);
         })
       : undefined;
@@ -308,7 +350,10 @@ export function useCuaOverlayState(options: {
     if (typeof api?.cuaGetState === 'function') {
       void api.cuaGetState()
         .then((response) => {
-          if (active && response.ok) applyCuaState(response.value);
+          if (active && response.ok) {
+            handleCuaStateRollbackAndAckSync(response.value, api.cuaAckCancel);
+            applyCuaState(response.value);
+          }
         })
         .catch(() => {
           // Ignore if main-process CUA runtime is not registered yet.
@@ -339,17 +384,14 @@ export function useCuaOverlayState(options: {
   useEffect(() => {
     if (typeof window === 'undefined' || typeof document === 'undefined') return;
 
-    // Initial fail-closed report before first measured paint, followed immediately by measurement.
-    const initialFailClosed = trackerRef.current.failClosed({
-      width: window.innerWidth,
-      height: window.innerHeight
-    });
+    const initialFailClosed = trackerRef.current.failClosed(
+      { width: Math.max(1, window.innerWidth), height: Math.max(1, window.innerHeight) },
+      'initializing'
+    );
     reportSnapshot(initialFailClosed);
     flushSnapshot();
 
     const onScroll = (event: Event): void => {
-      // Ignore scrolling strictly inside the right-hand AgentChatPanel so approval cards
-      // scrolling into view do not bump layoutRevision.
       const target = event.target;
       if (target instanceof Element && target.closest('[data-cua-protected="agent-panel"]') !== null) {
         return;
@@ -408,19 +450,18 @@ export function useCuaOverlayState(options: {
       resizeObserver?.disconnect();
       mutationObserver?.disconnect();
 
-      // Report fail-closed on unmount so main never acts on a stale surface.
-      const unmountedSnapshot = trackerRef.current.failClosed({
-        width: window.innerWidth,
-        height: window.innerHeight
-      });
+      const unmountedSnapshot = trackerRef.current.failClosed(
+        { width: Math.max(1, window.innerWidth), height: Math.max(1, window.innerHeight) },
+        'unmounted'
+      );
       reportSnapshot(unmountedSnapshot);
     };
   }, [flushSnapshot, reportSnapshot, scheduleSnapshot]);
 
-  // Re-measure whenever page, workspace inertness, or CUA phase changes.
+  // Re-measure whenever page, busy/approval flags, or CUA phase changes.
   useEffect(() => {
     flushSnapshot();
-  }, [flushSnapshot, isWorkspaceInert, options.activePageId, state.phase]);
+  }, [flushSnapshot, options.activePageId, options.isAgentBusy, options.hasPendingApproval, options.approvalInFlight, state.phase]);
 
   return useMemo<CuaOverlayController>(
     () => ({

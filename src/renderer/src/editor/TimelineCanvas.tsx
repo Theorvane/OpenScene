@@ -11,6 +11,10 @@ import { clipDurationMs, playheadForClipSelection } from '../../../shared/timeli
 import { nextVisualBoundaryMs, previousVisualBoundaryMs } from '../../../shared/timelinePlayback';
 import { snapTimelinePosition } from '../../../shared/timelineSnapping';
 import {
+  isActiveTimelineDragAborted,
+  registerActiveTimelineDrag
+} from '../cua/cuaDragGuard';
+import {
   computeClipDropPositionMs,
   computeTrimPositionMs,
   hasExceededDragThreshold,
@@ -315,24 +319,54 @@ export function TimelineCanvas({ editor, id }: TimelineCanvasProps): ReactElemen
     return bounds;
   };
 
-  const startPointerDrag = (session: TimelinePointerDragSession): void => {
+  const startPointerDrag = (session: TimelinePointerDragSession, captureTarget?: HTMLElement | null): void => {
     dragCleanupRef.current?.();
     pointerDragRef.current = session;
+    let aborted = false;
+
+    if (captureTarget != null && typeof captureTarget.setPointerCapture === 'function') {
+      try {
+        captureTarget.setPointerCapture(session.pointerId);
+      } catch {
+        // Synthetic or detached targets may decline pointer capture; window listeners remain active.
+      }
+    }
+
+    const releaseCapture = (): void => {
+      if (captureTarget == null || typeof captureTarget.releasePointerCapture !== 'function') return;
+      try {
+        if (typeof captureTarget.hasPointerCapture !== 'function' || captureTarget.hasPointerCapture(session.pointerId)) {
+          captureTarget.releasePointerCapture(session.pointerId);
+        }
+      } catch {
+        // Ignore already-released capture.
+      }
+    };
+
+    let unregisterDragGuard: (() => void) | null = null;
 
     const detach = (): void => {
       window.removeEventListener('pointermove', onWindowPointerMove);
       window.removeEventListener('pointerup', onWindowPointerUp);
       window.removeEventListener('pointercancel', onWindowPointerCancel);
       window.removeEventListener('keydown', onWindowKeyDown);
+      unregisterDragGuard?.();
+      unregisterDragGuard = null;
+      releaseCapture();
       dragCleanupRef.current = null;
     };
 
     const cancelDrag = (): void => {
+      aborted = true;
       detach();
       pointerDragRef.current = null;
       setDragOverTrackId(null);
       setDragPreview(null);
     };
+
+    // Register synchronous module-level rollback handler so renderer Stop or
+    // main-process `stopping` cancels this drag BEFORE synthetic `mouseUp` lands.
+    unregisterDragGuard = registerActiveTimelineDrag(cancelDrag);
 
     const onWindowKeyDown = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') {
@@ -341,6 +375,10 @@ export function TimelineCanvas({ editor, id }: TimelineCanvasProps): ReactElemen
     };
 
     const onWindowPointerMove = (event: PointerEvent): void => {
+      if (aborted || isActiveTimelineDragAborted()) {
+        cancelDrag();
+        return;
+      }
       const active = pointerDragRef.current;
       if (active === null || active.pointerId !== event.pointerId) return;
       const ctx = dragContextRef.current;
@@ -408,13 +446,16 @@ export function TimelineCanvas({ editor, id }: TimelineCanvasProps): ReactElemen
     const onWindowPointerUp = (event: PointerEvent): void => {
       const active = pointerDragRef.current;
       if (active === null || active.pointerId !== event.pointerId) return;
+      // Synchronous check BEFORE any commit: if Stop/cancel aborted this drag,
+      // discard the synthetic mouseUp release with zero timeline or Undo mutation.
+      const wasAborted = aborted || isActiveTimelineDragAborted();
       const ctx = dragContextRef.current;
       detach();
       pointerDragRef.current = null;
       setDragOverTrackId(null);
       setDragPreview(null);
 
-      if (!active.moved || ctx.project === null || ctx.view === null) return;
+      if (wasAborted || !active.moved || ctx.project === null || ctx.view === null) return;
 
       suppressNextClickClipIdRef.current = active.clipId;
       window.setTimeout(() => {
@@ -650,6 +691,7 @@ export function TimelineCanvas({ editor, id }: TimelineCanvasProps): ReactElemen
       data-testid="timeline-canvas"
       data-cua-safe-surface={project !== null && view !== null ? 'timeline' : undefined}
       aria-labelledby="timeline-title"
+      tabIndex={-1}
       style={{ display: 'grid', gridTemplateRows: 'auto minmax(0, 1fr)', gap: 0, padding: 0 }}
     >
       {/* Slim timeline toolbar: title + view tools on the left, zoom cluster on the right */}
@@ -1167,7 +1209,13 @@ export function TimelineCanvas({ editor, id }: TimelineCanvasProps): ReactElemen
                   }}
                   onDragLeave={() => setDragOverTrackId((current) => (current === track.id ? null : current))}
                   onDrop={(event) => !lockedTracks[track.id] && onLaneDrop(event, track.id)}
-                  onPointerDown={(event) => activeTool !== 'hand' && !lockedTracks[track.id] && scrubLane(event)}
+                  onPointerDown={(event) => {
+                    if (activeTool !== 'hand' && !lockedTracks[track.id]) {
+                      event.currentTarget.focus({ preventScroll: true });
+                      scrubLane(event);
+                    }
+                  }}
+                  tabIndex={-1}
                   role="application"
                   aria-label={`${track.name} lane. Drop assets or clips here.`}
                   style={{
@@ -1232,7 +1280,7 @@ export function TimelineCanvas({ editor, id }: TimelineCanvasProps): ReactElemen
                           offsetMs: pointerMs - block.clip.timelineStartMs,
                           originalStartMs: block.clip.timelineStartMs,
                           moved: false
-                        });
+                        }, event.currentTarget);
                       }}
                       style={{
                         left: `${renderedLeftPercent}%`,
@@ -1284,7 +1332,7 @@ export function TimelineCanvas({ editor, id }: TimelineCanvasProps): ReactElemen
                             startClientX: event.clientX,
                             startClientY: event.clientY,
                             moved: false
-                          });
+                          }, event.currentTarget);
                         }}
                         aria-hidden="true"
                       />
@@ -1305,7 +1353,7 @@ export function TimelineCanvas({ editor, id }: TimelineCanvasProps): ReactElemen
                             startClientX: event.clientX,
                             startClientY: event.clientY,
                             moved: false
-                          });
+                          }, event.currentTarget);
                         }}
                         aria-hidden="true"
                       />

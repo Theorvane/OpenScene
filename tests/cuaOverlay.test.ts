@@ -11,6 +11,7 @@ interface CuaOverlayModule {
     readonly state: CuaState;
     readonly stopPending: boolean;
     readonly stopError: string | null;
+    readonly agentBusy?: boolean;
     readonly onStop: () => void;
   }>;
   readonly getCuaCleanupStatusText: (state: CuaState, stopPending: boolean) => string | null;
@@ -33,7 +34,7 @@ function makeState(overrides: Partial<CuaState> = {}): CuaState {
 }
 
 describe('CuaOverlay', () => {
-  it('renders nothing when phase is idle and no stop is pending', async () => {
+  it('renders nothing when phase is idle, no stop is pending, and agent is not busy', async () => {
     const { CuaOverlay } = await loadCuaOverlayModule();
     const html = renderToStaticMarkup(
       createElement(CuaOverlay, {
@@ -44,6 +45,21 @@ describe('CuaOverlay', () => {
       })
     );
     expect(html).toBe('');
+  });
+
+  it('pre-mounts only the fixed stop button while agentBusy is true in idle phase', async () => {
+    const { CuaOverlay } = await loadCuaOverlayModule();
+    const html = renderToStaticMarkup(
+      createElement(CuaOverlay, {
+        state: makeState({ phase: 'idle' }),
+        stopPending: false,
+        stopError: null,
+        agentBusy: true,
+        onStop: () => undefined
+      })
+    );
+    expect(html).toContain('data-testid="cua-stop-btn"');
+    expect(html).not.toContain('data-testid="cua-hud"');
   });
 
   it('renders virtual cursor, drag path markers, label, and protected stop button while dragging', async () => {
@@ -90,7 +106,7 @@ describe('CuaOverlay', () => {
     const cleanupFailed = makeState({
       phase: 'cleanup-failed',
       cleanupComplete: false,
-      releaseFailures: ['mouseUp(left)', 'keyUp(Shift)']
+      releaseFailures: ['left', 'renderer-rollback-unconfirmed']
     });
 
     expect(isCuaStoppablePhase('ready')).toBe(true);
@@ -103,7 +119,6 @@ describe('CuaOverlay', () => {
     expect(isCuaStopSettled(stoppedComplete)).toBe(true);
     expect(isCuaStopSettled(cleanupFailed)).toBe(true);
 
-    // Even when phase is still acting, stopPending displays stopping status and disables stop button.
     const pendingHtml = renderToStaticMarkup(
       createElement(CuaOverlay, {
         state: acting,
@@ -119,14 +134,15 @@ describe('CuaOverlay', () => {
     expect(getCuaCleanupStatusText(stoppedComplete, false)).toContain('all synthetic inputs released');
   });
 
-  it('displays re-run lock warning and releaseFailures when phase is cleanup-failed', async () => {
+  it('displays re-run lock warning, releaseFailures, and targetGone when applicable', async () => {
     const { CuaOverlay } = await loadCuaOverlayModule();
     const state = makeState({
       phase: 'cleanup-failed',
+      targetGone: true,
       cursor: { x: 250, y: 500 },
       error: 'Could not release virtual pointer',
       cleanupComplete: false,
-      releaseFailures: ['mouseUp(left) timed out', 'keyUp(Meta) failed']
+      releaseFailures: ['renderer-rollback-unconfirmed', 'left']
     });
 
     const html = renderToStaticMarkup(
@@ -138,17 +154,19 @@ describe('CuaOverlay', () => {
       })
     );
 
+    expect(html).toContain('data-testid="cua-target-gone"');
+    expect(html).toContain('data-cua-target-gone="true"');
     expect(html).toContain('data-testid="cua-cleanup-failed-warning"');
     expect(html).toContain('Re-run locked:');
     expect(html).toContain('data-testid="cua-release-failures"');
-    expect(html).toContain('mouseUp(left) timed out');
-    expect(html).toContain('keyUp(Meta) failed');
+    expect(html).toContain('renderer-rollback-unconfirmed');
     expect(html).toContain('Could not release virtual pointer');
   });
 
-  it('mounts CuaOverlay outside the inert workspace lock with pointer-events pass-through except stop button', async () => {
-    const [appShell, css] = await Promise.all([
+  it('mounts CuaOverlay outside inert lock, keeps single agent-panel anchor, and pins fixed-geometry stop button', async () => {
+    const [appShell, panel, css] = await Promise.all([
       readFile(new URL('../src/renderer/src/AppShell.tsx', import.meta.url), 'utf8'),
+      readFile(new URL('../src/renderer/src/AgentChatPanel.tsx', import.meta.url), 'utf8'),
       readFile(new URL('../src/renderer/src/cua/cuaOverlay.css', import.meta.url), 'utf8')
     ]);
 
@@ -159,7 +177,14 @@ describe('CuaOverlay', () => {
     expect(overlayIndex).toBeGreaterThan(workspaceLockIndex);
     expect(bodyCloseIndex).toBeGreaterThan(workspaceLockIndex);
 
+    // Exact Backend verifyDom/observe invariant: [data-cua-protected="agent-panel"] appears ONLY on AgentChatPanel.
+    expect(appShell).not.toContain('data-cua-protected="agent-panel"');
+    expect(panel).toContain('data-cua-protected="agent-panel"');
+    expect(panel).toContain('data-cua-protected="approval-ui"');
+    expect(panel).toContain('data-testid="agent-cua-approval-summary"');
+    expect(panel).toContain("'agent-cua-error-code'");
+
     expect(css).toContain('.cua-overlay {\n  position: fixed;\n  inset: 0;\n  z-index: 9999;\n  pointer-events: none;');
-    expect(css).toContain('.cua-stop-btn {\n  pointer-events: auto;');
+    expect(css).toContain('.cua-stop-btn {\n  pointer-events: auto;\n  position: fixed;');
   });
 });
