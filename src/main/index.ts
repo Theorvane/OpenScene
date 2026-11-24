@@ -39,6 +39,7 @@ import { AGENT_CHAT_SPEND_TOOL_NAMES, agentChatMutatingToolNames, createAgentCha
 import { ChatGptCodexAdapter } from './chatGptCodexAdapter';
 import { ChatGptOAuthService } from './chatGptOAuthService';
 import { CredentialStore } from './credentialStore';
+import { createJevService, registerJevCredentialIpc } from './jevCredentialService';
 import { LlmExecutionAdapter } from './llmAdapter';
 import { LlmPromptRouter } from './llmPromptRouter';
 import { getOpenVideoMcpDefinition, OpenVideoMcpServer } from './openVideoMcpServer';
@@ -72,6 +73,8 @@ const assetLibraryStore = new AssetLibraryStore(join(app.getPath('userData'), 'p
 const audioDetachService = new AudioDetachService({ projects: projectStore, assets: assetLibraryStore });
 const exportJobStore = new ExportJobStore();
 const credentialStore = new CredentialStore(app.getPath('userData'));
+const jevService = createJevService({ store: credentialStore });
+let jevCredentialWindow: BrowserWindow | null = null;
 const updaterController = setupUpdater();
 const updaterPromptIo = {
   showMessageBox: (input: Parameters<typeof dialog.showMessageBox>[0]) => dialog.showMessageBox(input),
@@ -207,6 +210,10 @@ function createWindow(): void {
   });
 
   mainWindow.once('ready-to-show', () => {
+    jevCredentialWindow = mainWindow;
+    mainWindow.once('closed', () => {
+      if (jevCredentialWindow === mainWindow) jevCredentialWindow = null;
+    });
     mainWindow.show();
   });
 
@@ -346,6 +353,8 @@ async function installIpcHandlers(): Promise<void> {
     registerHandler: (channel, handler) => ipcMain.handle(channel, (_event, payload: unknown) => handler(payload))
   });
 
+  registerJevCredentialIpc({ ipcMain, getOwnWindow: () => jevCredentialWindow, service: jevService });
+
   ipcMain.handle(IPC_CHANNELS.getProviderCredentials, async () => {
     try {
       const status = await credentialStore.getCredentialStatus();
@@ -356,6 +365,7 @@ async function installIpcHandlers(): Promise<void> {
   });
 
   ipcMain.handle(IPC_CHANNELS.setProviderCredential, async (_event, provider: any, apiKey: string) => {
+    if (provider === 'typesafe-jev') return fail('PERMISSION_DENIED', 'Use the dedicated Jev credential operation.');
     try {
       await credentialStore.setCredential(provider, apiKey);
       return ok({ updated: true });
