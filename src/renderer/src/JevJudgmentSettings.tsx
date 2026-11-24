@@ -3,6 +3,7 @@ import { DEFAULT_JEV_CONFIG, type JevConfig } from '../../shared/jevConfig';
 import { JEV_API_KEY_MAX_LENGTH, type JevCredentialApi } from '../../shared/jevCredentials';
 import type { ApiResponse } from '../../shared/models';
 import { Button, StatusCard } from './ui';
+import './JevJudgmentSettings.css';
 
 /** Settings port only; the backend owns its final IPC names and persistence. */
 export interface JevConfigSettingsPort {
@@ -71,8 +72,8 @@ export function JevJudgmentSettings({ configApi, credentialApi = window.videoToo
     <StatusCard tone={config.enabled && configured ? 'success' : 'neutral'}>
       {ready ? `${config.enabled ? 'Enabled' : 'Off'} · ${configured ? 'Key configured' : 'No key configured; existing model fallback'}` : 'Loading Jev settings…'}
     </StatusCard>
-    <fieldset disabled={!ready || busy}>
-      <label><input type="checkbox" checked={draft.enabled} onChange={event => setDraft({ ...draft, enabled: event.target.checked })} /> Enable Jev observation judgments</label>
+    <fieldset className="jev-judgment-fields" disabled={!ready || busy}>
+      <label className="jev-judgment-toggle"><input type="checkbox" checked={draft.enabled} onChange={event => setDraft({ ...draft, enabled: event.target.checked })} /> Enable Jev observation judgments</label>
       <label className="field-label" htmlFor="jev-model">Model</label>
       <select id="jev-model" value={draft.model} onChange={() => undefined}><option value="jev-1.14.0">Jev 1.14.0 (pinned)</option></select>
       <label className="field-label" htmlFor="jev-threshold">Minimum selected-option probability</label>
@@ -85,8 +86,10 @@ export function JevJudgmentSettings({ configApi, credentialApi = window.videoToo
       <Button variant="default" onClick={() => void saveConfig()}>Save judgment settings</Button>
       <label className="field-label" htmlFor="jev-key">TypeSafe API key</label>
       <input ref={keyInput} id="jev-key" type="password" autoComplete="off" maxLength={JEV_API_KEY_MAX_LENGTH} placeholder="Enter a new key" />
-      <Button variant="default" onClick={() => void saveKey()}>Save key securely</Button>
-      <Button variant="default" disabled={!configured} onClick={() => void clearKey()}>Clear key</Button>
+      <div className="jev-judgment-actions">
+        <Button variant="default" onClick={() => void saveKey()}>Save key securely</Button>
+        <Button variant="default" disabled={!configured} onClick={() => void clearKey()}>Clear key</Button>
+      </div>
     </fieldset>
     <StatusCard tone="neutral">When enabled, explicit editor observations can send their metadata to TypeSafe. Screenshots are not sent by this setting. No action runs automatically, and every existing approval remains required. Desktop window observation is unavailable on mobile.</StatusCard>
     {message ? <StatusCard tone={failed ? 'danger' : 'success'}>{message}</StatusCard> : null}
