@@ -32,6 +32,7 @@ export class CuaDriver {
   private heldKey: KeyboardInputEvent | null = null;
   private cancellation: Promise<CuaState> | null = null;
   private injecting = false;
+  private cleanupFailureLatched = false;
   private state: CuaState;
 
   constructor(private readonly window: BrowserWindow, private readonly dependencies: CuaDriverDependencies) {
@@ -54,7 +55,11 @@ export class CuaDriver {
   }
   getState(): CuaState { return structuredClone(this.state); }
   setExecutionBlocked(blocked: boolean): void { this.executionBlocked = blocked; }
-  private publish(patch: Partial<CuaState>): void { this.state = { ...this.state, ...patch }; this.dependencies.onState?.(this.getState()); }
+  private publish(patch: Partial<CuaState>): void {
+    this.state = { ...this.state, ...patch };
+    // A disappearing renderer must never prevent held-input release.
+    try { this.dependencies.onState?.(this.getState()); } catch { /* transport is gone; state remains queryable */ }
+  }
   private live(): void {
     if (this.window.isDestroyed() || this.window.webContents.isDestroyed()) throw new Error('CUA_TARGET_GONE');
     if (!this.window.isFocused() || !this.window.webContents.isFocused()) throw new Error('CUA_NOT_FOCUSED');
@@ -77,7 +82,7 @@ export class CuaDriver {
   }
   async observe(context: { sessionId: string; runId: string }): Promise<CuaFrame> {
     this.live();
-    if (this.state.phase === 'acting' || this.state.phase === 'stopping' || this.state.phase === 'cleanup-failed') throw new Error('CUA_BUSY');
+    if (this.state.phase === 'acting' || this.state.phase === 'stopping' || this.cleanupFailureLatched) throw new Error('CUA_BUSY');
     if (!context.sessionId || !context.runId || !this.surface?.safeSurface?.interactive) throw new Error('CUA_UNSAFE_SURFACE');
     const snapshot = structuredClone(this.surface);
     const revision = this.generation;
@@ -147,6 +152,7 @@ export class CuaDriver {
       }
       if (generation !== this.generation) throw new Error('CUA_CANCELLED');
       const failures = this.release();
+      if (failures.length) this.cleanupFailureLatched = true;
       this.frame = null;
       this.publish({ phase: failures.length ? 'cleanup-failed' : 'ready', cleanupComplete: !failures.length, releaseFailures: failures, error: failures.length ? 'CUA_RELEASE_FAILED' : null, dragStart: null });
       if (failures.length) throw new Error('CUA_RELEASE_FAILED');
@@ -167,10 +173,13 @@ export class CuaDriver {
     let settle!: (state: CuaState) => void;
     this.cancellation = new Promise(resolve => { settle = resolve; });
     this.publish({ phase: 'stopping', error: reason, cleanupComplete: false });
+    let revokeFailed = false;
     try { this.dependencies.onCancel?.({ sessionId: this.state.sessionId, runId: this.state.runId, reason }); }
-    catch { reason += ':authority-revoke-failed'; }
+    catch { reason += ':authority-revoke-failed'; revokeFailed = true; }
     const failures = this.release();
-    this.publish({ phase: failures.length ? 'cleanup-failed' : 'stopped', error: reason, cleanupComplete: failures.length === 0, releaseFailures: failures, dragStart: null });
+    if (revokeFailed) failures.push('authority-revoke');
+    if (failures.length) this.cleanupFailureLatched = true;
+    this.publish({ phase: this.cleanupFailureLatched ? 'cleanup-failed' : 'stopped', error: reason, cleanupComplete: !this.cleanupFailureLatched, releaseFailures: failures.length ? failures : this.state.releaseFailures, dragStart: null });
     settle(this.getState());
     return this.cancellation;
   }
