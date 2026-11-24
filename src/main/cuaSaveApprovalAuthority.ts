@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type { CuaSaveProposal } from '../shared/cuaSave';
+import type { CuaSaveProposal, CuaSaveScope } from '../shared/cuaSave';
 import type { AgentCuaSaveApprovalSummary } from '../shared/agentChat';
 import { CuaApprovalError, type CuaApprovalAuthority } from './cuaAgentOrchestration';
 import { CuaApprovalGate } from './cuaApprovalGate';
@@ -22,6 +22,8 @@ interface Approval {
   readonly proposedAt: number;
 }
 interface SavePermit extends Approval { readonly issuedAt: number }
+const scopeDigest = (scope: CuaSaveScope) => JSON.stringify([scope.projectId, scope.sessionId, scope.runId,
+  scope.windowId, scope.frameId, scope.layoutRevision, scope.contentRevision]);
 
 /** Main-only, separate from pointer permits. The backend owns canonical live
  * snapshot/disk-baseline checks and invokes consume at the final publication
@@ -29,6 +31,7 @@ interface SavePermit extends Approval { readonly issuedAt: number }
 export class CuaSaveApprovalAuthority {
   private approvalGate = new CuaApprovalGate();
   private pending: Approval | null = null;
+  private preparation: { conversationId: string; toolCallId: string; scope: CuaSaveScope } | null = null;
   private readonly permits = new Map<string, SavePermit>();
   private readonly seenCalls = new Set<string>();
   private readonly revokedRuns = new Set<string>();
@@ -49,8 +52,29 @@ export class CuaSaveApprovalAuthority {
 
   /** The Save runtime must attach to its input runtime's gate before use. */
   shareInputApprovalGate(input: CuaApprovalAuthority): void {
-    if (this.pending || this.permits.size) throw new CuaApprovalError('CUA_BUSY');
+    if (this.preparation || this.pending || this.permits.size) throw new CuaApprovalError('CUA_BUSY');
     this.approvalGate = input.approvalGate;
+  }
+
+  /** A snapshot read is not approval, but must reserve the same global busy gate. */
+  reservePreparation(conversationId: string, toolCallId: string, scope: CuaSaveScope): void {
+    this.assertRun(scope.runId);
+    if (this.pending || this.permits.size) throw new CuaApprovalError('CUA_BUSY');
+    if (this.preparation) {
+      if (this.preparation.conversationId === conversationId && this.preparation.toolCallId === toolCallId
+        && scopeDigest(this.preparation.scope) === scopeDigest(scope)) return;
+      throw new CuaApprovalError('CUA_BUSY');
+    }
+    if (this.seenCalls.has(JSON.stringify([conversationId, toolCallId]))) throw new CuaApprovalError('CUA_ACTION_REPLAYED');
+    const snapshot = structuredClone(scope);
+    if (!this.approvalGate.acquire(this, scope.runId)) throw new CuaApprovalError('CUA_BUSY');
+    this.preparation = { conversationId, toolCallId, scope: snapshot };
+  }
+
+  releasePreparation(conversationId: string, toolCallId: string): void {
+    if (this.preparation?.conversationId !== conversationId || this.preparation.toolCallId !== toolCallId) return;
+    this.preparation = null;
+    if (!this.pending && !this.permits.size) this.approvalGate.release(this);
   }
 
   propose(conversationId: string, toolCallId: string, proposal: CuaSaveProposal): AgentCuaSaveApprovalSummary {
@@ -62,9 +86,13 @@ export class CuaSaveApprovalAuthority {
     const snapshot = structuredClone(proposal);
     const snapshotDigest = proposalDigest(snapshot);
     const proposedAt = this.options.now();
-    if (!this.approvalGate.acquire(this, proposal.scope.runId)) throw new CuaApprovalError('CUA_BUSY');
+    if (this.preparation) {
+      if (this.preparation.conversationId !== conversationId || this.preparation.toolCallId !== toolCallId
+        || scopeDigest(this.preparation.scope) !== scopeDigest(proposal.scope)) throw new CuaApprovalError('CUA_APPROVAL_MISMATCH');
+    } else if (!this.approvalGate.acquire(this, proposal.scope.runId)) throw new CuaApprovalError('CUA_BUSY');
     this.seenCalls.add(call);
     this.pending = { conversationId, toolCallId, proposal: snapshot, digest: snapshotDigest, proposedAt };
+    this.preparation = null;
     return { actionKind: 'save', actionLabel: snapshot.summary, frameId: snapshot.scope.frameId,
       scopeRevision: snapshot.scope.layoutRevision, contentRevision: snapshot.scope.contentRevision,
       projectId: snapshot.scope.projectId, proposalId: snapshot.proposalId, snapshotId: snapshot.snapshotId,
@@ -85,7 +113,7 @@ export class CuaSaveApprovalAuthority {
 
   check(proposal: CuaSaveProposal, token: unknown): void {
     this.assertRun(proposal.scope.runId);
-    if (this.pending) throw new CuaApprovalError('CUA_BUSY');
+    if (this.preparation || this.pending) throw new CuaApprovalError('CUA_BUSY');
     const permit = typeof token === 'string' ? this.permits.get(token) : undefined;
     if (!permit) throw new CuaApprovalError('CUA_ACTION_REPLAYED');
     if (permit.digest !== proposalDigest(proposal)) throw new CuaApprovalError('CUA_APPROVAL_MISMATCH');
@@ -98,7 +126,7 @@ export class CuaSaveApprovalAuthority {
     try { this.check(proposal, token); }
     finally {
       if (typeof token === 'string') this.permits.delete(token);
-      if (!this.pending && !this.permits.size) this.approvalGate.release(this);
+      if (!this.preparation && !this.pending && !this.permits.size) this.approvalGate.release(this);
     }
     this.savesByRun.set(proposal.scope.runId, (this.savesByRun.get(proposal.scope.runId) ?? 0) + 1);
   }
@@ -114,6 +142,7 @@ export class CuaSaveApprovalAuthority {
   revokeRun(runId: string): void {
     this.revokedRuns.add(runId);
     this.approvalGate.revokeRun(runId);
+    if (this.preparation?.scope.runId === runId) this.preparation = null;
     if (this.pending?.proposal.scope.runId === runId) this.pending = null;
     for (const [token, permit] of this.permits) if (permit.proposal.scope.runId === runId) this.permits.delete(token);
   }
@@ -122,7 +151,7 @@ export class CuaSaveApprovalAuthority {
   discardProposal(proposalId: string): void {
     if (this.pending?.proposal.proposalId === proposalId) this.pending = null;
     for (const [token, permit] of this.permits) if (permit.proposal.proposalId === proposalId) this.permits.delete(token);
-    if (!this.pending && !this.permits.size) this.approvalGate.release(this);
+    if (!this.preparation && !this.pending && !this.permits.size) this.approvalGate.release(this);
   }
 
   getPendingApproval(): Readonly<CuaSaveProposal['scope'] & { conversationId: string; toolCallId: string }> | null {
