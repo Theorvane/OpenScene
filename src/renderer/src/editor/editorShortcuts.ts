@@ -24,6 +24,96 @@ export const EDITOR_SHORTCUT_ACTION_IDS = [
 
 export type EditorShortcutActionId = (typeof EDITOR_SHORTCUT_ACTION_IDS)[number];
 
+/**
+ * Fixed allowlist of non-persistent safe-surface editor commands permitted
+ * while CUA is preparing or acting. Explicitly excludes `saveTimeline` (which
+ * must go through the separate CuaSaveBridge approval/snapshot boundary) and
+ * layout chrome toggles regardless of user shortcut remapping.
+ */
+export const CUA_SAFE_SHORTCUT_ACTION_IDS: ReadonlySet<EditorShortcutActionId> = new Set<EditorShortcutActionId>([
+  'playPause',
+  'undo',
+  'redo',
+  'deleteSelection',
+  'splitSelection',
+  'selectAll',
+  'clearSelection',
+  'duplicateSelection',
+  'stepBackward',
+  'stepForward',
+  'nudgeSelectionLeft',
+  'nudgeSelectionRight',
+  'goToStart',
+  'goToEnd'
+]);
+
+const CUA_FIXED_EXTRA_ALTERNATES: Readonly<Partial<Record<EditorShortcutActionId, readonly EditorShortcutChord[]>>> = {
+  undo: [{ key: 'Z', modifiers: ['Ctrl'] }],
+  redo: [
+    { key: 'Z', modifiers: ['Ctrl', 'Shift'] },
+    { key: 'Y', modifiers: ['Ctrl'] },
+    { key: 'Y', modifiers: ['Meta'] }
+  ],
+  selectAll: [{ key: 'A', modifiers: ['Ctrl'] }],
+  duplicateSelection: [{ key: 'D', modifiers: ['Ctrl'] }]
+};
+
+let cachedCuaFixedSafeBindings: readonly EditorShortcutBinding[] | null = null;
+
+/**
+ * Fixed semantic safe-editing keymap used exclusively while CUA is preparing
+ * or acting (`phase === 'preparing' || phase === 'acting'`).
+ * Completely ignores user custom shortcut remaps (`localStorage`) and excludes
+ * `saveTimeline`, `clearSelection` (Escape is Stop), and layout chrome toggles.
+ */
+export function getCuaFixedSafeShortcutBindings(): readonly EditorShortcutBinding[] {
+  if (cachedCuaFixedSafeBindings !== null) return cachedCuaFixedSafeBindings;
+  cachedCuaFixedSafeBindings = EDITOR_SHORTCUT_DEFINITIONS
+    .filter((definition) => definition.actionId !== 'clearSelection' && isShortcutActionAllowedDuringCua(definition.actionId))
+    .map((definition) => {
+      const extraAlternates = CUA_FIXED_EXTRA_ALTERNATES[definition.actionId] ?? [];
+      const alternateChords = [...(definition.alternateChords ?? []), ...extraAlternates];
+      return {
+        ...definition,
+        ...(alternateChords.length > 0 ? { alternateChords } : {}),
+        chord: definition.defaultChord,
+        isDefault: true,
+        isEnabled: true
+      };
+    });
+  return cachedCuaFixedSafeBindings;
+}
+
+export function isShortcutActionAllowedDuringCua(actionId: EditorShortcutActionId): boolean {
+  if (actionId === 'saveTimeline') return false;
+  return CUA_SAFE_SHORTCUT_ACTION_IDS.has(actionId);
+}
+
+export function resolveTimelineShortcutAction(input: {
+  readonly event: EditorShortcutKeyboardEvent;
+  readonly shortcutPreferences: EditorShortcutPreferences;
+  readonly isLocked: boolean;
+  readonly cuaActing?: boolean;
+}): EditorShortcutActionId | null {
+  if (input.cuaActing === true) {
+    // Never consult user custom shortcutPreferences (localStorage remaps) during CUA.
+    const fixedMatch = getCuaFixedSafeShortcutBindings().find((binding) =>
+      isEditorShortcutBindingMatch(input.event, binding)
+    );
+    if (fixedMatch === undefined || !isShortcutActionAllowedDuringCua(fixedMatch.actionId)) {
+      return null;
+    }
+    return fixedMatch.actionId;
+  }
+
+  if (input.isLocked) return null;
+
+  const matchedBinding = getEditorShortcutBindings(input.shortcutPreferences).find((binding) =>
+    isEditorShortcutBindingMatch(input.event, binding)
+  );
+  return matchedBinding?.actionId ?? null;
+}
+
 export type EditorShortcutModifier = 'Alt' | 'Ctrl' | 'Meta' | 'Shift';
 
 export type EditorShortcutChord = {
