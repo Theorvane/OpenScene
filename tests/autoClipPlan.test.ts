@@ -79,8 +79,8 @@ describe('AutoClip approved edit bridge', () => {
       expect(reopened?.assets).toEqual(before?.assets);
     } finally { await rm(root, { recursive: true, force: true }); }
   });
-  it('includes the organization fork and preserves MIT attribution', () => {
-    expect(readFileSync('.gitmodules', 'utf8')).toContain('https://github.com/Theorvane/autoclip.git');
+  it('includes the pinned upstream and preserves MIT attribution', () => {
+    expect(readFileSync('.gitmodules', 'utf8')).toContain('https://github.com/zhouxiaoka/autoclip.git');
     expect(readFileSync('external/autoclip/LICENSE', 'utf8')).toContain('MIT License');
   });
 });

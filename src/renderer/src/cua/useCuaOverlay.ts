@@ -206,7 +206,7 @@ export function collectDomSurfaceState(options: CollectDomSurfaceOptions): Measu
     focusedTestId,
     scrollStates,
     hasBlockingOverlay,
-    cuaActing: options.cuaPhase === 'acting'
+    cuaActing: options.cuaPhase === 'acting' || options.cuaPhase === 'preparing'
   };
 }
 

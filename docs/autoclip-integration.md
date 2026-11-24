@@ -1,7 +1,7 @@
 # AutoClip integration
 
 OpenScene includes the MIT project AutoClip as `external/autoclip`, from
-https://github.com/Theorvane/autoclip (forked from zhouxiaoka/autoclip).
+https://github.com/zhouxiaoka/autoclip (original upstream).
 Pinned version: 1.5.9, commit `39c856b0277cd22e730002f693ca333da1f625ba`.
 Initialize with `git submodule update --init --recursive`. No dependency installer
 or Tauri/FastAPI/MCP service is started by OpenScene.

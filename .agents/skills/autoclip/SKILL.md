@@ -1,14 +1,14 @@
 ---
 name: autoclip
-description: Evidence-based automatic highlight planning over imported OpenScene media, using the pinned AutoClip fork and approved edit batches.
+description: Evidence-based automatic highlight planning over imported OpenScene media, using the pinned AutoClip upstream and approved edit batches.
 allowed-tools: getProjectTimeline, watchProjectVideo, planAutoClipEdit, editProject
 ---
 
 # AutoClip / OpenScene adapter
 
 Read `external/autoclip/skills/autoclip/SKILL.md` and `docs/autoclip-integration.md`.
-The complete MIT source is pinned under `external/autoclip` from the organization
-fork, not dynamically installed or executed by the application.
+The complete MIT source is pinned under `external/autoclip` from the original
+upstream, not dynamically installed or executed by the application.
 
 For automatic editing, inspect imported asset IDs, measured durations and actual
 speech/frame evidence. Propose highlights using AutoClip's `start_time` and
