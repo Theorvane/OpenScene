@@ -14,6 +14,8 @@ The Pointer Capture variant receives pointerdown, every pointermove, pointerup a
 
 Both initial probes reported window/content focus false even after win.focus. Actual input partially delivered regardless, so the production driver explicitly refuses unfocused input instead of relying on delivery behavior. Driver code never automatically focuses the window.
 
+The zoom-2 probe records a CSS viewport of 350×184, PNG bitmap 700×368 and devicePixelRatio 2. Electron input (40,30) arrives at DOM CSS (20,15): input uses window DIP and must multiply CSS coordinates by zoomFactor. PNG dimensions and device display scale are measured separately; DPR alone cannot supply both conversions. `/tmp/openscene-cua-zoom-probe/input.json` and `capture.png` retain the evidence.
+
 Raw initial evidence: `/tmp/openscene-cua-probe/input.json`, `/tmp/openscene-cua-probe/capture.png`, `/tmp/openscene-cua-pointer-probe/input.json`, `/tmp/openscene-cua-pointer-probe/capture.png`. These are local experimental artifacts, not the required full application evidence.
 
 ## Remaining integration evidence

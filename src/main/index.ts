@@ -498,9 +498,8 @@ let shortsShutdownComplete = false;
 app.on('before-quit', event => {
   if (shortsShutdownComplete) return;
   event.preventDefault();
-  void cuaTarget?.driver.cancel('app-quit');
   exportIpcService.cancelAll();
-  void shortsService.shutdown().finally(() => {
+  void Promise.allSettled([cuaTarget?.driver.cancel('app-quit'), shortsService.shutdown()]).finally(() => {
     shortsShutdownComplete = true;
     app.quit();
   });
