@@ -1,6 +1,8 @@
 # Editing agent capabilities and boundaries
 
-The agent edits the open project's supplied media through the same rules as Timeline and Canvas. It can inspect source evidence, build workflows, materialize results into tracks and start export. It does not provide a media-generation workspace.
+OpenScene is a natural-language video editor. Describe what you want, review the result, and refine it with timeline and node-based editing.
+
+The agent edits the open project's supplied media through the same rules as Timeline and Canvas: describe the edit, review approved changes on Timeline, then refine node workflows or quick-start recipes. It can inspect source evidence, build workflows, materialize results into tracks and start export. Desktop also offers transcript-grounded local-video candidates for multiple editable shorts; candidate quality depends on the evidence and configured model. Existing tools do not establish completed app-window CUA or Jev integration; those remain roadmap work. It does not provide a media-generation workspace.
 
 ## Discover before editing
 

@@ -1,6 +1,10 @@
 # OpenScene mobile
 
-OpenScene mobile edits supplied media through **Edit**, **Canvas**, **Library** and an editing assistant. It shares timeline and workflow rules with the desktop editor.
+OpenScene is a natural-language video editor. Describe what you want, review the result, and refine it with timeline and node-based editing.
+
+자연어로 영상을 만들고 다듬는 영상 편집 도구.
+
+On mobile, describe an edit to the assistant, review and refine it in **Edit**, then use **Canvas** blocks and quick-start recipes for structured workflows over imported media. **Library** supplies the sources; timeline and workflow rules are shared with desktop. The dedicated local-video-to-multiple-shorts review and batch-export workspace is currently desktop-only. CUA and Jev integration remain roadmap work; this guide describes the existing mobile editing surface.
 
 ## Editing
 
