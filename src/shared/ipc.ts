@@ -1,5 +1,6 @@
 export const IPC_CHANNELS = {
   cuaGetState: 'cua:get-state',
+  cuaAckCancel: 'cua:ack-cancel',
   cuaStop: 'cua:stop',
   cuaReportSurfaceSnapshot: 'cua:report-surface-snapshot',
   cuaStateChanged: 'cua:state-changed',
