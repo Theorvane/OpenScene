@@ -120,6 +120,20 @@ export interface AgentChatSendInput {
  */
 export type AgentToolApprovalDecision = 'approve' | 'always' | 'deny';
 
+export const AGENT_CHAT_CUA_ACTION_TOOL_NAME = 'executeCuaAction' as const;
+export const AGENT_CHAT_CUA_SAVE_TOOL_NAME = 'saveCuaEditorProject' as const;
+
+/** Legacy MCP preparation can save dirty UI. Exact CUA/Save approval must not
+ * perform that write before its separate main-only permit is validated. */
+export async function prepareProjectForAgentApproval(
+  toolName: string,
+  decision: AgentToolApprovalDecision,
+  prepareProject?: () => Promise<boolean>
+): Promise<boolean> {
+  if (decision === 'deny' || toolName === AGENT_CHAT_CUA_ACTION_TOOL_NAME || toolName === AGENT_CHAT_CUA_SAVE_TOOL_NAME) return true;
+  return prepareProject ? prepareProject() : true;
+}
+
 export interface AgentChatApprovalInput {
   readonly conversationId: string;
   readonly toolCallId: string;

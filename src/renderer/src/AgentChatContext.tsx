@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import type { AgentChatContextUsage, AgentChatDisplayMessage, AgentChatHistoryEntry, AgentChatStatus, AgentCuaErrorCode, AgentToolApprovalDecision, AgentToolCallProposal } from '../../shared/agentChat';
+import { prepareProjectForAgentApproval } from '../../shared/agentChat';
 import type { EditAgentProjectContext } from '../../shared/editAgentContext';
 import type { AiDomainModelConfig } from '../../shared/aiDomainModels';
 import { isProviderConnected } from '../../shared/llmProviders';
@@ -278,7 +279,7 @@ export function AgentChatProvider({ activeProject, prepareProject, restoreReques
     setError(undefined);
     setErrorCode(undefined);
     try {
-      if (executingApproved && activeProject !== null && prepareProject && !await prepareProject()) {
+      if (activeProject !== null && !await prepareProjectForAgentApproval(pendingApproval.toolName, decision, prepareProject)) {
         throw new Error('Save the open timeline before approving the agent edit.');
       }
       if (executingApproved) {
