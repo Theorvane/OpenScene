@@ -1,0 +1,101 @@
+/*
+ * OpenScene Phase 0 Design System Tokens (Orca-aligned neutral desktop workbench).
+ *
+ * Strictly additive and scoped under `--os-ui-*` and `--os-z-*` so existing
+ * renderer stylesheets (`src/renderer/src/styles.css`) and themes remain
+ * unaffected during phased adoption.
+ *
+ * Visual rules:
+ * - Pure achromatic neutral dark surfaces (#0a0a0a -> #262626)
+ * - Crisp foreground hierarchy (#f0f0f0 -> #6b6b6b)
+ * - Hairline 1px borders, small radii (3/5/7px), dense desktop control heights (26-30px)
+ * - Monochrome primary CTA (#e5e5e5 on #171717, hover #ffffff)
+ * - Restrained semantic status tokens only (ok, warn, question, danger, info)
+ * - Zero gradients, zero decorative glow shadows, zero pill bloat
+ * - Explicit z-index scale where `--os-z-cua-stop` sits strictly above all UI portals
+ */
+
+:root {
+  /* Surfaces */
+  --os-ui-bg: #0a0a0a;
+  --os-ui-canvas: #121212;
+  --os-ui-surface: #171717;
+  --os-ui-surface-elevated: #1c1c1c;
+  --os-ui-hover: #222222;
+  --os-ui-active: #262626;
+  --os-ui-scrim: rgba(0, 0, 0, 0.64);
+
+  /* Foreground hierarchy */
+  --os-ui-fg: #f0f0f0;
+  --os-ui-fg-secondary: #c2c2c2;
+  --os-ui-fg-muted: #8f8f8f;
+  --os-ui-fg-faint: #6b6b6b;
+
+  /* Hairline dividers & borders */
+  --os-ui-border: rgba(255, 255, 255, 0.08);
+  --os-ui-border-strong: rgba(255, 255, 255, 0.15);
+
+  /* Monochrome primary CTA */
+  --os-ui-cta-bg: #e5e5e5;
+  --os-ui-cta-fg: #171717;
+  --os-ui-cta-bg-hover: #ffffff;
+  --os-ui-cta-bg-active: #d4d4d4;
+
+  /* Focus ring */
+  --os-ui-focus-ring: #737373;
+
+  /* Restrained semantic status tokens only */
+  --os-ui-ok: #4ade80;
+  --os-ui-ok-bg: rgba(74, 222, 128, 0.12);
+  --os-ui-ok-border: rgba(74, 222, 128, 0.28);
+
+  --os-ui-warn: #fbbf24;
+  --os-ui-warn-bg: rgba(251, 191, 36, 0.12);
+  --os-ui-warn-border: rgba(251, 191, 36, 0.28);
+
+  --os-ui-question: #a3a3a3;
+  --os-ui-question-bg: rgba(163, 163, 163, 0.12);
+  --os-ui-question-border: rgba(163, 163, 163, 0.28);
+
+  --os-ui-danger: #f87171;
+  --os-ui-danger-bg: rgba(248, 113, 113, 0.14);
+  --os-ui-danger-border: rgba(248, 113, 113, 0.36);
+  --os-ui-danger-fg: #fecaca;
+
+  --os-ui-info: #60a5fa;
+  --os-ui-info-bg: rgba(96, 165, 250, 0.12);
+  --os-ui-info-border: rgba(96, 165, 250, 0.28);
+
+  /* Radii */
+  --os-ui-radius-xs: 3px;
+  --os-ui-radius-sm: 5px;
+  --os-ui-radius-md: 7px;
+
+  /* Dense desktop control sizing */
+  --os-ui-height-sm: 26px;
+  --os-ui-height-md: 28px;
+  --os-ui-height-lg: 30px;
+
+  /* Typography */
+  --os-ui-font-sans: Inter, "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --os-ui-font-mono: "JetBrains Mono", "SF Mono", "Fira Code", Menlo, monospace;
+  --os-ui-text-xs: 11px;
+  --os-ui-text-sm: 12px;
+  --os-ui-text-md: 13px;
+  --os-ui-text-lg: 14px;
+
+  /*
+   * Z-index layering contract:
+   * `--os-z-cua-stop` MUST remain strictly above every portal layer so the
+   * user-only CUA emergency Stop control is never obscured or blocked.
+   */
+  --os-z-base: 0;
+  --os-z-sticky: 20;
+  --os-z-header: 100;
+  --os-z-popover: 400;
+  --os-z-dropdown: 400;
+  --os-z-sheet: 500;
+  --os-z-dialog: 600;
+  --os-z-tooltip: 700;
+  --os-z-cua-stop: 9999;
+}
