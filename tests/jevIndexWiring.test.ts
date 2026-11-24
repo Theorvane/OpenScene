@@ -18,6 +18,9 @@ it('denies the reserved slot in the actual generic index handler before any stor
   for (const event of [{}, { sender: {}, senderFrame: {} }]) {
     expect(await handler(event, 'typesafe-jev', 'secret')).toEqual(fail('PERMISSION_DENIED', 'Use the dedicated Jev credential operation.'));
   }
+  for (const provider of [['typesafe-jev'], null, {}, { toString: () => 'typesafe-jev' }]) {
+    expect(await handler({}, provider, 'secret')).toEqual(fail('INVALID_INPUT', 'Invalid credential provider.'));
+  }
   expect(store.setCredential).not.toHaveBeenCalled();
   expect(await handler({}, 'openaiApiKey', 'ordinary')).toEqual(ok({ updated: true }));
   expect(store.setCredential).toHaveBeenCalledExactlyOnceWith('openaiApiKey', 'ordinary');
