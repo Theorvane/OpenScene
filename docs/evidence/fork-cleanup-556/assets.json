@@ -1,0 +1,204 @@
+{
+  "autoclip": {
+    "issues?state=all&per_page=100": {
+      "exit_code": 0,
+      "response": [],
+      "error": ""
+    },
+    "pulls?state=all&per_page=100": {
+      "exit_code": 0,
+      "response": [],
+      "error": ""
+    },
+    "releases?per_page=100": {
+      "exit_code": 0,
+      "response": [],
+      "error": ""
+    },
+    "hooks": {
+      "exit_code": 0,
+      "response": [],
+      "error": ""
+    },
+    "keys": {
+      "exit_code": 0,
+      "response": [],
+      "error": ""
+    },
+    "actions/secrets": {
+      "exit_code": 0,
+      "response": {
+        "total_count": 0,
+        "secrets": []
+      },
+      "error": ""
+    },
+    "actions/variables": {
+      "exit_code": 0,
+      "response": {
+        "variables": [],
+        "total_count": 0
+      },
+      "error": ""
+    },
+    "environments": {
+      "exit_code": 0,
+      "response": {
+        "total_count": 0,
+        "environments": []
+      },
+      "error": ""
+    },
+    "deployments": {
+      "exit_code": 0,
+      "response": [],
+      "error": ""
+    },
+    "actions/artifacts": {
+      "exit_code": 0,
+      "response": {
+        "total_count": 0,
+        "artifacts": []
+      },
+      "error": ""
+    },
+    "actions/runs?per_page=1": {
+      "exit_code": 0,
+      "response": {
+        "total_count": 0,
+        "workflow_runs": []
+      },
+      "error": ""
+    },
+    "projectsV2_and_discussions": {
+      "exit_code": 1,
+      "response": {
+        "errors": [
+          {
+            "type": "INSUFFICIENT_SCOPES",
+            "locations": [
+              {
+                "line": 1,
+                "column": 48
+              }
+            ],
+            "message": "Your token has not been granted the required scopes to execute this query. The 'projectsV2' field requires one of the following scopes: ['read:project'], but your token has only been granted the: ['gist', 'read:org', 'repo', 'workflow'] scopes. Please modify your token's scopes at: https://github.com/settings/tokens."
+          }
+        ]
+      },
+      "error": "gh: Your token has not been granted the required scopes to execute this query. The 'projectsV2' field requires one of the following scopes: ['read:project'], but your token has only been granted the: ['gist', 'read:org', 'repo', 'workflow'] scopes. Please modify your token's scopes at: https://github.com/settings/tokens."
+    },
+    "repository_metadata": {
+      "full_name": "Theorvane/autoclip",
+      "fork": true,
+      "has_wiki": false,
+      "has_discussions": false,
+      "has_projects": true,
+      "has_issues": false,
+      "default_branch": "main",
+      "pushed_at": "2026-11-23T00:18:57Z",
+      "parent": "zhouxiaoka/autoclip"
+    }
+  },
+  "ffmpeg-skill": {
+    "issues?state=all&per_page=100": {
+      "exit_code": 0,
+      "response": [],
+      "error": ""
+    },
+    "pulls?state=all&per_page=100": {
+      "exit_code": 0,
+      "response": [],
+      "error": ""
+    },
+    "releases?per_page=100": {
+      "exit_code": 0,
+      "response": [],
+      "error": ""
+    },
+    "hooks": {
+      "exit_code": 0,
+      "response": [],
+      "error": ""
+    },
+    "keys": {
+      "exit_code": 0,
+      "response": [],
+      "error": ""
+    },
+    "actions/secrets": {
+      "exit_code": 0,
+      "response": {
+        "total_count": 0,
+        "secrets": []
+      },
+      "error": ""
+    },
+    "actions/variables": {
+      "exit_code": 0,
+      "response": {
+        "variables": [],
+        "total_count": 0
+      },
+      "error": ""
+    },
+    "environments": {
+      "exit_code": 0,
+      "response": {
+        "total_count": 0,
+        "environments": []
+      },
+      "error": ""
+    },
+    "deployments": {
+      "exit_code": 0,
+      "response": [],
+      "error": ""
+    },
+    "actions/artifacts": {
+      "exit_code": 0,
+      "response": {
+        "total_count": 0,
+        "artifacts": []
+      },
+      "error": ""
+    },
+    "actions/runs?per_page=1": {
+      "exit_code": 0,
+      "response": {
+        "total_count": 0,
+        "workflow_runs": []
+      },
+      "error": ""
+    },
+    "projectsV2_and_discussions": {
+      "exit_code": 1,
+      "response": {
+        "errors": [
+          {
+            "type": "INSUFFICIENT_SCOPES",
+            "locations": [
+              {
+                "line": 1,
+                "column": 52
+              }
+            ],
+            "message": "Your token has not been granted the required scopes to execute this query. The 'projectsV2' field requires one of the following scopes: ['read:project'], but your token has only been granted the: ['gist', 'read:org', 'repo', 'workflow'] scopes. Please modify your token's scopes at: https://github.com/settings/tokens."
+          }
+        ]
+      },
+      "error": "gh: Your token has not been granted the required scopes to execute this query. The 'projectsV2' field requires one of the following scopes: ['read:project'], but your token has only been granted the: ['gist', 'read:org', 'repo', 'workflow'] scopes. Please modify your token's scopes at: https://github.com/settings/tokens."
+    },
+    "repository_metadata": {
+      "full_name": "Theorvane/ffmpeg-skill",
+      "fork": true,
+      "has_wiki": true,
+      "has_discussions": false,
+      "has_projects": true,
+      "has_issues": false,
+      "default_branch": "main",
+      "pushed_at": "2026-11-21T05:13:12Z",
+      "parent": "kajisho5/ffmpeg-skill"
+    }
+  }
+}

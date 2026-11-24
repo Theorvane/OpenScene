@@ -93,6 +93,6 @@ SOFTWARE.
 
 ## AutoClip
 
-AutoClip, copyright (c) 2024 AutoClip Team, MIT. Source: https://github.com/zhouxiaoka/autoclip; managed fork https://github.com/Theorvane/autoclip. Pinned source and full license: `external/autoclip/LICENSE`. OpenScene does not automatically execute the upstream runtime.
+AutoClip, copyright (c) 2024 AutoClip Team, MIT. Source: https://github.com/zhouxiaoka/autoclip. Pinned source and full license: `external/autoclip/LICENSE`. OpenScene does not automatically execute the upstream runtime.
 
 Pinned version: 1.5.9, commit `39c856b0277cd22e730002f693ca333da1f625ba`. Desktop packages include the complete copyright and MIT permission/warranty notice at `licenses/AutoClip-LICENSE.txt`, alongside this inventory. The local shorts workflow calls OpenScene's shared source-range planner and existing editing/export code; it does not launch the upstream Python pipeline or redistribute its runtime/model dependencies.

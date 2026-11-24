@@ -8,7 +8,7 @@ OpenScene owns the timeline model, editing rules, project storage, source inspec
 
 ## FFmpeg skill
 
-The MIT `external/ffmpeg-skill` submodule from https://github.com/Theorvane/ffmpeg-skill.git is pinned at commit 3145261a1c19f399b9520fad7fdac741871e1426. Its version and hashes are recorded in .agents/skills/ffmpeg-skill/UPSTREAM.json.
+The MIT `external/ffmpeg-skill` submodule from https://github.com/kajisho5/ffmpeg-skill.git is pinned at commit 3145261a1c19f399b9520fad7fdac741871e1426. Its version and hashes are recorded in .agents/skills/ffmpeg-skill/UPSTREAM.json.
 
 ## Speech transcription
 
@@ -20,4 +20,4 @@ Run root typecheck, tests and build, plus mobile typecheck. Check a real importe
 
 ## AutoClip
 
-`external/autoclip` from https://github.com/Theorvane/autoclip.git (upstream zhouxiaoka/autoclip), MIT, version 1.5.9, pinned at `39c856b0277cd22e730002f693ca333da1f625ba`. See docs/autoclip-integration.md for the read-only planning bridge and approval/runtime boundaries.
+`external/autoclip` from https://github.com/zhouxiaoka/autoclip.git, MIT, version 1.5.9, pinned at `39c856b0277cd22e730002f693ca333da1f625ba`. See docs/autoclip-integration.md for the read-only planning bridge and approval/runtime boundaries.
