@@ -173,6 +173,14 @@ export class CuaAgentOrchestrator {
     readonly onAbortConversation: (conversationId: string) => void;
   }) {}
 
+  /** Trusted read-only driver query, after observe has yielded its first await. */
+  isObservationInFlight(scope: { sessionId: string; runId: string }): boolean {
+    const run = this.runs.get(scope.runId);
+    return scope.sessionId === this.sessionId && run !== undefined
+      && this.byConversation.get(run.conversationId) === run
+      && !run.controller.signal.aborted && run.observation !== null;
+  }
+
   async observe(conversationId: string): Promise<{ success: true; summary: string; frame: CuaFrame }> {
     let run = this.byConversation.get(conversationId);
     if (run?.controller.signal.aborted) throw new CuaApprovalError('CUA_CANCELLED');
