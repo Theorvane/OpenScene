@@ -187,7 +187,7 @@ export class CuaDriver {
       if (!safe || safe.closest('[inert],[hidden],[aria-hidden="true"]')) return false;
       const r = safe.getBoundingClientRect(), want = expected.safe.rect;
       if (want.x < r.x-0.5 || want.y < r.y-0.5 || want.x+want.width > r.right+0.5 || want.y+want.height > r.bottom+0.5) return false;
-      const forbidden = '[data-cua-protected],[role="dialog"],[role="menu"],.oc-editor-host__header';
+      const forbidden = 'iframe,webview,[data-cua-protected],[role="dialog"],[role="menu"],.oc-editor-host__header';
       if (expected.key && (!document.activeElement || !safe.contains(document.activeElement) || document.activeElement.closest(forbidden))) return false;
       return expected.points.every(p => { const e = document.elementFromPoint(p.x,p.y); return e && safe.contains(e) && !e.closest(forbidden); });
     })()`);
