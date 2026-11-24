@@ -279,4 +279,16 @@ describe('self-window CUA safety', () => {
       { type: 'keyDown', keyCode: 'Left' }, { type: 'keyUp', keyCode: 'Left' }
     ]);
   });
+  it('does not retain an old trusted live surface when an unmounted source reports a stale revision', async () => {
+    const f = fixture();
+    f.driver.reportSurface({ ...f.surface, contentRevision: 1 });
+    const frame = await f.driver.observe({ sessionId: 's', runId: 'r' });
+    const scope = { projectId: 'p', sessionId: frame.sessionId, runId: frame.runId, windowId: frame.windowId,
+      frameId: frame.frameId, layoutRevision: frame.layoutRevision, contentRevision: frame.contentRevision };
+    expect(() => f.driver.assertObservationScope(scope)).not.toThrow();
+    expect(() => f.driver.reportSurface({ ...f.surface, safeSurface: null })).toThrow('STALE_CONTENT');
+    expect(() => f.driver.assertObservationScope(scope)).toThrow('SAVE_SCOPE_CHANGED');
+    expect(f.consumePermit).not.toHaveBeenCalled();
+    expect(f.contents.sendInputEvent).not.toHaveBeenCalled();
+  });
 });

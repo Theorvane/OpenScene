@@ -129,10 +129,10 @@ export class CuaDriver {
       && p.rect.x >= panel.x && p.rect.y >= panel.y
       && p.rect.x + p.rect.width <= panel.x + panel.width && p.rect.y + p.rect.height <= panel.y + panel.height)));
   }
-  private invalidSurface(): never {
+  private invalidSurface(code = 'CUA_INVALID_SURFACE'): never {
     this.surface = null; this.frame = null;
     if (['ready', 'preparing', 'acting'].includes(this.state.phase)) void this.cancel('invalid-surface');
-    throw new Error('CUA_INVALID_SURFACE');
+    throw new Error(code);
   }
   reportSurface(snapshot: CuaSurfaceSnapshot): void {
     // Runtime validation is mandatory: the bridge does not make renderer data trusted.
@@ -143,8 +143,8 @@ export class CuaDriver {
       || !Array.isArray(snapshot.protectedRects) || snapshot.protectedRects.length > 256) this.invalidSurface();
     const validRect = (r: CuaRect): boolean => !!r && [r.x, r.y, r.width, r.height].every(Number.isFinite) && r.width >= 0 && r.height >= 0;
     if (snapshot.protectedRects.some(p => !p || !validRect(p.rect)) || (snapshot.safeSurface !== null && (!validRect(snapshot.safeSurface.rect) || typeof snapshot.safeSurface.interactive !== 'boolean'))) this.invalidSurface();
-    if (this.surface && snapshot.layoutRevision < this.surface.layoutRevision) throw new Error('CUA_STALE_SURFACE');
-    if (this.surface && snapshot.contentRevision < this.surface.contentRevision) throw new Error('CUA_STALE_CONTENT');
+    if (this.surface && snapshot.layoutRevision < this.surface.layoutRevision) this.invalidSurface('CUA_STALE_SURFACE');
+    if (this.surface && snapshot.contentRevision < this.surface.contentRevision) this.invalidSurface('CUA_STALE_CONTENT');
     const changed = this.surface !== null && (snapshot.layoutRevision !== this.surface.layoutRevision
       || JSON.stringify(snapshot.viewport) !== JSON.stringify(this.surface.viewport)
       || JSON.stringify(snapshot.safeSurface && { kind: snapshot.safeSurface.kind, rect: snapshot.safeSurface.rect }) !== JSON.stringify(this.surface.safeSurface && { kind: this.surface.safeSurface.kind, rect: this.surface.safeSurface.rect })
