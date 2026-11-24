@@ -56,10 +56,14 @@ ipcMain.handle = (channel, handler) => {
       clips: response?.value?.timeline?.tracks.flatMap(track => track.clips.map(clip => ({ id: clip.id, timelineStartMs: clip.timelineStartMs }))) });
     return response;
   });
-  if (['agent-chat:send', 'agent-chat:approve', 'agent-chat:cancel'].includes(channel)) return originalHandle(channel, (event, payload) => {
-    evidence.agentRequests.push({ channel, at: performance.now(), conversationId: payload?.conversationId,
-      interactionMode: payload?.interactionMode, hasUnsavedTimeline: payload?.hasUnsavedTimeline, decision: payload?.decision, toolCallId: payload?.toolCallId });
-    return handler(event, payload);
+  if (['agent-chat:send', 'agent-chat:approve', 'agent-chat:cancel'].includes(channel)) return originalHandle(channel, async (event, payload) => {
+    const record = { channel, at: performance.now(), conversationId: payload?.conversationId,
+      interactionMode: payload?.interactionMode, hasUnsavedTimeline: payload?.hasUnsavedTimeline, decision: payload?.decision, toolCallId: payload?.toolCallId };
+    evidence.agentRequests.push(record);
+    const response = await handler(event, payload);
+    record.response = { ok: response?.ok, status: response?.value?.status, errorCode: response?.value?.errorCode,
+      pendingApproval: response?.value?.pendingApproval, cuaSaveResult: response?.value?.cuaSaveResult };
+    return response;
   });
   return originalHandle(channel, channel !== 'cua:report-surface-snapshot' ? handler : (event, snapshot) => {
   // Passive evidence tap: original sender, payload, handler and return value.
@@ -100,13 +104,23 @@ async function mcp(name, args) {
   assert.equal(result?.success, true, `${name}: ${JSON.stringify(result)}`);
   return result;
 }
-async function pointFor(selector, text) {
+async function pointFor(selector, text, requireHit = true) {
   return js(`(() => {
     const element = [...document.querySelectorAll(${JSON.stringify(selector)})].find(e => {
       const r=e.getBoundingClientRect();return r.width>0&&r.height>0&&${text === undefined ? 'true' : `e.textContent.trim()===${JSON.stringify(text)}`};
     });
     if(!element||element.disabled) return null;
-    const r=element.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};
+    const r=element.getBoundingClientRect();
+    let left=Math.max(0,r.left),right=Math.min(innerWidth,r.right),top=Math.max(0,r.top),bottom=Math.min(innerHeight,r.bottom);
+    for(let p=element.parentElement;p;p=p.parentElement){
+      const style=getComputedStyle(p),pr=p.getBoundingClientRect();
+      if(/auto|scroll|hidden|clip/.test(style.overflowX)){left=Math.max(left,pr.left);right=Math.min(right,pr.right);}
+      if(/auto|scroll|hidden|clip/.test(style.overflowY)){top=Math.max(top,pr.top);bottom=Math.min(bottom,pr.bottom);}
+    }
+    if(right<=left||bottom<=top)return null;
+    const point={x:left+Math.min(right-left,160)/2,y:(top+bottom)/2};
+    const hit=document.elementFromPoint(point.x,point.y);
+    return ${requireHit ? 'hit&&(hit===element||element.contains(hit))' : 'true'}?point:null;
   })()`);
 }
 function input(event) {
@@ -153,12 +167,13 @@ ChatOllama.prototype.invoke = async function(messages, options) {
   options?.signal?.throwIfAborted();
   evidence.modelCalls.push({ kind: scenario.kind, stage: scenario.stage, at: performance.now() });
   if (scenario.stage++ === 0) return new AIMessage({ content: '', tool_calls: [{ id: `observe-${++callSequence}`, name: 'observeEditorWindow', args: {} }] });
+  if (scenario.kind === 'dirty-observe') return new AIMessage('Readonly dirty first-turn probe settled; no input or saving requested.');
   if (scenario.stage === 2) {
     const frame = lastFrame(messages);
     if (!frame) return new AIMessage('Synthetic planner stopped after the actual observation tool refused. No input was requested.');
-    const point = await pointFor('.timeline-clip');
+    const point = await pointFor('.timeline-clip', undefined, false);
     assert.ok(point, 'Fixture clip is visible to the deterministic synthetic planner');
-    const action = ['move', 'cancel'].includes(scenario.kind)
+    const action = ['move', 'move-save', 'save-deny', 'cancel'].includes(scenario.kind)
       ? { kind: 'drag', from: point, to: { x: point.x + 65, y: point.y }, durationMs: scenario.kind === 'cancel' ? 1800 : 600 }
       : { kind: 'click', point };
     lastActionCallId = `action-${++callSequence}`;
@@ -174,13 +189,36 @@ ChatOllama.prototype.invoke = async function(messages, options) {
         tool_calls: [{ id: `observe-after-action-${++callSequence}`, name: 'observeEditorWindow', args: {} }] });
     } catch { /* A denied/failed input is never retried. */ }
   }
+  if (['move-save', 'save-deny'].includes(scenario.kind) && scenario.stage === 4) {
+    const frame = lastFrame(messages);
+    assert.ok(frame, 'Explicit post-input observation is required for Save');
+    return new AIMessage({ content: '', tool_calls: [{ id: `save-${++callSequence}`, name: 'saveCuaEditorProject', args: {
+      projectId, sessionId: frame.sessionId, runId: frame.runId, windowId: frame.windowId,
+      frameId: frame.frameId, layoutRevision: frame.layoutRevision, contentRevision: frame.contentRevision
+    } }] });
+  }
+  if (scenario.kind === 'move-save' && scenario.stage === 5) {
+    const message = [...messages].reverse().find(candidate => candidate.name === 'saveCuaEditorProject');
+    const receipt = JSON.parse(String(message?.content));
+    scenario.saveReceipt = receipt;
+    if (!['persisted', 'persisted-after-cancel', 'already-clean'].includes(receipt.status) || receipt.diskMatches !== true || receipt.uiApplied !== true) {
+      return new AIMessage('Save was not fully verified/applied. Inspect the terminal receipt; do not retry the write.');
+    }
+    return new AIMessage({ content: '', tool_calls: [{ id: `saved-read-${++callSequence}`, name: 'getProjectTimeline', args: { projectId } }] });
+  }
+  if (scenario.kind === 'move-save' && scenario.stage === 6) {
+    const message = [...messages].reverse().find(candidate => candidate.name === 'getProjectTimeline');
+    scenario.modeledSavedRead = JSON.parse(String(message?.content));
+  }
   return new AIMessage(`Synthetic ${scenario.kind} scenario settled. Verify the saved timeline separately.`);
 };
 
 async function prompt(kind) {
   scenario = { kind, stage: 0 };
   await click('[aria-label="Edit Agent prompt"]');
-  target.webContents.insertText(`CUA integration scenario ${kind}`);
+  const text = `CUA integration scenario ${kind}`;
+  for (const keyCode of text) input({ type: 'char', keyCode });
+  await until('actual prompt character input', () => js(`document.querySelector('[aria-label="Edit Agent prompt"]')?.value===${JSON.stringify(text)}`));
   await click('[aria-label="Send Edit Agent prompt"]');
 }
 async function waitIdle() {
@@ -270,7 +308,10 @@ try {
     }
     input({ type: 'mouseUp', x: Math.round((point.x + 60) * zoom), y: Math.round(point.y * zoom), button: 'left', clickCount: 1 });
     await until('user-role fixture edit is visibly dirty', () => js('document.querySelector("[data-testid=timeline-canvas]")?.dataset.dirty==="true"'));
-    evidence.scenarios.push({ kind: 'user-role-dirty-fixture-setup', before, after: await liveClip(), savedPosition: await savedPosition() });
+    const after = await liveClip(), saved = await savedPosition();
+    assert.ok(after.timelineStartMs > before.timelineStartMs, 'User-role fixture setup changed the live timeline');
+    assert.equal(saved, before.timelineStartMs, 'User-role fixture setup has not saved the project');
+    evidence.scenarios.push({ kind: 'user-role-dirty-fixture-setup', before, after, savedPosition: saved });
   }
   await capture('00-actual-app-before-observe');
   const focusWaitMs = Number(process.env.CUA_AGENT_WAIT_FOR_FOCUS_MS || 0);
@@ -293,7 +334,20 @@ try {
     assert.fail('CUA_NOT_FOCUSED: actual own OpenScene window/contents lack focus; observed product tool refusal, zero product input, guard remains enabled');
   }
   await until('Frontend safe surface marker', () => js('!!document.querySelector("[data-cua-safe-surface]")'));
-  const scenarios = (process.env.CUA_AGENT_SCENARIOS || 'deny,stale,duplicate,move,cancel').split(',');
+  if (process.env.CUA_AGENT_DIRTY_READ_PROBE === '1') {
+    const legacyBefore = evidence.saveRequests.length;
+    const liveBefore = await liveClip(), savedBefore = await savedPosition();
+    await prompt('dirty-observe');
+    await waitIdle();
+    assert.equal(evidence.saveRequests.length, legacyBefore, 'Readonly CUA first turn must not save dirty UI');
+    assert.equal((await liveClip()).timelineStartMs, liveBefore.timelineStartMs);
+    assert.equal(await savedPosition(), savedBefore);
+    assert.equal(await js('document.querySelector("[data-testid=timeline-canvas]")?.dataset.dirty'), 'true');
+    assert.equal(productDowns(), 0);
+    evidence.scenarios.push({ kind: 'dirty-observe-only', legacySaveRequests: 0, live: await liveClip(), savedPosition: savedBefore });
+    await capture('dirty-observe-only-settled');
+  } else {
+  const scenarios = (process.env.CUA_AGENT_SCENARIOS || 'deny,stale,duplicate,save-deny,move-save,cancel').split(',');
   for (const kind of scenarios) {
     const before = await savedPosition();
     const liveBefore = await liveClip();
@@ -316,6 +370,16 @@ try {
         evidence.scenarios.push({ kind: 'duplicate-approval-response', result: duplicate });
         assert.ok(duplicate.errorCode === 'CUA_BUSY' || /no longer matches|REPLAYED/.test(duplicate.error ?? ''), 'Duplicate approval was refused through actual IPC/session ledger');
       }
+      if (kind === 'move-save' || kind === 'save-deny') {
+        await until('separate explicit live snapshot Save approval', () => js('document.querySelector(".agent-chat-approval")?.textContent.includes("saveCuaEditorProject")'));
+        assert.equal(evidence.saveRequests.length, legacyBefore, 'Preparing the dirty Save proposal cannot call legacy Save');
+        await capture(`${kind}-save-pending`);
+        const pending = [...evidence.agentRequests].reverse().find(record => record.response?.pendingApproval?.toolName === 'saveCuaEditorProject')?.response.pendingApproval;
+        assert.equal(pending?.cuaApproval?.actionKind, 'save');
+        assert.equal(pending.cuaApproval.dirty, true);
+        assert.ok(pending.cuaApproval.snapshotId && pending.cuaApproval.timelineDigest, 'Main pinned the exact snapshot identity before approval');
+        await click('.agent-chat-approval button', kind === 'save-deny' ? 'Deny' : 'Run once');
+      }
       if (kind === 'cancel') {
         await until('actual held drag', async () => (await bridge('cuaGetState')).phase === 'acting' && heldInputs().length > 0);
         await click('[data-testid="cua-stop-btn"]');
@@ -329,7 +393,7 @@ try {
       await waitIdle();
       assert.equal(evidence.saveRequests.length, legacyBefore, 'CUA approval/denial/cancel must not call legacy project-timeline:save');
       if (kind === 'deny') assert.equal(productDowns(), downs);
-      if (kind === 'move' || kind === 'duplicate') {
+      if (['move', 'move-save', 'save-deny', 'duplicate'].includes(kind)) {
         assert.equal(productDowns(), downs + 1, 'Only one approved pointer action dispatch');
         const state = await bridge('cuaGetState');
         assert.equal(state.phase, 'ready', JSON.stringify(state));
@@ -338,10 +402,33 @@ try {
       }
     }
     const liveAfter = await liveClip();
-    await saveThroughUi();
+    if (kind === 'move-save') {
+      assert.ok(scenario.modeledSavedRead?.success, 'The actual model tool loop completed saved MCP verification');
+      assert.equal(scenario.saveReceipt?.diskMatches, true);
+      assert.equal(scenario.saveReceipt?.uiApplied, true);
+      assert.equal(await js('document.querySelector("[data-testid=timeline-canvas]")?.dataset.dirty'), 'false');
+      assert.equal(evidence.saveRequests.length, legacyBefore, 'The approved Save path bypasses no legacy approval boundary');
+    } else if (kind === 'save-deny') {
+      assert.equal(await savedPosition(), before, 'Denied Save publishes no live UI edit');
+      assert.equal(await js('document.querySelector("[data-testid=timeline-canvas]")?.dataset.dirty'), 'true');
+      evidence.scenarios.push({ kind: 'explicit-save-denied', live: liveAfter, saved: before, legacySaveRequests: evidence.saveRequests.length - legacyBefore });
+      const undo = Menu.getApplicationMenu()?.getMenuItemById('timeline:undo');
+      assert.ok(undo?.enabled); undo.click(undefined, target, undefined);
+      await until('user-role cleanup Undo after denied Save', async () => (await liveClip()).timelineStartMs === before);
+    } else await saveThroughUi();
     const after = await savedPosition();
-    if (kind === 'move') {
+    if (kind === 'move' || kind === 'move-save') {
       assert.ok(after > before, `MCP saved position changed: ${before} → ${after}`);
+      const modifier = process.platform === 'darwin' ? 'meta' : 'control';
+      input({ type: 'keyDown', keyCode: 'z', modifiers: [modifier] });
+      input({ type: 'keyUp', keyCode: 'z', modifiers: [modifier] });
+      await until('actual app native key Undo restores one live edit', async () => (await liveClip()).timelineStartMs === before);
+      evidence.scenarios.push({ kind: 'user-role-native-key-undo', key: `${modifier}+z`, live: await liveClip(),
+        savedBeforeUndoSave: await savedPosition(), productionCuaKeyValidated: false });
+      const redo = Menu.getApplicationMenu()?.getMenuItemById('timeline:redo');
+      assert.ok(redo?.enabled, 'The single live edit can be redone through the actual app menu');
+      redo.click(undefined, target, undefined);
+      await until('app menu Redo restores the moved live clip', async () => (await liveClip()).timelineStartMs === after);
       const undo = Menu.getApplicationMenu()?.getMenuItemById('timeline:undo');
       assert.ok(undo?.enabled, 'Actual app Undo menu is enabled');
       evidence.scenarios.push({ kind: 'ui-undo-menu', menuId: undo.id, at: performance.now() });
@@ -351,10 +438,14 @@ try {
       await saveThroughUi();
       assert.equal(await savedPosition(), before, 'One UI Undo restores the original saved timeline');
     } else assert.equal(after, before);
-    evidence.scenarios.push({ kind, before, after, liveBefore, liveAfter, driverDowns: productDowns() - downs, held: heldInputs(), passed: true });
+    evidence.scenarios.push({ kind, before, after, liveBefore, liveAfter, saveReceipt: scenario.saveReceipt,
+      modeledSavedProjectId: scenario.modeledSavedRead?.project?.id,
+      modeledSavedClips: scenario.modeledSavedRead?.project?.timeline?.tracks.flatMap(track => track.clips.map(clip => ({ id: clip.id, timelineStartMs: clip.timelineStartMs }))),
+      driverDowns: productDowns() - downs, held: heldInputs(), passed: true });
     await capture(`${kind}-settled`);
     // Actual reset waits driver release and removes the old run/checkpoint.
     await click('[aria-label="Reset conversation"]');
+  }
   }
   evidence.states = await js('window.__cuaAgentStates');
   evidence.domEvents = await js('window.__cuaAgentEvents');
