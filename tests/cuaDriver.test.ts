@@ -34,6 +34,89 @@ function fixture(autoAck = true, autoPrepare = true) {
   return { driver, window, contents, consumePermit, checkPermit, onCancel, getPendingApproval, isObservationInFlight, surface, observe, acting };
 }
 describe('self-window CUA safety', () => {
+  it('returns cloned current frame metadata without capturing, DOM calls or renewing TTL', async () => {
+    const f = fixture(), r = await f.observe();
+    const captures = f.contents.capturePage.mock.calls.length, dom = f.contents.executeJavaScript.mock.calls.length;
+    const meta = f.driver.getCurrentFrame(r)!;
+    expect(meta.frameId).toBe(r.frameId);
+    expect(meta).not.toHaveProperty('pngDataUrl');
+    (meta.viewport as { width: number }).width = 1;
+    expect(f.driver.getCurrentFrame(r)?.viewport.width).toBe(800);
+    expect(f.driver.getCurrentFrame({ ...r, runId: 'other' })).toBeNull();
+    f.window.isFocused.mockReturnValue(false);
+    expect(f.driver.getCurrentFrame(r)).toBeNull();
+    f.window.isFocused.mockReturnValue(true);
+    const clock = vi.spyOn(performance, 'now');
+    const expired = performance.now() + 120001;
+    clock.mockReturnValue(expired);
+    expect(f.driver.getCurrentFrame(r)).toBeNull();
+    expect(f.driver.getCurrentFrame(r)).toBeNull();
+    clock.mockRestore();
+    expect(f.contents.capturePage).toHaveBeenCalledTimes(captures);
+    expect(f.contents.executeJavaScript).toHaveBeenCalledTimes(dom);
+    expect(f.contents.sendInputEvent).not.toHaveBeenCalled();
+    expect(f.consumePermit).not.toHaveBeenCalled();
+    f.driver.invalidateContent();
+    expect(f.driver.getCurrentFrame(r)).toBeNull();
+  });
+  it('excludes input and capture until the exact lease owner releases, including after abort', async () => {
+    const f = fixture(), r = await f.observe(), caller = new AbortController();
+    const lease = f.driver.acquireObservationLease(r, caller.signal)!;
+    expect(lease).not.toBeNull();
+    expect(lease.frame).not.toHaveProperty('pngDataUrl');
+    expect(lease.getCurrentFrame()?.frameId).toBe(r.frameId);
+    expect(f.driver.getCurrentFrame(r)).toBeNull();
+    expect(f.driver.acquireObservationLease(r)).toBeNull();
+    await expect(f.observe()).rejects.toThrow('BUSY');
+    await expect(f.driver.execute(r, 'p')).rejects.toThrow('BUSY');
+    expect(f.checkPermit).not.toHaveBeenCalled();
+    caller.abort();
+    expect(lease.signal.aborted).toBe(true);
+    expect(lease.getCurrentFrame()).toBeNull();
+    expect(f.driver.acquireObservationLease(r)).toBeNull();
+    lease.release(); lease.release();
+    expect(lease.getCurrentFrame()).toBeNull();
+    const next = f.driver.acquireObservationLease(r)!;
+    lease.release(); // stale release cannot release a subsequent lease.
+    expect(f.driver.acquireObservationLease(r)).toBeNull();
+    next.release();
+    expect(f.contents.sendInputEvent).not.toHaveBeenCalled();
+  });
+  it('aborts first and keeps Stop unsettled until transport release, with recursive cancellation safe', async () => {
+    const f = fixture(), r = await f.observe(), lease = f.driver.acquireObservationLease(r)!;
+    let recursive: Promise<unknown> | undefined;
+    lease.signal.addEventListener('abort', () => { recursive = f.driver.cancel('recursive'); });
+    const stop = f.driver.cancel('stop');
+    expect(recursive).toBe(stop);
+    expect(lease.signal.aborted).toBe(true);
+    expect(lease.getCurrentFrame()).toBeNull();
+    let settled = false;
+    void stop.then(() => { settled = true; });
+    await Promise.resolve(); await Promise.resolve();
+    expect(settled).toBe(false);
+    expect(f.driver.getState().phase).toBe('stopping');
+    expect(f.driver.acquireObservationLease(r)).toBeNull();
+    await expect(f.observe()).rejects.toThrow('BUSY');
+    lease.release();
+    expect((await stop).cleanupComplete).toBe(true);
+    expect(f.driver.getState().phase).toBe('stopped');
+    expect(f.contents.sendInputEvent).not.toHaveBeenCalled();
+  });
+  it('rejects stale and aborted lease acquisition without changing frame time or authority', async () => {
+    const f = fixture(), r = await f.observe(), signal = AbortSignal.abort();
+    expect(f.driver.acquireObservationLease(r, signal)).toBeNull();
+    expect(f.driver.acquireObservationLease({ ...r, contentRevision: 99 })).toBeNull();
+    const lease = f.driver.acquireObservationLease(r)!;
+    f.window.isFocused.mockReturnValue(false);
+    expect(lease.getCurrentFrame()).toBeNull();
+    f.window.isFocused.mockReturnValue(true);
+    f.driver.invalidateContent();
+    expect(lease.signal.aborted).toBe(true);
+    expect(lease.getCurrentFrame()).toBeNull();
+    lease.release();
+    await f.driver.cancel();
+    expect(f.consumePermit).not.toHaveBeenCalled();
+  });
   it('uses actual bitmap ratio and rejects invalid pixels', () => {
     const f = { bitmap: { width: 1600, height: 1200 }, viewport: { width: 800, height: 600 } };
     expect(cuaBitmapPointToViewport(f, { x: 200, y: 100 })).toEqual({ x: 100, y: 50 });
@@ -78,6 +161,7 @@ describe('self-window CUA safety', () => {
     expect(f.contents.sendInputEvent).toHaveBeenCalledTimes(count);
     expect(f.contents.sendInputEvent.mock.calls.at(-1)?.[0].type).toBe('mouseUp');
     expect(f.onCancel).toHaveBeenCalledTimes(1);
+    expect(f.driver.getHeldInputCount()).toBe(0);
   });
   it('cancels real input during drag but ignores synchronous injected events', async () => {
     const f = fixture(), r = await f.observe();
@@ -93,11 +177,15 @@ describe('self-window CUA safety', () => {
     const f = fixture(), r = await f.observe();
     const execution = f.driver.execute({ ...r, action: { kind: 'drag', from: { x: 20, y: 20 }, to: { x: 200, y: 20 }, durationMs: 100 } }, 'p');
     await f.acting;
+    expect(f.driver.getHeldInputCount()).toBe(1);
+    expect(f.driver.getCurrentFrame(r)).toBeNull();
     f.contents.sendInputEvent.mockImplementation(() => { throw new Error('closed'); });
     const stopped = await f.driver.cancel('closed');
     expect(stopped.phase).toBe('cleanup-failed');
     expect(stopped.cleanupComplete).toBe(false);
     expect(stopped.releaseFailures).toEqual(['left']);
+    expect(f.driver.getHeldInputCount()).toBe(1);
+    expect(f.driver.getCurrentFrame(r)).toBeNull();
     await expect(execution).rejects.toThrow('CANCELLED');
     await expect(f.observe()).rejects.toThrow('BUSY');
   });
