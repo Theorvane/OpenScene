@@ -1,4 +1,10 @@
 import { EventEmitter } from 'node:events';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { JevConfigStore } from '../src/main/jevConfigStore';
+import { createJevRuntime } from '../src/main/jevRuntime';
 import { createServer } from 'node:http';
 import type { BrowserWindow } from 'electron';
 import { describe, expect, it, vi } from 'vitest';
@@ -34,6 +40,23 @@ async function fixture() {
     input: { conversationId: 'c', output: { success: true, summary: 'Metadata only.', frame } } };
 }
 describe('trusted main Jev composition', () => {
+  it('reads committed persistent config through the actual main runtime closure', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'jev-main-config-'));
+    try {
+      const store = new JevConfigStore(directory);
+      await store.load();
+      const runtime = createJevRuntime({ service: { getApiKey: async () => null }, readConfig: store.getSnapshot });
+      expect(runtime.getConfig().enabled).toBe(false);
+      await store.set({ ...DEFAULT_JEV_CONFIG, enabled: true });
+      expect(runtime.getConfig().enabled).toBe(true);
+      const reopened = new JevConfigStore(directory); await reopened.load();
+      expect(reopened.getSnapshot().enabled).toBe(true);
+      await store.set(DEFAULT_JEV_CONFIG);
+      expect(runtime.getConfig().enabled).toBe(false);
+      const source = readFileSync(new URL('../src/main/index.ts', import.meta.url), 'utf8');
+      expect(source).toContain('runtime: createJevRuntime({ service: jevService, readConfig: jevConfigStore.getSnapshot })');
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  });
   it('default-off reads no key and sends no network request', async () => {
     const f = await fixture(), network = vi.fn<typeof fetch>();
     expect(await f.makeHook(network, false)(f.input)).toBeNull();

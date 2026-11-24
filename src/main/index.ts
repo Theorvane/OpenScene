@@ -485,7 +485,7 @@ async function installIpcHandlers(): Promise<void> {
 
   const agentChatTools = await createAgentChatTools(mcpServerInstance, cuaAgent, cuaSaveAgent);
   const jevObservationHook = createMainJevObservationHook({
-    runtime: createJevRuntime({ service: jevService }), // No opt-in source: remains default-off.
+    runtime: createJevRuntime({ service: jevService, readConfig: jevConfigStore.getSnapshot }),
     agent: cuaAgent, getDriver: () => cuaTarget?.driver ?? null
   });
   const agentChatGraphBundle = buildAgentChatGraph({
