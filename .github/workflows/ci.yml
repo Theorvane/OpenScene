@@ -37,6 +37,8 @@ jobs:
         working-directory: mobile
         run: npm ci
       - run: brew install ffmpeg
+      - name: Calibrate synthetic shorts media checks
+        run: node scripts/shorts-media.mjs self-test "$RUNNER_TEMP/shorts-media-smoke" smoke
       - run: npm run typecheck
       - name: Typecheck the mobile app
         working-directory: mobile
