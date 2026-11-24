@@ -26,7 +26,7 @@ export class CuaAgentSaveOrchestrator {
   private readonly lastResults = new Map<string, CuaSaveResult>();
 
   constructor(readonly authority: CuaSaveApprovalAuthority, private readonly options: {
-    readonly bridge: Pick<CuaSaveBridge, 'prepareSaveSnapshot' | 'saveApproved' | 'cancelRun' | 'settleWrites'>;
+    readonly bridge: Pick<CuaSaveBridge, 'prepareSaveSnapshot' | 'saveApproved' | 'cancelRun' | 'settleWrites' | 'discardProposal'>;
     readonly assertScope: (conversationId: string, scope: CuaSaveScope) => void;
     readonly inputAuthority: CuaApprovalAuthority;
   }) { authority.shareInputApprovalGate(options.inputAuthority); }
@@ -44,6 +44,7 @@ export class CuaAgentSaveOrchestrator {
     }
     if (this.entries.size || this.cancellations.size) throw new CuaApprovalError('CUA_BUSY');
     const snapshot = structuredClone(scope);
+    this.authority.reservePreparation(conversationId, toolCallId, snapshot);
     // Install before invoking bridge callbacks, just as the driver does for
     // cancellation. Replayed graph interrupts reuse this immutable preparation.
     const preparation = Promise.resolve().then(() => this.options.bridge.prepareSaveSnapshot(snapshot));
@@ -59,6 +60,7 @@ export class CuaAgentSaveOrchestrator {
       entry.summary = this.authority.propose(conversationId, toolCallId, entry.proposal);
       return structuredClone(entry.summary);
     } catch (error) {
+      this.authority.releasePreparation(conversationId, toolCallId);
       if (this.entries.get(conversationId) === entry) this.entries.delete(conversationId);
       throw error;
     }
@@ -68,6 +70,9 @@ export class CuaAgentSaveOrchestrator {
     const entry = this.entries.get(conversationId);
     if (!entry || entry.toolCallId !== toolCallId) throw new CuaApprovalError('CUA_APPROVAL_MISMATCH');
     this.authority.deny(conversationId, toolCallId);
+    // This only asks the bridge to discard an inactive snapshot. A false
+    // result is never treated as cancellation of an actual pending/write job.
+    if (entry.proposal) this.options.bridge.discardProposal(entry.proposal.proposalId);
     this.entries.delete(conversationId);
   }
 

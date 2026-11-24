@@ -19,6 +19,35 @@ function pair() {
   return { pointer, save };
 }
 describe('shared main approval arbitration', () => {
+  it('reserves the shared gate during snapshot preparation without pretending approval exists', () => {
+    const { pointer, save } = pair();
+    save.reservePreparation('a', 'save', proposal.scope);
+    expect(save.getPendingApproval()).toBeNull();
+    save.discardProposal('unrelated-old-proposal');
+    expect(() => save.consume(proposal, 'wrong-token')).toThrow('CUA_BUSY');
+    expect(() => pointer.propose('b', 'click', input)).toThrow('CUA_BUSY');
+    save.releasePreparation('wrong-conversation', 'save');
+    expect(() => pointer.propose('b', 'click', input)).toThrow('CUA_BUSY');
+    save.propose('a', 'save', proposal);
+    expect(save.getPendingApproval()?.conversationId).toBe('a');
+    expect(() => pointer.propose('b', 'click', input)).toThrow('CUA_BUSY');
+    save.deny('a', 'save');
+    pointer.propose('b', 'click', input);
+  });
+
+  it('releases failed or cancelled preparation without leaving a hidden pending authority', () => {
+    const { pointer, save } = pair();
+    save.reservePreparation('a', 'failed', proposal.scope);
+    save.releasePreparation('a', 'failed');
+    pointer.propose('b', 'click', input);
+    pointer.deny('b', 'click');
+    save.reservePreparation('a', 'cancelled', proposal.scope);
+    save.revokeRun('r');
+    expect(save.getPendingApproval()).toBeNull();
+    expect(() => save.propose('a', 'cancelled', proposal)).toThrow('CUA_CANCELLED');
+    pointer.propose('b', 'new', { ...input, runId: 'new-run' });
+  });
+
   it('never permits simultaneous input and Save pending approval, across conversations', () => {
     const { pointer, save } = pair();
     pointer.propose('a', 'click', input);

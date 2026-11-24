@@ -14,7 +14,7 @@ const resultFor = (proposal: CuaSaveProposal): CuaSaveResult => ({ saveToken: 's
   snapshotId: proposal.snapshotId, timelineDigest: proposal.timelineDigest, expectedContentRevision: 2,
   persistedUpdatedAt: '2026-11-24T00:00:00.000Z', status: 'persisted', diskMatches: true, uiApplied: true, errorCode: null });
 function fixture() {
-  let preparations = 0, publications = 0, cancellations = 0;
+  let preparations = 0, publications = 0, cancellations = 0, discards = 0;
   let waitForPublication: Promise<void> = Promise.resolve();
   let terminal: Partial<CuaSaveResult> = {};
   let admitBeforeWait = false;
@@ -36,6 +36,7 @@ function fixture() {
       return { ...resultFor(proposal), ...terminal };
     },
     cancelRun: () => { cancellations++; },
+    discardProposal: (id: string) => { discards++; return proposals.delete(id); },
     settleWrites: async () => { await waitForPublication; }
   };
   const inputAuthority = new CuaApprovalAuthority({ permitTtlMs: 1000, maxActionsPerRun: 3, now: () => 0 });
@@ -43,6 +44,7 @@ function fixture() {
     if (conversationId !== 'a' || JSON.stringify(value) !== JSON.stringify(scope)) throw new Error('CUA_SCOPE_CHANGED');
   } });
   return { orchestrator, authority, publications: () => publications, preparations: () => preparations,
+    discards: () => discards,
     cancellations: () => cancellations, waitForPublication: (promise: Promise<void>) => { waitForPublication = promise; },
     admitBeforeWait: () => { admitBeforeWait = true; },
     terminal: (value: Partial<CuaSaveResult>) => { terminal = value; } };
@@ -64,6 +66,8 @@ describe('approved Save dispatch orchestration', () => {
     const f = fixture();
     await f.orchestrator.prepareApproval('a', 'call', scope);
     f.orchestrator.deny('a', 'call');
+    expect(f.discards()).toBe(1);
+    expect(f.authority.getPendingApproval()).toBeNull();
     await expect(f.orchestrator.executeApproved('a', 'call', scope)).rejects.toThrow('CUA_APPROVAL_MISMATCH');
     await expect(createCuaSaveAgentChatTools()[0]!.invoke(scope)).rejects.toThrow('CUA_APPROVAL_MISMATCH');
     expect(f.publications()).toBe(0);
@@ -84,6 +88,8 @@ describe('approved Save dispatch orchestration', () => {
     await f.orchestrator.prepareApproval('a', 'call', scope);
     const first = f.orchestrator.executeApproved('a', 'call', scope);
     expect(f.orchestrator.executeApproved('a', 'call', scope)).toBe(first);
+    expect(() => f.orchestrator.deny('a', 'call')).toThrow('CUA_APPROVAL_MISMATCH');
+    expect(f.discards()).toBe(0);
     release();
     await first;
     await expect(f.orchestrator.executeApproved('a', 'call', scope)).rejects.toThrow('CUA_APPROVAL_MISMATCH');
