@@ -32,6 +32,7 @@ import {
   SHORTS_MAX_DURATION_MS_DEFAULT,
   SHORTS_MIN_DURATION_MS_DEFAULT,
   aggregateShortsExports,
+  canApplyResultAsyncResponse,
   filterSourceCaptionsForCandidate,
   findRecipeForCandidate,
   formatShortsStageLabel,
@@ -111,13 +112,29 @@ export function ShortsReviewWorkspace({
     readonly text: string;
   } | null>(null);
 
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   const [resultProjectsById, setResultProjectsById] = useState<Readonly<Record<string, LocalProjectSnapshot>>>({});
   const resultProjectsRef = useRef<Readonly<Record<string, LocalProjectSnapshot>>>({});
+  const resultRevisionByIdRef = useRef<Record<string, number>>({});
+  const latestLoadRevByIdRef = useRef<Record<string, number>>({});
   const lastReloadTokenRef = useRef<number>(returnReloadToken);
   const [loadingResultIds, setLoadingResultIds] = useState<ReadonlySet<string>>(() => new Set());
   const [dirtyResultIds, setDirtyResultIds] = useState<ReadonlySet<string>>(() => new Set());
   const [savingResultId, setSavingResultId] = useState<string | null>(null);
   const [resultStatusById, setResultStatusById] = useState<Readonly<Record<string, string>>>({});
+
+  const bumpResultRevision = useCallback((resultProjectId: string): number => {
+    const next = (resultRevisionByIdRef.current[resultProjectId] ?? 0) + 1;
+    resultRevisionByIdRef.current[resultProjectId] = next;
+    return next;
+  }, []);
 
   useEffect(() => {
     resultProjectsRef.current = resultProjectsById;
@@ -278,7 +295,7 @@ export function ShortsReviewWorkspace({
     const prevStage = activeReviewJob.stage;
     const timer = window.setTimeout(() => {
       void window.videoTool.shortsGet({ jobId }).then((response) => {
-        if (!response.ok) return;
+        if (!mountedRef.current || !response.ok) return;
         upsertJob(response.value);
         if (response.value.cleanupComplete && cancelAcceptedJobId === jobId) {
           setCancelAcceptedJobId(null);
@@ -298,7 +315,7 @@ export function ShortsReviewWorkspace({
     const jobId = latestExportRun.id;
     const timer = window.setTimeout(() => {
       void window.videoTool.shortsGet({ jobId }).then((response) => {
-        if (!response.ok) return;
+        if (!mountedRef.current || !response.ok) return;
         upsertJob(response.value);
         if (response.value.cleanupComplete && cancelAcceptedJobId === jobId) {
           setCancelAcceptedJobId(null);
@@ -332,6 +349,7 @@ export function ShortsReviewWorkspace({
       void Promise.all(
         pollableExportJobIds.map(async (jobId) => {
           const response = await window.videoTool.getExportJob({ jobId });
+          if (!mountedRef.current) return;
           if (response.ok) {
             setExportJobsById((current) => ({ ...current, [jobId]: response.value }));
             return;
@@ -351,9 +369,20 @@ export function ShortsReviewWorkspace({
 
   const loadResultProject = useCallback(async (resultProjectId: string, force = false): Promise<void> => {
     if (!force && resultProjectsRef.current[resultProjectId] !== undefined) return;
+    const startRev = bumpResultRevision(resultProjectId);
+    latestLoadRevByIdRef.current[resultProjectId] = startRev;
     setLoadingResultIds((current) => new Set(current).add(resultProjectId));
     try {
       const response = await window.videoTool.openProject({ projectId: resultProjectId });
+      if (
+        !canApplyResultAsyncResponse({
+          mounted: mountedRef.current,
+          currentRevision: resultRevisionByIdRef.current[resultProjectId] ?? 0,
+          requestRevision: startRev
+        })
+      ) {
+        return;
+      }
       if (response.ok) {
         setResultProjectsById((current) => {
           const next = { ...current, [resultProjectId]: response.value };
@@ -370,13 +399,16 @@ export function ShortsReviewWorkspace({
         setResultStatusById((current) => ({ ...current, [resultProjectId]: errorMessage(response.error) }));
       }
     } finally {
-      setLoadingResultIds((current) => {
-        const next = new Set(current);
-        next.delete(resultProjectId);
-        return next;
-      });
+      if (mountedRef.current && latestLoadRevByIdRef.current[resultProjectId] === startRev) {
+        setLoadingResultIds((current) => {
+          if (!current.has(resultProjectId)) return current;
+          const next = new Set(current);
+          next.delete(resultProjectId);
+          return next;
+        });
+      }
     }
-  }, []);
+  }, [bumpResultRevision]);
 
   useEffect(() => {
     if (activeResultProjectId === undefined) return;
@@ -391,6 +423,7 @@ export function ShortsReviewWorkspace({
       if (existing === undefined) return;
       const nextTimeline = updater(existing.timeline);
       if (nextTimeline === null) return;
+      bumpResultRevision(resultProjectId);
       const updatedSnapshot: LocalProjectSnapshot = { ...existing, timeline: nextTimeline };
       const nextMap = { ...resultProjectsRef.current, [resultProjectId]: updatedSnapshot };
       resultProjectsRef.current = nextMap;
@@ -403,21 +436,37 @@ export function ShortsReviewWorkspace({
         return next;
       });
     },
-    []
+    [bumpResultRevision]
   );
 
   const saveResultProject = useCallback(
     async (resultProjectId: string): Promise<boolean> => {
       const snapshot = resultProjectsRef.current[resultProjectId];
       if (snapshot === undefined) return true;
+      const saveRev = resultRevisionByIdRef.current[resultProjectId] ?? 0;
       setSavingResultId(resultProjectId);
       try {
         const response = await window.videoTool.saveTimeline({
           projectId: resultProjectId,
           timeline: snapshot.timeline
         });
+        if (!mountedRef.current) return false;
         if (!response.ok) {
           setResultStatusById((current) => ({ ...current, [resultProjectId]: errorMessage(response.error) }));
+          return false;
+        }
+        if (
+          !canApplyResultAsyncResponse({
+            mounted: mountedRef.current,
+            currentRevision: resultRevisionByIdRef.current[resultProjectId] ?? 0,
+            requestRevision: saveRev
+          })
+        ) {
+          // Newer local edits arrived while saveTimeline was in flight; preserve local timeline & dirty state.
+          setResultStatusById((current) => ({
+            ...current,
+            [resultProjectId]: '저장 중 추가 편집이 발생하여 최신 변경사항을 유지했습니다. 다시 저장하세요.'
+          }));
           return false;
         }
         setResultProjectsById((current) => {
@@ -433,7 +482,9 @@ export function ShortsReviewWorkspace({
         setResultStatusById((current) => ({ ...current, [resultProjectId]: '변경사항이 격리 쇼츠 프로젝트에 저장되었습니다.' }));
         return true;
       } finally {
-        setSavingResultId((current) => (current === resultProjectId ? null : current));
+        if (mountedRef.current) {
+          setSavingResultId((current) => (current === resultProjectId ? null : current));
+        }
       }
     },
     []
@@ -466,6 +517,7 @@ export function ShortsReviewWorkspace({
         minDurationMs: bounds.minDurationMs,
         maxDurationMs: bounds.maxDurationMs
       });
+      if (!mountedRef.current) return;
       if (!response.ok) {
         setWorkspaceError(errorMessage(response.error));
         return;
@@ -473,7 +525,7 @@ export function ShortsReviewWorkspace({
       upsertJob(response.value);
       setActiveReviewJobId(response.value.id);
     } finally {
-      setIsStartingRun(false);
+      if (mountedRef.current) setIsStartingRun(false);
     }
   };
 
@@ -483,6 +535,7 @@ export function ShortsReviewWorkspace({
     setWorkspaceError(null);
     try {
       const response = await window.videoTool.shortsCancel({ jobId });
+      if (!mountedRef.current) return;
       if (!response.ok) {
         setWorkspaceError(errorMessage(response.error));
         return;
@@ -491,10 +544,13 @@ export function ShortsReviewWorkspace({
         setCancelAcceptedJobId(jobId);
       }
       const refreshed = await window.videoTool.shortsGet({ jobId });
+      if (!mountedRef.current) return;
       if (refreshed.ok) upsertJob(refreshed.value);
     } finally {
-      if (kind === 'review') setIsCancellingReview(false);
-      else setIsCancellingExport(false);
+      if (mountedRef.current) {
+        if (kind === 'review') setIsCancellingReview(false);
+        else setIsCancellingExport(false);
+      }
     }
   };
 
@@ -507,13 +563,14 @@ export function ShortsReviewWorkspace({
         jobId: activeReviewJob.id,
         candidateIds: selectedCandidateIds
       });
+      if (!mountedRef.current) return;
       if (!response.ok) {
         setWorkspaceError(errorMessage(response.error));
         return;
       }
       upsertJob(response.value);
     } finally {
-      setIsMaterializing(false);
+      if (mountedRef.current) setIsMaterializing(false);
     }
   };
 
@@ -525,6 +582,7 @@ export function ShortsReviewWorkspace({
       for (const resultId of targetResultProjectIds) {
         if (dirtyResultIds.has(resultId)) {
           const saved = await saveResultProject(resultId);
+          if (!mountedRef.current) return;
           if (!saved) {
             setExportActionNotice({
               tone: 'danger',
@@ -538,6 +596,7 @@ export function ShortsReviewWorkspace({
         jobId: activeReviewJob.id,
         resultProjectIds: targetResultProjectIds
       });
+      if (!mountedRef.current) return;
       if (!response.ok) {
         setExportActionNotice({ tone: 'danger', text: errorMessage(response.error) });
         return;
@@ -545,7 +604,7 @@ export function ShortsReviewWorkspace({
       upsertJob(response.value);
       setRightTab('export');
     } finally {
-      setIsStartingExport(false);
+      if (mountedRef.current) setIsStartingExport(false);
     }
   };
 
@@ -553,7 +612,7 @@ export function ShortsReviewWorkspace({
     if (activeReviewJob === null || activeCandidate === null || activeResultProjectId === undefined) return;
     if (dirtyResultIds.has(activeResultProjectId)) {
       const saved = await saveResultProject(activeResultProjectId);
-      if (!saved) return;
+      if (!mountedRef.current || !saved) return;
     }
     await onOpenMaterializedProject({
       sourceProjectId: activeReviewJob.sourceProjectId,
@@ -565,6 +624,7 @@ export function ShortsReviewWorkspace({
 
   const handleOpenExportResult = async (jobId: string): Promise<void> => {
     const response = await window.videoTool.openExportResult({ jobId });
+    if (!mountedRef.current) return;
     setExportActionNotice(
       response.ok
         ? { tone: 'success', text: '내보낸 MP4를 기본 로컬 플레이어로 열었습니다.' }
@@ -574,6 +634,7 @@ export function ShortsReviewWorkspace({
 
   const handleRevealExportResult = async (jobId: string): Promise<void> => {
     const response = await window.videoTool.revealExportResult({ jobId });
+    if (!mountedRef.current) return;
     setExportActionNotice(
       response.ok
         ? { tone: 'success', text: '내보낸 MP4 위치를 로컬 파일 관리자에서 열었습니다.' }
@@ -1026,6 +1087,9 @@ export function ShortsReviewWorkspace({
                 }}
                 onSaveTimeline={() => {
                   if (activeResultProjectId !== undefined) void saveResultProject(activeResultProjectId);
+                }}
+                onReloadTimeline={() => {
+                  if (activeResultProjectId !== undefined) void loadResultProject(activeResultProjectId, true);
                 }}
                 onOpenInTimelineEditor={() => { void handleOpenInTimelineEditor(); }}
               />

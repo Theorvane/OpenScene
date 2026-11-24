@@ -10,6 +10,7 @@ import {
   addShortsTitle,
   aggregateShortsExports,
   applyPresetToShortsTitles,
+  canApplyResultAsyncResponse,
   computeContainScale,
   computeManualFillScale,
   computeShortsPreviewMediaStyle,
@@ -317,5 +318,22 @@ describe('shortsReviewState pure logic', () => {
     expect(normalizeShortsStartBounds({ requestedCount: 0, minDurationSeconds: 15, maxDurationSeconds: 60 })).toBeNull();
     expect(normalizeShortsStartBounds({ requestedCount: 6, minDurationSeconds: 15, maxDurationSeconds: 60 })).toBeNull();
     expect(normalizeShortsStartBounds({ requestedCount: 2, minDurationSeconds: 40, maxDurationSeconds: 20 })).toBeNull();
+  });
+
+  it('rejects stale or post-unmount async openProject/saveTimeline responses via revision & mounted guards', () => {
+    expect(
+      canApplyResultAsyncResponse({ mounted: true, currentRevision: 3, requestRevision: 3 })
+    ).toBe(true);
+    // Stale response after a newer inline edit bumped revision.
+    expect(
+      canApplyResultAsyncResponse({ mounted: true, currentRevision: 4, requestRevision: 3 })
+    ).toBe(false);
+    // Delayed response arriving after component unmount.
+    expect(
+      canApplyResultAsyncResponse({ mounted: false, currentRevision: 3, requestRevision: 3 })
+    ).toBe(false);
+    expect(
+      canApplyResultAsyncResponse({ mounted: false, currentRevision: 4, requestRevision: 3 })
+    ).toBe(false);
   });
 });

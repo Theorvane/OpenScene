@@ -39,6 +39,7 @@ type ShortsResultEditorProps = {
   readonly statusMessage: string | null;
   readonly onChangeTimeline: (updater: (timeline: TimelineDocument) => TimelineDocument | null) => void;
   readonly onSaveTimeline: () => void;
+  readonly onReloadTimeline?: (() => void) | undefined;
   readonly onOpenInTimelineEditor: () => void;
 };
 
@@ -53,6 +54,7 @@ export function ShortsResultEditor({
   statusMessage,
   onChangeTimeline,
   onSaveTimeline,
+  onReloadTimeline,
   onOpenInTimelineEditor
 }: ShortsResultEditorProps): ReactElement {
   if (candidate === null) {
@@ -110,9 +112,9 @@ export function ShortsResultEditor({
     );
   }
 
-  if (isLoadingResult || resultProject === null) {
+  if (resultProject === null) {
     return (
-      <div className="shorts-section">
+      <div className="shorts-section" data-testid="shorts-result-loading">
         <p className="shorts-muted">격리 쇼츠 프로젝트({resultProjectId})를 불러오는 중…</p>
       </div>
     );
@@ -147,7 +149,9 @@ export function ShortsResultEditor({
       <section className="shorts-section" aria-label="격리 프로젝트 저장 및 편집기 이동">
         <div className="shorts-row">
           <h3 className="shorts-section__title">격리 쇼츠 프로젝트 편집</h3>
-          <span className="shorts-badge">{isDirty ? '미저장 변경 있음' : '저장됨'}</span>
+          <span className="shorts-badge" data-testid="shorts-result-dirty-badge">
+            {isLoadingResult ? '새로고침 중…' : isDirty ? '미저장 변경 있음' : '저장됨'}
+          </span>
         </div>
         <div className="shorts-nudge-group">
           <Button
@@ -168,6 +172,15 @@ export function ShortsResultEditor({
           >
             편집기에서 열기
           </Button>
+          {onReloadTimeline !== undefined && (
+            <Button
+              data-testid="shorts-reload-result-btn"
+              disabled={isLoadingResult || isSavingResult}
+              onClick={onReloadTimeline}
+            >
+              {isLoadingResult ? '새로고침 중…' : '다시 불러오기'}
+            </Button>
+          )}
         </div>
         {statusMessage !== null && <StatusCard tone="neutral">{statusMessage}</StatusCard>}
       </section>

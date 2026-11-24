@@ -646,6 +646,14 @@ export function findRecipeForCandidate(
   return job.recipes.find((recipe) => recipe.candidate.id === candidateId) ?? null;
 }
 
+export function canApplyResultAsyncResponse(input: {
+  readonly mounted: boolean;
+  readonly currentRevision: number;
+  readonly requestRevision: number;
+}): boolean {
+  return input.mounted && input.currentRevision === input.requestRevision;
+}
+
 export function formatShortsStageLabel(stage: ShortsJobStage, cleanupComplete: boolean): string {
   switch (stage) {
     case 'transcribing':

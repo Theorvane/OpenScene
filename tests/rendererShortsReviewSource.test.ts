@@ -70,6 +70,7 @@ describe('renderer shorts review UI source & CUA contract', () => {
       'data-testid="shorts-preview-scrub-slider"',
       'data-testid="shorts-recipe-meta"',
       'data-testid="shorts-save-result-btn"',
+      'data-testid="shorts-reload-result-btn"',
       'data-testid="shorts-trim-start-input"',
       'data-testid="shorts-trim-end-input"',
       'data-testid="shorts-crop-offset-x-input"',
@@ -98,5 +99,9 @@ describe('renderer shorts review UI source & CUA contract', () => {
     expect(editorPanelSource).toContain('data-dirty=');
     expect(editorPanelSource).toContain('data-saving=');
     expect(editorPanelSource).toContain('step={1}');
+    expect(workspaceSource).toContain('mountedRef');
+    expect(workspaceSource).toContain('resultRevisionByIdRef');
+    expect(workspaceSource).toContain('latestLoadRevByIdRef');
+    expect(workspaceSource).toContain('canApplyResultAsyncResponse');
   });
 });
