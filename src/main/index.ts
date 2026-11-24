@@ -1,5 +1,6 @@
-import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, session, shell, systemPreferences } from 'electron';
+import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, screen, session, shell, systemPreferences } from 'electron';
 import { existsSync } from 'node:fs';
+import { performance } from 'node:perf_hooks';
 import { join } from 'node:path';
 
 import { IPC_CHANNELS } from '../shared/ipc';
@@ -35,7 +36,10 @@ import { AgentChatHistoryStore } from './agentChatHistoryStore';
 import { registerAgentChatIpcHandlers } from './agentChatIpcHandlers';
 import { createAgentChatModel } from './agentChatModel';
 import { AgentChatSessionManager } from './agentChatSession';
-import { AGENT_CHAT_SPEND_TOOL_NAMES, agentChatMutatingToolNames, createAgentChatTools } from './agentChatTools';
+import { AGENT_CHAT_CUA_PER_CALL_TOOL_NAMES, AGENT_CHAT_SPEND_TOOL_NAMES, agentChatMutatingToolNames, createAgentChatTools } from './agentChatTools';
+import { CuaDriver } from './cuaDriver';
+import { registerCuaIpc } from './cuaIpc';
+import { CuaAgentOrchestrator, CuaApprovalAuthority, type CuaAgentDriver } from './cuaAgentOrchestration';
 import { ChatGptCodexAdapter } from './chatGptCodexAdapter';
 import { ChatGptOAuthService } from './chatGptOAuthService';
 import { CredentialStore } from './credentialStore';
@@ -172,6 +176,24 @@ function getScreenPermissionStatus(): string {
  * still shows Electron; this is what a packaged build and the About panel use.
  */
 const APP_NAME = 'OpenScene';
+let cuaTarget: { window: BrowserWindow; driver: CuaDriver } | null = null;
+let activeAgentChatSessions: AgentChatSessionManager | null = null;
+const cuaAuthority = new CuaApprovalAuthority({ permitTtlMs: 2000, maxActionsPerRun: 20, now: () => performance.now() });
+const requireCuaDriver = (): CuaDriver => {
+  if (!cuaTarget || cuaTarget.window.isDestroyed()) throw new Error('CUA_TARGET_GONE');
+  return cuaTarget.driver;
+};
+const cuaDriverAdapter: CuaAgentDriver = {
+  observe: context => requireCuaDriver().observe(context),
+  execute: (request, permit, signal) => requireCuaDriver().execute(request, permit, signal),
+  cancel: reason => requireCuaDriver().cancel(reason),
+  getState: () => requireCuaDriver().getState(),
+  setExecutionBlocked: blocked => requireCuaDriver().setExecutionBlocked(blocked)
+};
+const cuaAgent = new CuaAgentOrchestrator(cuaAuthority, {
+  driver: cuaDriverAdapter,
+  onAbortConversation: id => activeAgentChatSessions?.abortConversation(id)
+});
 
 /** Window icon for platforms that take one; macOS uses the bundle icon. */
 function appIconPath(): string | undefined {
@@ -205,6 +227,19 @@ function createWindow(): void {
       allowRunningInsecureContent: false
     }
   });
+  const cuaDriver = new CuaDriver(mainWindow, {
+    getDeviceScaleFactor: () => screen.getDisplayMatching(mainWindow.getBounds()).scaleFactor,
+    getPendingApproval: () => cuaAuthority.getPendingApproval(),
+    consumePermit: (request, permit) => cuaAuthority.consume(request, permit),
+    onCancel: ({ runId }) => {
+      if (runId) { cuaAuthority.revokeRun(runId); cuaAgent.abortRun(runId); }
+    },
+    onState: state => {
+      cuaAgent.settleRun(state);
+      if (!mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send(IPC_CHANNELS.cuaStateChanged, state);
+    }
+  });
+  cuaTarget = { window: mainWindow, driver: cuaDriver };
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
@@ -306,6 +341,7 @@ function installDisplayMediaHandler(): void {
 }
 
 async function installIpcHandlers(): Promise<void> {
+  registerCuaIpc(ipcMain, () => cuaTarget);
   ipcMain.handle(IPC_CHANNELS.getTitleFontData, (_event, input: unknown) => readTitleFontData(input));
   registerCaptureIpcHandlers({
     ipcMain,
@@ -388,17 +424,24 @@ async function installIpcHandlers(): Promise<void> {
     return executeRegisteredEditorTool(mcpServerInstance, toolName, params);
   });
 
-  const agentChatTools = await createAgentChatTools(mcpServerInstance);
+  const agentChatTools = await createAgentChatTools(mcpServerInstance, cuaAgent);
   const agentChatGraphBundle = buildAgentChatGraph({
     tools: agentChatTools,
     // Derived from the tools that exist, so a tool added tomorrow asks for
     // approval by default rather than because someone remembered a list.
     mutatingToolNames: agentChatMutatingToolNames(agentChatTools),
     spendToolNames: AGENT_CHAT_SPEND_TOOL_NAMES,
+    perCallApprovalToolNames: AGENT_CHAT_CUA_PER_CALL_TOOL_NAMES,
+    cua: cuaAgent,
     createModel: createAgentChatModel(agentChatTools, credentialStore, chatGptOAuthService)
   });
-  const agentChatSessions = new AgentChatSessionManager(agentChatGraphBundle);
-  registerAgentChatIpcHandlers(ipcMain, agentChatSessions, new AgentChatHistoryStore(projectStore));
+  const agentChatSessions = new AgentChatSessionManager(agentChatGraphBundle, { cancelCua: id => cuaAgent.cancelConversation(id) });
+  activeAgentChatSessions = agentChatSessions;
+  registerAgentChatIpcHandlers(ipcMain, agentChatSessions, new AgentChatHistoryStore(projectStore), {
+    cancelChannel: IPC_CHANNELS.agentChatCancel,
+    isTrustedSender: event => cuaTarget !== null && !cuaTarget.window.isDestroyed()
+      && event.sender === cuaTarget.window.webContents && event.senderFrame === cuaTarget.window.webContents.mainFrame
+  });
 }
 
 app.setName(APP_NAME);
@@ -456,7 +499,7 @@ app.on('before-quit', event => {
   if (shortsShutdownComplete) return;
   event.preventDefault();
   exportIpcService.cancelAll();
-  void shortsService.shutdown().finally(() => {
+  void Promise.allSettled([cuaTarget?.driver.cancel('app-quit'), shortsService.shutdown()]).finally(() => {
     shortsShutdownComplete = true;
     app.quit();
   });

@@ -4,17 +4,19 @@ import { describe, expect, it, vi } from 'vitest';
 import { CuaDriver } from '../src/main/cuaDriver';
 import { cuaBitmapPointToViewport, type CuaActionRequest, type CuaSurfaceSnapshot } from '../src/shared/cua';
 
-function fixture() {
+function fixture(autoAck = true) {
   const contents = Object.assign(new EventEmitter(), {
-    isDestroyed: vi.fn(() => false), isFocused: vi.fn(() => true), getZoomFactor: () => 1,
+    isDestroyed: vi.fn(() => false), isFocused: vi.fn(() => true), getZoomFactor: vi.fn(() => 1),
     executeJavaScript: vi.fn(async () => true),
-    capturePage: vi.fn(async () => ({ getSize: () => ({ width: 800, height: 600 }), isEmpty: () => false, toDataURL: () => 'data:image/png;base64,test' })),
+    capturePage: vi.fn(async () => ({ isEmpty: () => false, toPNG: () => {
+      const png = Buffer.alloc(24); Buffer.from('89504e470d0a1a0a', 'hex').copy(png); png.writeUInt32BE(800,16); png.writeUInt32BE(600,20); return png;
+    } })),
     sendInputEvent: vi.fn((input: MouseInputEvent) => contents.emit(input.type.startsWith('mouse') ? 'before-mouse-event' : 'before-input-event', {}, input))
   });
   const window = Object.assign(new EventEmitter(), { id: 7, webContents: contents, isDestroyed: vi.fn(() => false), isFocused: vi.fn(() => true) });
   const consumePermit = vi.fn(); const onCancel = vi.fn();
   const driver = new CuaDriver(window as unknown as BrowserWindow, { consumePermit, onCancel, onState: state => {
-    if (state.phase === 'stopping' && state.cancelToken && state.runId) driver.acknowledgeCancel({ runId: state.runId, cancelToken: state.cancelToken });
+    if (autoAck && state.phase === 'stopping' && state.cancelToken && state.runId) driver.acknowledgeCancel({ runId: state.runId, cancelToken: state.cancelToken });
   } });
   const surface: CuaSurfaceSnapshot = { executionBlocked: false, blockReason: null, layoutRevision: 1, viewport: { width: 800, height: 600 }, safeSurface: { kind: 'timeline', rect: { x: 0, y: 0, width: 800, height: 600 }, interactive: true }, protectedRects: [], focusedInSafeSurface: true, focusedTestId: null };
   driver.reportSurface(surface); driver.setExecutionBlocked(false);
@@ -99,5 +101,35 @@ describe('self-window CUA safety', () => {
     f.window.isFocused.mockReturnValue(false);
     await expect(f.observe()).rejects.toThrow('NOT_FOCUSED');
     expect(f.consumePermit).not.toHaveBeenCalled();
+  });
+  it('times out missing rollback acknowledgement, still releases and locks recovery', async () => {
+    const f = fixture(false), r = await f.observe();
+    const execution = f.driver.execute({ ...r, action: { kind: 'drag', from: { x: 20, y: 20 }, to: { x: 200, y: 20 }, durationMs: 3000 } }, 'p');
+    await Promise.resolve(); await Promise.resolve();
+    const rejected = expect(execution).rejects.toThrow('CANCELLED');
+    const stop = f.driver.cancel('user-stop');
+    const pending = f.driver.getState();
+    expect(pending.phase).toBe('stopping');
+    expect(f.driver.acknowledgeCancel({ runId: 'wrong', cancelToken: pending.cancelToken! })).toBe(false);
+    const stopped = await stop;
+    expect(stopped.cleanupComplete).toBe(false);
+    expect(stopped.releaseFailures).toContain('renderer-rollback-unconfirmed');
+    expect(f.contents.sendInputEvent.mock.calls.at(-1)?.[0].type).toBe('mouseUp');
+    expect(f.driver.acknowledgeCancel({ runId: 'r', cancelToken: pending.cancelToken! })).toBe(false);
+    await rejected;
+    await expect(f.observe()).rejects.toThrow('BUSY');
+  });
+  it('rejects independently unsafe DOM without consuming a permit', async () => {
+    const f = fixture(), r = await f.observe();
+    f.contents.executeJavaScript.mockResolvedValue(false);
+    await expect(f.driver.execute(r, 'p')).rejects.toThrow('UNSAFE_DOCUMENT');
+    expect(f.consumePermit).not.toHaveBeenCalled();
+    expect(f.contents.sendInputEvent).not.toHaveBeenCalled();
+  });
+  it('converts CSS points to Electron DIP input with zoom, independently of bitmap scale', async () => {
+    const f = fixture(); f.contents.getZoomFactor.mockReturnValue(2);
+    const r = await f.observe();
+    await f.driver.execute(r, 'p');
+    expect(f.contents.sendInputEvent.mock.calls[0]?.[0]).toMatchObject({ type: 'mouseMove', x: 40, y: 40 });
   });
 });
