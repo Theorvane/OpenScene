@@ -75,6 +75,42 @@ export function useTimelineEditor() {
   const [metadataProbeRetryRevisionsByAssetId, setMetadataProbeRetryRevisionsByAssetId] = useState<Readonly<Record<string, number>>>({});
   const [statusMessage, setStatusMessage] = useState<StatusMessage>({ tone: 'neutral', text: 'Create or open a project to start editing locally.' });
   const projectRef = useRef<LocalProjectSnapshot | null>(null);
+  // Monotonic committed content revision for CUA stale-content invalidation.
+  // Increments ONLY when committed project/timeline/assets content actually changes
+  // (never on selection, focus, playhead, uncommitted drag preview, HUD changes, or
+  // no-op saveTimeline round-trips returning identical timeline/assets content).
+  const contentRevisionRef = useRef<{
+    projectId: string | null;
+    timeline: TimelineDocument | null;
+    assets: LocalProjectSnapshot['assets'] | null;
+    fingerprint: string;
+    revision: number;
+  }>({
+    projectId: null,
+    timeline: null,
+    assets: null,
+    fingerprint: 'null',
+    revision: 0
+  });
+
+  const nextProjectId = project?.id ?? null;
+  const nextTimeline = project?.timeline ?? null;
+  const nextAssets = project?.assets ?? null;
+  if (
+    contentRevisionRef.current.projectId !== nextProjectId ||
+    contentRevisionRef.current.timeline !== nextTimeline ||
+    contentRevisionRef.current.assets !== nextAssets
+  ) {
+    const nextFingerprint = project === null ? 'null' : JSON.stringify([project.id, project.timeline, project.assets]);
+    if (nextFingerprint !== contentRevisionRef.current.fingerprint) {
+      contentRevisionRef.current.revision += 1;
+      contentRevisionRef.current.fingerprint = nextFingerprint;
+    }
+    contentRevisionRef.current.projectId = nextProjectId;
+    contentRevisionRef.current.timeline = nextTimeline;
+    contentRevisionRef.current.assets = nextAssets;
+  }
+  const contentRevision = contentRevisionRef.current.revision;
 
   useEffect(() => {
     projectRef.current = project;
@@ -779,7 +815,7 @@ export function useTimelineEditor() {
       (timeline) => connectVideoClips(timeline, fromId, toId),
       'Connected clips. The video track now plays continuously in the new order.'
     ),
-    addTimelineTrack, removeTimelineTrack, renameTimelineTrack, insertTimelineTrack, createProject, deleteCurrentProject, deleteSelectedClip, duplicateSelectedClip, hasUnsavedTimeline, importAssets,
+    addTimelineTrack, removeTimelineTrack, renameTimelineTrack, insertTimelineTrack, contentRevision, createProject, deleteCurrentProject, deleteSelectedClip, duplicateSelectedClip, hasUnsavedTimeline, importAssets,
     isSavingTimeline, timelineSaveError, timelineSaveStatus,
     importRecordingResult, isBusy, metadataProbeFailuresByAssetId, metadataProbeRetryRevisionsByAssetId, moveSelectedClip, newProjectName,
     cutAtPlayhead, transitionAtPlayhead, setTransitionAtPlayhead, removeTransitionAtPlayhead,
