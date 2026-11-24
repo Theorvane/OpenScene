@@ -40,6 +40,20 @@ function fixture() {
 }
 
 describe('CUA immutable run binding and dispatch', () => {
+  it('binds Save scope to the immutable main conversation/project and latest observation', async () => {
+    const f = fixture();
+    const frame = (await f.orchestrator.observe('a', 'project')).frame;
+    const scope = { projectId: 'project', sessionId: frame.sessionId, runId: frame.runId, windowId: frame.windowId,
+      frameId: frame.frameId, layoutRevision: frame.layoutRevision, contentRevision: frame.contentRevision };
+    f.orchestrator.assertSaveScope('a', scope);
+    expect(() => f.orchestrator.assertSaveScope('other', scope)).toThrow('CUA_SCOPE_CHANGED');
+    expect(() => f.orchestrator.assertSaveScope('a', { ...scope, projectId: 'other' })).toThrow('CUA_SCOPE_CHANGED');
+    expect(() => f.orchestrator.assertSaveScope('a', { ...scope, contentRevision: 99 })).toThrow('CUA_SCOPE_CHANGED');
+    await expect(f.orchestrator.observe('a', 'other')).rejects.toThrow('CUA_SCOPE_CHANGED');
+    await f.orchestrator.cancelConversation('a');
+    expect(() => f.orchestrator.assertSaveScope('a', scope)).toThrow('CUA_SCOPE_CHANGED');
+  });
+
   it('reports observation only after driver promise assignment and clears it on settlement', async () => {
     const f = fixture();
     const originalObserve = f.driver.observe;

@@ -1,5 +1,6 @@
 import type { EditAgentContextAsset, EditAgentProjectContext } from './editAgentContext';
 import type { OpenAiAuthMode, ReasoningEffort } from './openAiAuth';
+import type { CuaSaveResult } from './cuaSave';
 
 export type AgentChatMessageRole = 'user' | 'assistant' | 'tool';
 
@@ -23,7 +24,7 @@ export interface AgentToolCallProposal {
  * displayed in the coordinate system named here; the driver owns conversion
  * and validation. Changing this evidence requires a new proposal and approval.
  */
-export interface AgentCuaApprovalSummary {
+export interface AgentCuaInputApprovalSummary {
   readonly actionKind: 'click' | 'key' | 'drag';
   readonly actionLabel: string;
   readonly frameId: string;
@@ -33,6 +34,26 @@ export interface AgentCuaApprovalSummary {
   readonly coords?: { readonly x: number; readonly y: number } | undefined;
   readonly dragTo?: { readonly x: number; readonly y: number } | undefined;
 }
+
+export interface AgentCuaSaveApprovalSummary {
+  readonly actionKind: 'save';
+  readonly actionLabel: string;
+  readonly frameId: string;
+  readonly scopeRevision: number;
+  readonly contentRevision: number;
+  readonly projectId: string;
+  readonly proposalId: string;
+  readonly snapshotId: string;
+  readonly timelineDigest: string;
+  readonly dirty: boolean;
+  readonly clipCount: number;
+  readonly titleCount: number;
+  readonly coordinateSpace?: undefined;
+  readonly coords?: undefined;
+  readonly dragTo?: undefined;
+}
+
+export type AgentCuaApprovalSummary = AgentCuaInputApprovalSummary | AgentCuaSaveApprovalSummary;
 
 /** Stable presentation codes; the main process remains the source of errors. */
 export type AgentCuaErrorCode =
@@ -46,7 +67,10 @@ export type AgentCuaErrorCode =
   | 'CUA_CANCELLED'
   | 'CUA_BUSY'
   | 'CUA_TARGET_GONE'
-  | 'CUA_CLEANUP_FAILED';
+  | 'CUA_CLEANUP_FAILED'
+  | 'CUA_SAVE_OUTCOME_UNKNOWN'
+  | 'CUA_SAVE_NOT_VERIFIED'
+  | 'CUA_SAVE_NOT_WRITTEN';
 
 export type AgentChatStatus = 'idle' | 'thinking' | 'awaiting-approval' | 'error';
 
@@ -67,6 +91,8 @@ export interface AgentChatTurnState {
   readonly status: AgentChatStatus;
   readonly error?: string | undefined;
   readonly errorCode?: AgentCuaErrorCode | undefined;
+  /** Main-confirmed Save receipt; independent of later cancellation or UI acknowledgement. */
+  readonly cuaSaveResult?: CuaSaveResult | undefined;
   readonly contextUsage?: AgentChatContextUsage | undefined;
 }
 

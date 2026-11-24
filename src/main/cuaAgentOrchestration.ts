@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { CuaActionRequest, CuaFrame, CuaState } from '../shared/cua';
 import type { AgentCuaApprovalSummary, AgentCuaErrorCode } from '../shared/agentChat';
+import type { CuaSaveScope } from '../shared/cuaSave';
 
 export class CuaApprovalError extends Error {
   constructor(readonly code: AgentCuaErrorCode) { super(code); }
@@ -107,7 +108,7 @@ export class CuaApprovalAuthority {
     if (permit === undefined) throw new CuaApprovalError('CUA_ACTION_REPLAYED');
     if (permit.digest !== digest(request)) throw new CuaApprovalError('CUA_APPROVAL_MISMATCH');
     const elapsed = this.options.now() - permit.issuedAt;
-    if (elapsed < 0 || elapsed >= this.options.permitTtlMs) throw new CuaApprovalError('CUA_APPROVAL_EXPIRED');
+    if (!Number.isFinite(elapsed) || elapsed < 0 || elapsed >= this.options.permitTtlMs) throw new CuaApprovalError('CUA_APPROVAL_EXPIRED');
     const count = this.actionsByRun.get(request.runId) ?? 0;
     if (count >= this.options.maxActionsPerRun) throw new CuaApprovalError('CUA_BUDGET_EXCEEDED');
   }
@@ -154,6 +155,7 @@ export interface CuaAgentDriver {
 
 interface BoundRun {
   readonly conversationId: string;
+  readonly projectId: string | null;
   readonly runId: string;
   readonly controller: AbortController;
   frame: CuaFrame | null;
@@ -181,15 +183,16 @@ export class CuaAgentOrchestrator {
       && !run.controller.signal.aborted && run.observation !== null;
   }
 
-  async observe(conversationId: string): Promise<{ success: true; summary: string; frame: CuaFrame }> {
+  async observe(conversationId: string, projectId?: string): Promise<{ success: true; summary: string; frame: CuaFrame }> {
     let run = this.byConversation.get(conversationId);
     if (run?.controller.signal.aborted) throw new CuaApprovalError('CUA_CANCELLED');
     if (!run) {
       if (this.byConversation.size > 0) throw new CuaApprovalError('CUA_BUSY');
-      run = { conversationId, runId: randomUUID(), controller: new AbortController(), frame: null, observation: null, pending: null };
+      run = { conversationId, projectId: projectId ?? null, runId: randomUUID(), controller: new AbortController(), frame: null, observation: null, pending: null };
       this.byConversation.set(conversationId, run);
       this.runs.set(run.runId, run);
     }
+    if (projectId !== undefined && run.projectId !== projectId) throw new CuaApprovalError('CUA_SCOPE_CHANGED');
     if (run.pending) throw new CuaApprovalError('CUA_BUSY');
     this.authority.assertRunAllowed(run.runId);
     if (run.observation) throw new CuaApprovalError('CUA_BUSY');
@@ -201,6 +204,18 @@ export class CuaAgentOrchestrator {
     if (frame.sessionId !== this.sessionId || frame.runId !== run.runId) throw new CuaApprovalError('CUA_SCOPE_CHANGED');
     run.frame = structuredClone(frame);
     return { success: true, summary: `Self-window observation frameId=${frame.frameId}, layoutRevision=${frame.layoutRevision}, contentRevision=${frame.contentRevision}; CSS viewport ${frame.viewport.width}×${frame.viewport.height}.`, frame };
+  }
+
+  /** Main conversation/project binding in addition to the driver's scope checks. */
+  assertSaveScope(conversationId: string, scope: CuaSaveScope): void {
+    const run = this.byConversation.get(conversationId);
+    if (!run || run.projectId !== scope.projectId || run.runId !== scope.runId || scope.sessionId !== this.sessionId
+      || run.frame?.windowId !== scope.windowId || run.frame.frameId !== scope.frameId
+      || run.frame.layoutRevision !== scope.layoutRevision || run.frame.contentRevision !== scope.contentRevision) {
+      throw new CuaApprovalError('CUA_SCOPE_CHANGED');
+    }
+    run.controller.signal.throwIfAborted();
+    this.authority.assertRunAllowed(run.runId);
   }
 
   prepareApproval(conversationId: string, toolCallId: string, request: CuaActionRequest): AgentCuaApprovalSummary {
