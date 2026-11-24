@@ -1,6 +1,6 @@
 # Canvas workflows
 
-Canvas assembles imported media using typed function blocks. A graph describes processing; the saved timeline remains the sequence used for preview and export.
+Canvas is the node-based refinement step in OpenScene's natural-language editing flow: describe the result, review and precisely edit it on Timeline, then shape a workflow with blocks or quick-start recipes. Canvas already assembles imported media using typed function blocks and four fixed quick starts; broader reusable recipe workflows remain a roadmap goal. A graph describes processing; the saved timeline remains the sequence used for preview and export. Local-video-to-multiple-shorts candidate review is a separate desktop workflow; the Quick highlight template below is a mechanical configuration, not that candidate selector.
 
 ## Build an edit
 

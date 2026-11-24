@@ -1,6 +1,8 @@
 # OpenScene documentation
 
-OpenScene combines Timeline, a node Canvas and an editing agent for supplied media. These guides describe the implemented product and its limits.
+OpenScene is a natural-language video editor. Describe what you want, review the result, and refine it with timeline and node-based editing.
+
+The editing flow is natural-language requests → precise Timeline refinement → Canvas workflows and quick-start recipes over supplied media. A core desktop workflow turns local video files into multiple reviewable, editable shorts and batch exports; see [current scope](local-shorts-backend.md) and [verification limits](shorts-media-validation.md). Existing node graphs and quick starts are implemented; broader reusable recipes, CUA and Jev integration remain roadmap work. These guides distinguish current capabilities from planned work.
 
 ## Using the editor
 
