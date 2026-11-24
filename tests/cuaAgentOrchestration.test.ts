@@ -64,7 +64,7 @@ describe('main CUA approval authority', () => {
     expect(() => authority.consume(request, token)).toThrow('CUA_ACTION_REPLAYED');
   });
 
-  it.each(['sessionId', 'runId', 'windowId', 'frameId', 'layoutRevision'] as const)('binds %s to the original evidence', (field) => {
+  it.each(['sessionId', 'runId', 'windowId', 'frameId', 'layoutRevision', 'contentRevision'] as const)('binds %s to the original evidence', (field) => {
     const { authority, approve } = fixture();
     const token = approve();
     const changed = { ...request, [field]: typeof request[field] === 'number' ? 99 : 'different' } as CuaActionRequest;

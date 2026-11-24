@@ -158,7 +158,7 @@ ChatOllama.prototype.invoke = async function(messages, options) {
     lastActionCallId = `action-${++callSequence}`;
     return new AIMessage({ content: '', tool_calls: [{ id: lastActionCallId, name: 'executeCuaAction', args: {
       sessionId: frame.sessionId, runId: frame.runId, windowId: frame.windowId,
-      frameId: scenario.kind === 'stale' ? `${frame.frameId}-stale` : frame.frameId, layoutRevision: frame.layoutRevision, action
+      frameId: scenario.kind === 'stale' ? `${frame.frameId}-stale` : frame.frameId, layoutRevision: frame.layoutRevision, contentRevision: frame.contentRevision, action
     } }] });
   }
   if (scenario.stage === 3) {
@@ -206,9 +206,9 @@ async function saveThroughUi() {
   await until('actual main save acknowledgement', () => evidence.saves.length > previousAcks);
   assert.equal(evidence.saves.at(-1).ok, true, JSON.stringify(evidence.saves.at(-1)));
   assert.equal(evidence.saves.at(-1).projectId, projectId);
-  await until('project save', () => js(`!document.querySelector('.oc-editor-host__save')?.textContent.includes('*')`));
+  await until('project save', () => js(`(() => {const b=document.querySelector('[data-testid="editor-save-btn"]');return b?.dataset.dirty==='false'&&b.dataset.saving!=='true'&&b.dataset.saveStatus!=='error';})()`));
 }
-const liveClip = () => js(`(() => {const e=document.querySelector('.timeline-clip');if(!e)return null;const r=e.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,left:e.style.left,selected:e.classList.contains('timeline-clip--selected')};})()`);
+const liveClip = () => js(`(() => {const e=document.querySelector('.timeline-clip');if(!e)return null;const r=e.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,left:e.style.left,timelineStartMs:Number(e.dataset.timelineStartMs),selected:e.classList.contains('timeline-clip--selected')};})()`);
 async function savedPosition() {
   const state = await mcp('getProjectTimeline', { projectId });
   return state.project.timeline.tracks.flatMap((track) => track.clips)[0]?.timelineStartMs;

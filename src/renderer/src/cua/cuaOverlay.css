@@ -1,0 +1,310 @@
+/* Self-window CUA overlay: strictly click-through except the user-only Stop button. */
+.cua-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.cua-overlay__svg {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.cua-overlay__drag-guide {
+  stroke: rgba(56, 189, 248, 0.35);
+  stroke-width: 2;
+  stroke-dasharray: 4 4;
+}
+
+.cua-overlay__drag-progress {
+  stroke: #38bdf8;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+}
+
+.cua-overlay__drag-remaining {
+  stroke: #f59e0b;
+  stroke-width: 2;
+  stroke-dasharray: 6 4;
+  stroke-linecap: round;
+}
+
+.cua-overlay__start-halo {
+  fill: rgba(56, 189, 248, 0.2);
+  stroke: #38bdf8;
+  stroke-width: 1.5;
+}
+
+.cua-overlay__start-dot {
+  fill: #38bdf8;
+}
+
+.cua-overlay__target-ring {
+  fill: rgba(245, 158, 11, 0.14);
+  stroke: #f59e0b;
+  stroke-width: 1.75;
+}
+
+.cua-overlay__target-dot {
+  fill: #f59e0b;
+}
+
+.cua-overlay__target-cross {
+  stroke: #f59e0b;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+
+/* Virtual cursor */
+.cua-cursor {
+  position: fixed;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  will-change: transform;
+  z-index: 2;
+}
+
+.cua-cursor__ring {
+  position: absolute;
+  top: -12px;
+  left: -12px;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  border: 2px solid rgba(56, 189, 248, 0.65);
+  background: rgba(56, 189, 248, 0.14);
+  transition: transform 120ms ease, border-color 120ms ease, background-color 120ms ease;
+}
+
+.cua-cursor--acting .cua-cursor__ring {
+  border-color: #38bdf8;
+  background: rgba(56, 189, 248, 0.25);
+  transform: scale(1.2);
+}
+
+.cua-cursor--dragging .cua-cursor__ring {
+  border-color: #f59e0b;
+  background: rgba(245, 158, 11, 0.28);
+  transform: scale(1.35);
+}
+
+.cua-cursor--stopping .cua-cursor__ring {
+  border-color: #f59e0b;
+  background: rgba(245, 158, 11, 0.2);
+}
+
+.cua-cursor--cleanup-failed .cua-cursor__ring {
+  border-color: #ef4444;
+  background: rgba(239, 68, 68, 0.28);
+  transform: scale(1.3);
+}
+
+.cua-cursor__arrow {
+  position: relative;
+  display: block;
+  margin-left: -2px;
+  margin-top: -2px;
+  filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.55));
+}
+
+.cua-cursor__arrow-shape {
+  fill: #0ea5e9;
+  stroke: #ffffff;
+  stroke-width: 1.75;
+  stroke-linejoin: round;
+}
+
+.cua-cursor--dragging .cua-cursor__arrow-shape {
+  fill: #f59e0b;
+}
+
+.cua-cursor--cleanup-failed .cua-cursor__arrow-shape {
+  fill: #ef4444;
+}
+
+.cua-cursor__badge {
+  position: absolute;
+  top: 18px;
+  left: 14px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #f59e0b;
+  color: #111827;
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+
+/* Status HUD pill at top-center (outside timeline area) */
+.cua-hud {
+  position: fixed;
+  top: 46px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: min(620px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.92);
+  color: #f8fafc;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(8px);
+  pointer-events: none;
+  z-index: 3;
+}
+
+.cua-overlay--cleanup-failed .cua-hud {
+  border-color: rgba(239, 68, 68, 0.8);
+  background: rgba(69, 10, 10, 0.95);
+}
+
+.cua-hud__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.cua-hud__phase {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.cua-hud__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #38bdf8;
+}
+
+.cua-hud__phase--ready .cua-hud__dot {
+  background: #22c55e;
+}
+
+.cua-hud__phase--acting .cua-hud__dot {
+  background: #38bdf8;
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.35);
+}
+
+.cua-hud__phase--stopping .cua-hud__dot {
+  background: #f59e0b;
+}
+
+.cua-hud__phase--stopped .cua-hud__dot {
+  background: #94a3b8;
+}
+
+.cua-hud__phase--cleanup-failed .cua-hud__dot {
+  background: #ef4444;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.4);
+}
+
+.cua-hud__label {
+  font-size: 12px;
+  color: #cbd5e1;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cua-stop-btn {
+  pointer-events: auto;
+  position: fixed;
+  top: 54px;
+  left: 16px;
+  width: 116px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 7px;
+  border: 1px solid rgba(248, 113, 113, 0.85);
+  background: #dc2626;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  opacity: 1;
+  z-index: 4;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  transition: background-color 120ms ease, opacity 120ms ease;
+}
+
+.cua-stop-btn:hover:not(:disabled) {
+  background: #b91c1c;
+}
+
+.cua-stop-btn:focus-visible {
+  outline: 2px solid #fca5a5;
+  outline-offset: 2px;
+}
+
+.cua-stop-btn:disabled {
+  cursor: wait;
+  opacity: 0.85;
+  background: #b45309;
+  border-color: rgba(251, 191, 36, 0.75);
+}
+
+.cua-stop-btn.cua-stop-btn--idle,
+.cua-stop-btn.cua-stop-btn--idle:disabled {
+  opacity: 0;
+  pointer-events: none;
+  box-shadow: none;
+}
+
+.cua-hud__cleanup {
+  margin: 0;
+  font-size: 11px;
+  color: #cbd5e1;
+}
+
+.cua-hud__target-gone {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fde68a;
+}
+
+.cua-hud__error {
+  margin: 0;
+  font-size: 11px;
+  color: #fca5a5;
+}
+
+.cua-hud__lock-warning {
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(248, 113, 113, 0.55);
+  background: rgba(127, 29, 29, 0.7);
+  font-size: 12px;
+  color: #fee2e2;
+}
+
+.cua-hud__failures {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: #fecaca;
+}

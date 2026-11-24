@@ -10,6 +10,19 @@ import type { ThumbnailClip } from '../../../shared/clipThumbnails';
 import { clipDurationMs, playheadForClipSelection } from '../../../shared/timelineClipGeometry';
 import { nextVisualBoundaryMs, previousVisualBoundaryMs } from '../../../shared/timelinePlayback';
 import { snapTimelinePosition } from '../../../shared/timelineSnapping';
+import {
+  isActiveTimelineDragAborted,
+  registerActiveTimelineDrag
+} from '../cua/cuaDragGuard';
+import {
+  computeClipDropPositionMs,
+  computeTrimPositionMs,
+  hasExceededDragThreshold,
+  resolveTargetLane,
+  type LaneBounds,
+  type TimelineDragPreview,
+  type TimelinePointerDragSession
+} from './timelinePointerDrag';
 import type { TimelineEditorController } from './useTimelineEditor';
 
 type TimelineCanvasProps = {
@@ -36,7 +49,7 @@ function readTimelineDrag(event: DragEvent): TimelineDragPayload | null {
   }
 }
 
-function writeTimelineDrag(event: DragEvent, payload: TimelineDragPayload): void {
+export function writeTimelineDrag(event: DragEvent, payload: TimelineDragPayload): void {
   // A trim handle lives inside a draggable clip. Do not overwrite its payload.
   event.stopPropagation();
   event.dataTransfer.setData(TIMELINE_DRAG_TYPE, JSON.stringify(payload));
@@ -97,7 +110,9 @@ const ICONS = {
   volumeOff: toolIcon(<><path d="M4 9v6h4l5 4V5L8 9H4z" /><path d="M16 9l5 6M21 9l-5 6" /></>, 12),
   headphones: toolIcon(<><path d="M4 14v-2a8 8 0 0116 0v2" /><rect x="3" y="14" width="4" height="6" rx="1.5" /><rect x="17" y="14" width="4" height="6" rx="1.5" /></>, 12),
   lock: toolIcon(<><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V8a4 4 0 018 0v3" /></>, 12),
-  unlock: toolIcon(<><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V8a4 4 0 017.8-1.3" /></>, 12)
+  unlock: toolIcon(<><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V8a4 4 0 017.8-1.3" /></>, 12),
+  undo: toolIcon(<><path d="M9 14L4 9l5-5" /><path d="M20 20v-7a4 4 0 00-4-4H4" /></>),
+  redo: toolIcon(<><path d="M15 14l5-5-5-5" /><path d="M4 20v-7a4 4 0 014-4h12" /></>)
 } as const;
 
 /**
@@ -278,9 +293,227 @@ export function TimelineCanvas({ editor, id }: TimelineCanvasProps): ReactElemen
   const [soloTracks, setSoloTracks] = useState<Record<string, boolean>>({});
   const [lockedTracks, setLockedTracks] = useState<Record<string, boolean>>({});
   const [dragOverTrackId, setDragOverTrackId] = useState<string | null>(null);
+  const [dragPreview, setDragPreview] = useState<TimelineDragPreview | null>(null);
   const [snappingEnabled, setSnappingEnabled] = useState(true);
   const snapMs = 1;
   const selectedClip = editor.selectedClip;
+  const laneElementsRef = useRef<Map<string, HTMLDivElement>>(new Map());
+  const pointerDragRef = useRef<TimelinePointerDragSession | null>(null);
+  const suppressNextClickClipIdRef = useRef<string | null>(null);
+  const dragCleanupRef = useRef<(() => void) | null>(null);
+  const dragContextRef = useRef({ project, view, editor, snappingEnabled, lockedTracks });
+  dragContextRef.current = { project, view, editor, snappingEnabled, lockedTracks };
+
+  useEffect(() => () => {
+    dragCleanupRef.current?.();
+  }, []);
+
+  const readLaneBounds = (): LaneBounds[] => {
+    const bounds: LaneBounds[] = [];
+    laneElementsRef.current.forEach((element, trackId) => {
+      const rect = element.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        bounds.push({ trackId, top: rect.top, bottom: rect.bottom, left: rect.left, width: rect.width });
+      }
+    });
+    return bounds;
+  };
+
+  const startPointerDrag = (session: TimelinePointerDragSession, captureTarget?: HTMLElement | null): void => {
+    dragCleanupRef.current?.();
+    pointerDragRef.current = session;
+    let aborted = false;
+
+    if (captureTarget != null && typeof captureTarget.setPointerCapture === 'function') {
+      try {
+        captureTarget.setPointerCapture(session.pointerId);
+      } catch {
+        // Synthetic or detached targets may decline pointer capture; window listeners remain active.
+      }
+    }
+
+    const releaseCapture = (): void => {
+      if (captureTarget == null || typeof captureTarget.releasePointerCapture !== 'function') return;
+      try {
+        if (typeof captureTarget.hasPointerCapture !== 'function' || captureTarget.hasPointerCapture(session.pointerId)) {
+          captureTarget.releasePointerCapture(session.pointerId);
+        }
+      } catch {
+        // Ignore already-released capture.
+      }
+    };
+
+    let unregisterDragGuard: (() => void) | null = null;
+
+    const detach = (): void => {
+      window.removeEventListener('pointermove', onWindowPointerMove);
+      window.removeEventListener('pointerup', onWindowPointerUp);
+      window.removeEventListener('pointercancel', onWindowPointerCancel);
+      window.removeEventListener('keydown', onWindowKeyDown);
+      unregisterDragGuard?.();
+      unregisterDragGuard = null;
+      releaseCapture();
+      dragCleanupRef.current = null;
+    };
+
+    const cancelDrag = (): void => {
+      aborted = true;
+      detach();
+      pointerDragRef.current = null;
+      setDragOverTrackId(null);
+      setDragPreview(null);
+    };
+
+    // Register synchronous module-level rollback handler so renderer Stop or
+    // main-process `stopping` cancels this drag BEFORE synthetic `mouseUp` lands.
+    unregisterDragGuard = registerActiveTimelineDrag(cancelDrag);
+
+    const onWindowKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        cancelDrag();
+      }
+    };
+
+    const onWindowPointerMove = (event: PointerEvent): void => {
+      if (aborted || isActiveTimelineDragAborted()) {
+        cancelDrag();
+        return;
+      }
+      const active = pointerDragRef.current;
+      if (active === null || active.pointerId !== event.pointerId) return;
+      const ctx = dragContextRef.current;
+      if (ctx.project === null || ctx.view === null) {
+        cancelDrag();
+        return;
+      }
+
+      if (!active.moved) {
+        if (!hasExceededDragThreshold(active.startClientX, active.startClientY, event.clientX, event.clientY)) return;
+        pointerDragRef.current = { ...active, moved: true };
+      }
+
+      const lanes = readLaneBounds();
+      if (active.kind === 'clip') {
+        const targetLane = resolveTargetLane(lanes, event.clientY, active.sourceTrackId, ctx.lockedTracks);
+        if (targetLane === null) return;
+        const previewStartMs = computeClipDropPositionMs({
+          timeline: ctx.project.timeline,
+          clipId: active.clipId,
+          clientX: event.clientX,
+          laneLeft: targetLane.left,
+          laneWidth: targetLane.width,
+          durationMs: ctx.view.durationMs,
+          offsetMs: active.offsetMs,
+          playheadMs: ctx.editor.playheadMs,
+          snappingEnabled: ctx.snappingEnabled,
+          altKey: event.altKey,
+          snapMs
+        });
+        setDragOverTrackId(targetLane.trackId);
+        setDragPreview({
+          kind: 'clip',
+          clipId: active.clipId,
+          targetTrackId: targetLane.trackId,
+          previewStartMs,
+          deltaMs: previewStartMs - active.originalStartMs
+        });
+        return;
+      }
+
+      const trimLane = lanes.find((lane) => lane.trackId === active.trackId && !ctx.lockedTracks[lane.trackId]);
+      if (trimLane === undefined) return;
+      const previewTimeMs = computeTrimPositionMs({
+        timeline: ctx.project.timeline,
+        clipId: active.clipId,
+        clientX: event.clientX,
+        laneLeft: trimLane.left,
+        laneWidth: trimLane.width,
+        durationMs: ctx.view.durationMs,
+        playheadMs: ctx.editor.playheadMs,
+        snappingEnabled: ctx.snappingEnabled,
+        altKey: event.altKey,
+        snapMs
+      });
+      setDragPreview({
+        kind: 'trim',
+        clipId: active.clipId,
+        trackId: active.trackId,
+        edge: active.edge,
+        previewTimeMs
+      });
+    };
+
+    const onWindowPointerUp = (event: PointerEvent): void => {
+      const active = pointerDragRef.current;
+      if (active === null || active.pointerId !== event.pointerId) return;
+      // Synchronous check BEFORE any commit: if Stop/cancel aborted this drag,
+      // discard the synthetic mouseUp release with zero timeline or Undo mutation.
+      const wasAborted = aborted || isActiveTimelineDragAborted();
+      const ctx = dragContextRef.current;
+      detach();
+      pointerDragRef.current = null;
+      setDragOverTrackId(null);
+      setDragPreview(null);
+
+      if (wasAborted || !active.moved || ctx.project === null || ctx.view === null) return;
+
+      suppressNextClickClipIdRef.current = active.clipId;
+      window.setTimeout(() => {
+        if (suppressNextClickClipIdRef.current === active.clipId) {
+          suppressNextClickClipIdRef.current = null;
+        }
+      }, 0);
+
+      const lanes = readLaneBounds();
+      if (active.kind === 'clip') {
+        const targetLane = resolveTargetLane(lanes, event.clientY, active.sourceTrackId, ctx.lockedTracks);
+        if (targetLane === null) return;
+        const position = computeClipDropPositionMs({
+          timeline: ctx.project.timeline,
+          clipId: active.clipId,
+          clientX: event.clientX,
+          laneLeft: targetLane.left,
+          laneWidth: targetLane.width,
+          durationMs: ctx.view.durationMs,
+          offsetMs: active.offsetMs,
+          playheadMs: ctx.editor.playheadMs,
+          snappingEnabled: ctx.snappingEnabled,
+          altKey: event.altKey,
+          snapMs
+        });
+        ctx.editor.moveClipToTrack(active.clipId, targetLane.trackId, position);
+        return;
+      }
+
+      const trimLane = lanes.find((lane) => lane.trackId === active.trackId && !ctx.lockedTracks[lane.trackId]);
+      if (trimLane === undefined) return;
+      const position = computeTrimPositionMs({
+        timeline: ctx.project.timeline,
+        clipId: active.clipId,
+        clientX: event.clientX,
+        laneLeft: trimLane.left,
+        laneWidth: trimLane.width,
+        durationMs: ctx.view.durationMs,
+        playheadMs: ctx.editor.playheadMs,
+        snappingEnabled: ctx.snappingEnabled,
+        altKey: event.altKey,
+        snapMs
+      });
+      ctx.editor.trimClipTo(active.clipId, active.edge, position);
+    };
+
+    const onWindowPointerCancel = (event: PointerEvent): void => {
+      const active = pointerDragRef.current;
+      if (active === null || active.pointerId !== event.pointerId) return;
+      cancelDrag();
+    };
+
+    window.addEventListener('pointermove', onWindowPointerMove);
+    window.addEventListener('pointerup', onWindowPointerUp);
+    window.addEventListener('pointercancel', onWindowPointerCancel);
+    window.addEventListener('keydown', onWindowKeyDown);
+    dragCleanupRef.current = detach;
+  };
 
   const onLaneDrop = (event: DragEvent<HTMLDivElement>, trackId: string): void => {
     if (view === null || project === null) return;
@@ -452,7 +685,19 @@ export function TimelineCanvas({ editor, id }: TimelineCanvasProps): ReactElemen
   };
 
   return (
-    <section id={id} className="timeline-panel editor-timeline-region" aria-labelledby="timeline-title" style={{ display: 'grid', gridTemplateRows: 'auto minmax(0, 1fr)', gap: 0, padding: 0 }}>
+    <section
+      id={id}
+      className="timeline-panel editor-timeline-region"
+      data-testid="timeline-canvas"
+      data-cua-safe-surface={project !== null && view !== null ? 'timeline' : undefined}
+      data-dirty={editor.hasUnsavedTimeline ? 'true' : 'false'}
+      data-saving={editor.isSavingTimeline ? 'true' : 'false'}
+      data-save-status={editor.timelineSaveStatus}
+      data-save-error={editor.timelineSaveError ?? undefined}
+      aria-labelledby="timeline-title"
+      tabIndex={-1}
+      style={{ display: 'grid', gridTemplateRows: 'auto minmax(0, 1fr)', gap: 0, padding: 0 }}
+    >
       {/* Slim timeline toolbar: title + view tools on the left, zoom cluster on the right */}
       <div
         className="panel-heading"
@@ -568,6 +813,29 @@ export function TimelineCanvas({ editor, id }: TimelineCanvasProps): ReactElemen
             </button>
             <button type="button" disabled={selectedClip?.asset?.kind !== 'video' || editor.isBusy} onClick={() => void editor.detachSelectedClipAudio()} style={selectedClip?.asset?.kind !== 'video' || editor.isBusy ? DISABLED_TOOL_BUTTON_STYLE : TOOL_BUTTON_STYLE} aria-label="Detach selected clip audio" title="Detach audio to an aligned audio track">
               {ICONS.separateAudio}
+            </button>
+            <span aria-hidden="true" style={{ width: '1px', height: '18px', background: 'var(--border)', margin: '0 2px' }} />
+            <button
+              type="button"
+              data-testid="timeline-undo-btn"
+              onClick={editor.undoTimeline}
+              disabled={!editor.canUndoTimeline}
+              style={!editor.canUndoTimeline ? DISABLED_TOOL_BUTTON_STYLE : TOOL_BUTTON_STYLE}
+              aria-label="Undo timeline edit"
+              title="Undo (Cmd/Ctrl+Z)"
+            >
+              {ICONS.undo}
+            </button>
+            <button
+              type="button"
+              data-testid="timeline-redo-btn"
+              onClick={editor.redoTimeline}
+              disabled={!editor.canRedoTimeline}
+              style={!editor.canRedoTimeline ? DISABLED_TOOL_BUTTON_STYLE : TOOL_BUTTON_STYLE}
+              aria-label="Redo timeline edit"
+              title="Redo (Cmd/Ctrl+Shift+Z)"
+            >
+              {ICONS.redo}
             </button>
           </div>
         </div>
@@ -814,6 +1082,7 @@ export function TimelineCanvas({ editor, id }: TimelineCanvasProps): ReactElemen
             {project.timeline.tracks.map((track) => (
               <div
                 className="timeline-track"
+                data-testid={`timeline-track-${track.id}`}
                 key={track.id}
                 style={{
                   gridTemplateColumns: TRACK_GRID_TEMPLATE,
@@ -928,6 +1197,15 @@ export function TimelineCanvas({ editor, id }: TimelineCanvasProps): ReactElemen
                 {/* Track Lane */}
                 <div
                   className="timeline-track__lane"
+                  data-testid={`timeline-lane-${track.id}`}
+                  data-track-id={track.id}
+                  ref={(element) => {
+                    if (element === null) {
+                      laneElementsRef.current.delete(track.id);
+                    } else {
+                      laneElementsRef.current.set(track.id, element);
+                    }
+                  }}
                   onDragOver={(event) => {
                     if (lockedTracks[track.id]) return;
                     event.preventDefault();
@@ -935,7 +1213,13 @@ export function TimelineCanvas({ editor, id }: TimelineCanvasProps): ReactElemen
                   }}
                   onDragLeave={() => setDragOverTrackId((current) => (current === track.id ? null : current))}
                   onDrop={(event) => !lockedTracks[track.id] && onLaneDrop(event, track.id)}
-                  onPointerDown={(event) => activeTool !== 'hand' && !lockedTracks[track.id] && scrubLane(event)}
+                  onPointerDown={(event) => {
+                    if (activeTool !== 'hand' && !lockedTracks[track.id]) {
+                      event.currentTarget.focus({ preventScroll: true });
+                      scrubLane(event);
+                    }
+                  }}
+                  tabIndex={-1}
                   role="application"
                   aria-label={`${track.name} lane. Drop assets or clips here.`}
                   style={{
@@ -952,13 +1236,24 @@ export function TimelineCanvas({ editor, id }: TimelineCanvasProps): ReactElemen
                   }}
                 >
                   {/* Track Clips */}
-                  {(view.blocksByTrackId[track.id] ?? []).map((block) => (
+                  {(view.blocksByTrackId[track.id] ?? []).map((block) => {
+                    const isPointerDraggingClip = dragPreview?.kind === 'clip' && dragPreview.clipId === block.clip.id;
+                    const renderedLeftPercent = isPointerDraggingClip
+                      ? Math.max(0, (dragPreview.previewStartMs / Math.max(1, view.durationMs)) * 100)
+                      : block.leftPercent;
+                    return (
                     <button
                       className={`timeline-clip timeline-clip--${block.kind}${editor.selectedClipIds.includes(block.clip.id) || editor.selectedClipId === block.clip.id ? ' timeline-clip--selected' : ''}`}
-                      draggable={!lockedTracks[track.id] && activeTool === 'select'}
+                      data-testid={`timeline-clip-${block.clip.id}`}
+                      data-clip-id={block.clip.id}
+                      data-timeline-start-ms={block.clip.timelineStartMs}
                       key={block.clip.id}
                       type="button"
                       onClick={(event) => {
+                        if (suppressNextClickClipIdRef.current === block.clip.id) {
+                          suppressNextClickClipIdRef.current = null;
+                          return;
+                        }
                         if (lockedTracks[track.id]) return;
                         if (activeTool === 'razor') {
                           razorSplitClip(event, block.clip.id);
@@ -967,21 +1262,38 @@ export function TimelineCanvas({ editor, id }: TimelineCanvasProps): ReactElemen
                         editor.setSelectedClipId(block.clip.id);
                         editor.setPlayheadMs(playheadForClipSelection(block.clip, editor.playheadMs));
                       }}
-                      onDragStart={(event) => {
-                        if (lockedTracks[track.id] || activeTool !== 'select') return;
-                        writeTimelineDrag(event, {
-                          kind: 'clip',
-                          clipId: block.clip.id,
-                          offsetMs: clientXToTimelineMs({
-                            clientX: event.clientX,
-                            laneLeft: event.currentTarget.parentElement?.getBoundingClientRect().left ?? 0,
-                            laneWidth: event.currentTarget.parentElement?.getBoundingClientRect().width ?? 1,
-                            durationMs: view.durationMs,
-                            snapMs: 1
-                          }) - block.clip.timelineStartMs
+                      onPointerDown={(event) => {
+                        if (event.button !== 0 || lockedTracks[track.id] || activeTool !== 'select') return;
+                        event.stopPropagation();
+                        const laneRect = event.currentTarget.parentElement?.getBoundingClientRect();
+                        if (laneRect === undefined || laneRect.width <= 0) return;
+                        const pointerMs = clientXToTimelineMs({
+                          clientX: event.clientX,
+                          laneLeft: laneRect.left,
+                          laneWidth: laneRect.width,
+                          durationMs: view.durationMs,
+                          snapMs: 1
                         });
+                        startPointerDrag({
+                          kind: 'clip',
+                          pointerId: event.pointerId,
+                          clipId: block.clip.id,
+                          sourceTrackId: track.id,
+                          startClientX: event.clientX,
+                          startClientY: event.clientY,
+                          offsetMs: pointerMs - block.clip.timelineStartMs,
+                          originalStartMs: block.clip.timelineStartMs,
+                          moved: false
+                        }, event.currentTarget);
                       }}
-                      style={{ left: `${block.leftPercent}%`, width: `${Math.max(block.widthPercent, 2)}%`, cursor: activeTool === 'razor' ? 'crosshair' : undefined }}
+                      style={{
+                        left: `${renderedLeftPercent}%`,
+                        width: `${Math.max(block.widthPercent, 2)}%`,
+                        cursor: activeTool === 'razor' ? 'crosshair' : isPointerDraggingClip ? 'grabbing' : undefined,
+                        opacity: isPointerDraggingClip ? 0.82 : undefined,
+                        outline: isPointerDraggingClip ? '1.5px solid var(--ring)' : undefined,
+                        zIndex: isPointerDraggingClip ? 5 : undefined
+                      }}
                       title={`${block.assetName} starts at ${formatDuration(block.clip.timelineStartMs)}`}
                       aria-label={`${block.assetName}, ${block.kind} clip from ${formatDuration(block.clip.timelineStartMs)} for ${formatDuration(clipDurationMs(block.clip))}`}
                     >
@@ -1009,12 +1321,49 @@ export function TimelineCanvas({ editor, id }: TimelineCanvasProps): ReactElemen
                           widthPercent={block.widthPercent}
                         />
                       )}
-                      <span className="timeline-clip__handle timeline-clip__handle--left" draggable={!lockedTracks[track.id] && activeTool === 'select'} onDragStart={(event) => writeTimelineDrag(event, { kind: 'trim', clipId: block.clip.id, edge: 'left' })} aria-hidden="true" />
+                      <span
+                        className="timeline-clip__handle timeline-clip__handle--left"
+                        data-testid={`timeline-clip-${block.clip.id}-trim-left`}
+                        onPointerDown={(event) => {
+                          if (event.button !== 0 || lockedTracks[track.id] || activeTool !== 'select') return;
+                          event.stopPropagation();
+                          startPointerDrag({
+                            kind: 'trim',
+                            pointerId: event.pointerId,
+                            clipId: block.clip.id,
+                            trackId: track.id,
+                            edge: 'left',
+                            startClientX: event.clientX,
+                            startClientY: event.clientY,
+                            moved: false
+                          }, event.currentTarget);
+                        }}
+                        aria-hidden="true"
+                      />
                       <strong>{block.assetName}</strong>
                       <small>{formatDuration(clipDurationMs(block.clip))}</small>
-                      <span className="timeline-clip__handle timeline-clip__handle--right" draggable={!lockedTracks[track.id] && activeTool === 'select'} onDragStart={(event) => writeTimelineDrag(event, { kind: 'trim', clipId: block.clip.id, edge: 'right' })} aria-hidden="true" />
+                      <span
+                        className="timeline-clip__handle timeline-clip__handle--right"
+                        data-testid={`timeline-clip-${block.clip.id}-trim-right`}
+                        onPointerDown={(event) => {
+                          if (event.button !== 0 || lockedTracks[track.id] || activeTool !== 'select') return;
+                          event.stopPropagation();
+                          startPointerDrag({
+                            kind: 'trim',
+                            pointerId: event.pointerId,
+                            clipId: block.clip.id,
+                            trackId: track.id,
+                            edge: 'right',
+                            startClientX: event.clientX,
+                            startClientY: event.clientY,
+                            moved: false
+                          }, event.currentTarget);
+                        }}
+                        aria-hidden="true"
+                      />
                     </button>
-                  ))}
+                    );
+                  })}
 
             {/* Takes the remaining height so the timeline fills its panel.
                 Clicking it clears the selection, like empty space in any NLE. */}

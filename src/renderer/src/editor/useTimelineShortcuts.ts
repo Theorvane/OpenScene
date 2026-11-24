@@ -15,6 +15,7 @@ const CLIP_NUDGE_MS = 100;
 type TimelineShortcutInput = {
   readonly canSplit: boolean;
   readonly isLocked: boolean;
+  readonly cuaActing?: boolean;
   readonly clearSelection: () => void;
   readonly deleteSelectedClip: () => void;
   readonly duplicateSelectedClip: () => void;
@@ -61,7 +62,9 @@ export function useTimelineShortcuts(input: TimelineShortcutInput): void {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.defaultPrevented || (event.target instanceof Element && event.target.closest('[role="menu"], [role="menubar"]'))) return;
-      if (input.isLocked) return;
+      if (input.cuaActing !== true) {
+        if (input.isLocked) return;
+      }
       const formTarget = isTextEditingShortcutTarget(event.target as { tagName?: string; isContentEditable?: boolean } | null);
       const sliderUndo = event.target instanceof HTMLInputElement && event.target.type === 'range'
         && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z';
