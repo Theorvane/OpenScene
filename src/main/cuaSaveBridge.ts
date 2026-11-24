@@ -8,6 +8,10 @@ import { IPC_CHANNELS } from '../shared/ipc';
 import type { ProjectStore } from './projectStore';
 
 const ACK_TIMEOUT_MS = 500;
+function safeErrorCode(error: unknown): string {
+  const message = error instanceof Error ? error.message : '';
+  return /^CUA_[A-Z0-9_]{1,80}$/.test(message) ? message : 'CUA_SAVE_FAILED';
+}
 function canonical(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonical);
   if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value)
@@ -115,7 +119,8 @@ export class CuaSaveBridge {
     };
     this.entries.set(proposal.proposalId, { createdAt: performance.now(), completed: false, proposal: structuredClone(proposal), timeline: structuredClone(timeline), baselineDigest: cuaSaveDigest(baseline), cancelled: false });
     return structuredClone(proposal);
-    } finally { this.preparingScope = null; this.prune(); }
+    } catch (error) { throw new Error(safeErrorCode(error)); }
+    finally { this.preparingScope = null; this.prune(); }
   }
   reportSnapshot(report: CuaSaveSnapshotReport): boolean {
     const pending = this.snapshot;
@@ -189,7 +194,7 @@ export class CuaSaveBridge {
       } catch { result = { ...result, errorCode: 'CUA_SAVE_READBACK_FAILED' }; }
     } catch (error) {
       result = { ...result, status: persisted ? (entry.cancelled ? 'persisted-after-cancel' : 'persisted') : publishStarted ? 'write-outcome-unknown' : 'not-written',
-        persistedUpdatedAt: persisted?.updatedAt ?? null, errorCode: error instanceof Error ? error.message : 'CUA_SAVE_FAILED' };
+        persistedUpdatedAt: persisted?.updatedAt ?? null, errorCode: safeErrorCode(error) };
     } finally { if (this.ready?.token === saveToken) this.ready = null; }
     const written = result.status === 'persisted' || result.status === 'persisted-after-cancel' || result.status === 'already-clean';
     const commitPromise = written ? new Promise<CuaSaveCommitAck | null>(resolve => { this.commit = { token: saveToken, entry, resolve }; }) : null;

@@ -106,3 +106,13 @@ it('treats a clean report as already saved only after comparing real persisted b
     expect(f.consumePermit).toHaveBeenCalledOnce();
   });
 });
+
+it('does not expose main-process filesystem errors through model or renderer receipts', async () => {
+  await withBridge(async f => {
+    const proposal = await f.bridge.prepareSaveSnapshot(f.scope);
+    vi.spyOn(f.store, 'saveTimeline').mockRejectedValue(new Error('EACCES: /private/user-secret/project.json'));
+    const result = await f.bridge.saveApproved(proposal.proposalId, 'approved');
+    expect(result).toMatchObject({ status: 'not-written', errorCode: 'CUA_SAVE_FAILED' });
+    expect(JSON.stringify(result)).not.toContain('/private');
+  });
+});
