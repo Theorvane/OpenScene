@@ -15,7 +15,7 @@ export interface CuaOverlayProps {
 const PHASE_LABELS: Readonly<Record<CuaPhase, string>> = {
   idle: 'Idle',
   ready: 'CUA Ready',
-  preparing: 'Preparing approved CUA…',
+  preparing: 'Preparing CUA…',
   acting: 'CUA Acting',
   stopping: 'Stopping CUA…',
   stopped: 'CUA Stopped',

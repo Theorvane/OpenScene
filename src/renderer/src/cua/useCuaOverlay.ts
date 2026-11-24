@@ -1,4 +1,4 @@
-import { createContext, createElement, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react';
+import { createContext, createElement, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react';
 
 import type { CuaPhase, CuaState, CuaSurfaceSnapshot } from '../../../shared/cua';
 import {
@@ -52,9 +52,9 @@ function getElementProtectedId(element: HTMLElement, kind: CuaProtectedKind, kin
 }
 
 export interface CollectDomSurfaceOptions {
+  readonly contentRevision: number;
   readonly isAgentBusy: boolean;
   readonly hasPendingApproval: boolean;
-  readonly approvalInFlight: boolean;
   readonly cuaPhase: CuaPhase;
   readonly isUpdating?: boolean;
 }
@@ -67,6 +67,7 @@ export function collectDomSurfaceState(options: CollectDomSurfaceOptions): Measu
 
   if (options.isUpdating === true || viewport.width <= 0 || viewport.height <= 0) {
     return {
+      contentRevision: options.contentRevision,
       executionBlocked: true,
       blockReason: 'updating',
       viewport,
@@ -189,13 +190,13 @@ export function collectDomSurfaceState(options: CollectDomSurfaceOptions): Measu
   const { executionBlocked, blockReason } = computeExecutionBlockState({
     isAgentBusy: options.isAgentBusy,
     hasPendingApproval: options.hasPendingApproval,
-    approvalInFlight: options.approvalInFlight,
     hasBlockingOverlay,
     hasSafeSurface: safeSurface !== null,
     cuaPhase: options.cuaPhase
   });
 
   return {
+    contentRevision: options.contentRevision,
     executionBlocked,
     blockReason,
     viewport,
@@ -215,6 +216,7 @@ export interface CuaOverlayController {
   readonly stopError: string | null;
   readonly snapshot: CuaSurfaceSnapshot;
   readonly isActing: boolean;
+  readonly isPreparing: boolean;
   readonly isWorkspaceInert: boolean;
   readonly requestStop: () => Promise<void>;
   readonly refreshSnapshot: () => void;
@@ -223,55 +225,65 @@ export interface CuaOverlayController {
 const CuaOverlayContext = createContext<CuaOverlayController | null>(null);
 
 export function useCuaOverlayState(options: {
+  readonly contentRevision: number;
   readonly isAgentBusy: boolean;
   readonly hasPendingApproval: boolean;
-  readonly approvalInFlight: boolean;
   readonly activePageId: string;
 }): CuaOverlayController {
   const [state, setState] = useState<CuaState>(INITIAL_CUA_STATE);
   const [stopPending, setStopPending] = useState(false);
   const [stopError, setStopError] = useState<string | null>(null);
   const trackerRef = useRef<CuaSurfaceRevisionTracker>(new CuaSurfaceRevisionTracker());
-  const [snapshot, setSnapshot] = useState<CuaSurfaceSnapshot>(() => createFailClosedSnapshot(0));
+  const [snapshot, setSnapshot] = useState<CuaSurfaceSnapshot>(() => createFailClosedSnapshot(0, { width: 1, height: 1 }, 'unmounted', options.contentRevision));
   const isWorkspaceInert = computeWorkspaceInert({
     isAgentBusy: options.isAgentBusy,
     hasPendingApproval: options.hasPendingApproval,
-    approvalInFlight: options.approvalInFlight,
     cuaPhase: state.phase
   });
   const stateRef = useRef<CuaState>(state);
   const stopPendingRef = useRef<boolean>(stopPending);
   const optionsRef = useRef(options);
+  const mountedRef = useRef(false);
+  const ackedPrepareKeysRef = useRef<Set<string>>(new Set());
   const rafIdRef = useRef<number | null>(null);
 
   stateRef.current = state;
   stopPendingRef.current = stopPending;
   optionsRef.current = options;
 
-  const reportSnapshot = useCallback((nextSnapshot: CuaSurfaceSnapshot): void => {
+  const reportSnapshotAsync = useCallback(async (nextSnapshot: CuaSurfaceSnapshot): Promise<boolean> => {
     setSnapshot(nextSnapshot);
     const api = typeof window === 'undefined' ? undefined : window.videoTool;
-    if (typeof api?.cuaReportSurfaceSnapshot !== 'function') return;
-    if (nextSnapshot.viewport.width <= 0 || nextSnapshot.viewport.height <= 0) return;
-    void api.cuaReportSurfaceSnapshot(nextSnapshot).catch(() => {
-      // Main-process CUA runtime may not be registered yet in contract-only builds.
-    });
+    if (typeof api?.cuaReportSurfaceSnapshot !== 'function') return true;
+    if (nextSnapshot.viewport.width <= 0 || nextSnapshot.viewport.height <= 0) return false;
+    try {
+      const res = await api.cuaReportSurfaceSnapshot(nextSnapshot);
+      return res.ok && res.value.accepted;
+    } catch {
+      return false;
+    }
   }, []);
 
-  const flushSnapshot = useCallback((): void => {
-    if (typeof window === 'undefined' || typeof document === 'undefined') return;
+  const flushSnapshotAsync = useCallback(async (flushOptions?: { readonly force?: boolean }): Promise<CuaSurfaceSnapshot | null> => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return null;
     const currentOpts = optionsRef.current;
     const measured = collectDomSurfaceState({
+      contentRevision: currentOpts.contentRevision,
       isAgentBusy: currentOpts.isAgentBusy,
       hasPendingApproval: currentOpts.hasPendingApproval,
-      approvalInFlight: currentOpts.approvalInFlight,
       cuaPhase: stateRef.current.phase
     });
     const { snapshot: nextSnapshot, changed } = trackerRef.current.next(measured);
-    if (changed) {
-      reportSnapshot(nextSnapshot);
+    if (changed || flushOptions?.force === true) {
+      const ok = await reportSnapshotAsync(nextSnapshot);
+      return ok ? nextSnapshot : null;
     }
-  }, [reportSnapshot]);
+    return nextSnapshot;
+  }, [reportSnapshotAsync]);
+
+  const flushSnapshot = useCallback((): void => {
+    void flushSnapshotAsync();
+  }, [flushSnapshotAsync]);
 
   const scheduleSnapshot = useCallback((): void => {
     if (typeof window === 'undefined') return;
@@ -288,7 +300,7 @@ export function useCuaOverlayState(options: {
     if (isCuaStopSettled(nextState)) {
       setStopPending(false);
     }
-    if (nextState.phase === 'idle' || nextState.phase === 'ready' || nextState.phase === 'acting') {
+    if (nextState.phase === 'idle' || nextState.phase === 'ready' || nextState.phase === 'preparing' || nextState.phase === 'acting') {
       setStopError(null);
     }
   }, []);
@@ -386,12 +398,14 @@ export function useCuaOverlayState(options: {
   // Report fail-closed immediately on mount, then observe layout, scroll, DOM, and focus changes.
   useEffect(() => {
     if (typeof window === 'undefined' || typeof document === 'undefined') return;
+    mountedRef.current = true;
 
     const initialFailClosed = trackerRef.current.failClosed(
       { width: Math.max(1, window.innerWidth), height: Math.max(1, window.innerHeight) },
-      'initializing'
+      'initializing',
+      optionsRef.current.contentRevision
     );
-    reportSnapshot(initialFailClosed);
+    void reportSnapshotAsync(initialFailClosed);
     flushSnapshot();
 
     const onScroll = (event: Event): void => {
@@ -442,6 +456,7 @@ export function useCuaOverlayState(options: {
     });
 
     return () => {
+      mountedRef.current = false;
       if (rafIdRef.current !== null) {
         window.cancelAnimationFrame(rafIdRef.current);
         rafIdRef.current = null;
@@ -455,16 +470,71 @@ export function useCuaOverlayState(options: {
 
       const unmountedSnapshot = trackerRef.current.failClosed(
         { width: Math.max(1, window.innerWidth), height: Math.max(1, window.innerHeight) },
-        'unmounted'
+        'unmounted',
+        optionsRef.current.contentRevision
       );
-      reportSnapshot(unmountedSnapshot);
+      void reportSnapshotAsync(unmountedSnapshot);
     };
-  }, [flushSnapshot, reportSnapshot, scheduleSnapshot]);
+  }, [flushSnapshot, reportSnapshotAsync, scheduleSnapshot]);
 
-  // Re-measure whenever page, busy/approval flags, or CUA phase changes.
+  useLayoutEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  // Deterministic prepareAck handshake:
+  // When main publishes phase === 'preparing' with (runId, prepareToken), React first
+  // commits workspaceInert=false to DOM; then useLayoutEffect verifies the active
+  // [data-cua-safe-surface] is non-inert, awaits cuaReportSurfaceSnapshot(executionBlocked: false, contentRevision),
+  // and acknowledges once via cuaAckPrepare({ runId, prepareToken }).
+  useLayoutEffect(() => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return;
+    if (state.phase !== 'preparing' || state.prepareToken === null || state.runId === null) return;
+    const runId = state.runId;
+    const prepareToken = state.prepareToken;
+    const ackKey = `${runId}:${prepareToken}`;
+    if (ackedPrepareKeysRef.current.has(ackKey)) return;
+
+    let cancelled = false;
+    void (async () => {
+      const safeEl = Array.from(document.querySelectorAll('[data-cua-safe-surface]')).find(
+        (el): el is HTMLElement => el instanceof HTMLElement && el.getBoundingClientRect().width > 0
+      );
+      if (!safeEl || safeEl.closest('[inert],[hidden],[aria-hidden="true"]') !== null) {
+        return;
+      }
+      const reported = await flushSnapshotAsync({ force: true });
+      if (cancelled || !mountedRef.current || reported === null) return;
+      if (reported.executionBlocked || reported.safeSurface === null || !reported.safeSurface.interactive) {
+        return;
+      }
+      const latest = stateRef.current;
+      if (latest.phase !== 'preparing' || latest.runId !== runId || latest.prepareToken !== prepareToken) {
+        return;
+      }
+      if (ackedPrepareKeysRef.current.has(ackKey)) return;
+      if (ackedPrepareKeysRef.current.size >= 64) {
+        const oldest = ackedPrepareKeysRef.current.values().next().value;
+        if (oldest !== undefined) ackedPrepareKeysRef.current.delete(oldest);
+      }
+      ackedPrepareKeysRef.current.add(ackKey);
+      const api = typeof window === 'undefined' ? undefined : window.videoTool;
+      if (typeof api?.cuaAckPrepare === 'function') {
+        void api.cuaAckPrepare({ runId, prepareToken }).catch(() => undefined);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [flushSnapshotAsync, isWorkspaceInert, state.phase, state.prepareToken, state.runId]);
+
+  // Re-measure whenever page, committed contentRevision, busy/approval flags, or CUA phase changes.
   useEffect(() => {
     flushSnapshot();
-  }, [flushSnapshot, options.activePageId, options.isAgentBusy, options.hasPendingApproval, options.approvalInFlight, state.phase]);
+  }, [flushSnapshot, options.activePageId, options.contentRevision, options.isAgentBusy, options.hasPendingApproval, state.phase]);
 
   return useMemo<CuaOverlayController>(
     () => ({
@@ -473,6 +543,7 @@ export function useCuaOverlayState(options: {
       stopError,
       snapshot,
       isActing: state.phase === 'acting',
+      isPreparing: state.phase === 'preparing',
       isWorkspaceInert,
       requestStop,
       refreshSnapshot: flushSnapshot

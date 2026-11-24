@@ -232,6 +232,7 @@ export function App(): ReactElement {
         onPageChange={setActivePage}
         activeProjectContext={activeProjectContext}
         hasUnsavedTimeline={editor.hasUnsavedTimeline}
+        contentRevision={editor.contentRevision}
         prepareAgentProject={() => editor.hasUnsavedTimeline ? editor.saveTimeline() : Promise.resolve(true)}
         studioLayout={false}
         projectTabs={projectTabs}
