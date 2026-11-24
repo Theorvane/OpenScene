@@ -13,6 +13,7 @@ import type {
 import type { SaveAiProjectDocumentInput } from '../shared/aiProjectDomain';
 import type { ExportJobActionInput, LocalExportJob, LocalFfmpegRuntimeStatus, StartExportJobInput } from '../shared/exportTypes';
 import { IPC_CHANNELS } from '../shared/ipc';
+import { JEV_CREDENTIAL_CHANNELS, type JevCredentialApi } from '../shared/jevCredentials';
 import type {
   AbortRecordingInput,
   ApiResponse,
@@ -63,7 +64,7 @@ type AssetPlaybackUrl = {
   readonly url: string;
 };
 
-export interface VideoToolApi {
+export interface VideoToolApi extends JevCredentialApi {
   shortsStart(input: ShortsStartInput): Promise<ApiResponse<ShortsJob>>;
   shortsGet(input: ShortsJobInput): Promise<ApiResponse<ShortsJob>>;
   shortsList(input: ShortsListInput): Promise<ApiResponse<readonly ShortsJob[]>>;
@@ -153,6 +154,9 @@ function parseUpdaterSnapshot(payload: unknown): UpdaterSnapshot | null {
 }
 
 const videoTool: VideoToolApi = {
+  getJevCredentialStatus: () => ipcRenderer.invoke(JEV_CREDENTIAL_CHANNELS.status),
+  setJevCredential: (apiKey) => ipcRenderer.invoke(JEV_CREDENTIAL_CHANNELS.set, apiKey),
+  clearJevCredential: () => ipcRenderer.invoke(JEV_CREDENTIAL_CHANNELS.clear),
   shortsStart: input => ipcRenderer.invoke(IPC_CHANNELS.shortsStart, input) as Promise<ApiResponse<ShortsJob>>,
   shortsGet: input => ipcRenderer.invoke(IPC_CHANNELS.shortsGet, input) as Promise<ApiResponse<ShortsJob>>,
   shortsList: input => ipcRenderer.invoke(IPC_CHANNELS.shortsList, input) as Promise<ApiResponse<readonly ShortsJob[]>>,
