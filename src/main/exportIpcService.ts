@@ -1,5 +1,3 @@
-import { spawn } from 'node:child_process';
-
 import { audioProbeArgs, probeSaysAudible } from '../shared/audibleAssets';
 import { FILTER_LIST_ARGS, escapeFontPath, supportsDrawtext } from '../shared/titleFont';
 import type { ApiResponse } from '../shared/models';
@@ -25,6 +23,8 @@ import { ExportAssetStagingError, removeExportStaging, stageExportAssets, type S
 import { preflightExport, preflightSummary } from '../shared/exportPreflight';
 import { reviewExport, type ExportPromise } from '../shared/exportReview';
 import { measureExportedFile } from './exportMeasurement';
+import { inspectFfmpegEncoders, runFfmpegPreparationProbe } from './ffmpegEncoders';
+import { missingFfmpegEncoders } from '../shared/ffmpegExportCapabilities';
 import { discoverFfmpeg, type FfmpegDiscoveryResult } from './ffmpegDiscovery';
 import { startFfmpegExportProcess, type FfmpegExecution, type StartFfmpegExportProcessInput } from './ffmpegExportProcess';
 import { compileFfmpegTimeline, FfmpegTimelineError } from './ffmpegTimelineCompiler';
@@ -53,6 +53,7 @@ type ExportIpcServiceDependencies = {
   readonly revealPath?: (path: string) => void;
   readonly now?: () => Date;
   readonly inspectContainerMetadata?: (input: InspectContainerMetadataInput) => Promise<MetadataTagInventory>;
+  readonly inspectEncoders?: (executablePath: string) => Promise<string>;
 };
 
 type PreparedExport = {
@@ -203,6 +204,11 @@ export class ExportIpcService {
     return ok(ffmpeg.kind === 'unavailable' ? { kind: 'unavailable', reason: ffmpeg.reason } : { kind: ffmpeg.kind });
   }
 
+  /** A cancelled job state is acceptance only; pending work owns files until this becomes true. */
+  isSettled(jobId: string): boolean {
+    return !this.pendingJobs.has(jobId) && !this.activeExecutions.has(jobId);
+  }
+
   async getExportJob(payload: unknown): Promise<ApiResponse<LocalExportJob>> {
     const input = parseExportJobActionInput(payload);
     if (input === null) {
@@ -271,15 +277,10 @@ export class ExportIpcService {
     const audible = new Set<string>();
     await Promise.all(
       [...assetPaths].map(
-        async ([assetId, assetPath]) =>
-          new Promise<void>((resolve) => {
-            const probe = spawn(executablePath, [...audioProbeArgs(assetPath)], { stdio: 'ignore' });
-            probe.on('error', () => resolve());
-            probe.on('close', (code) => {
-              if (probeSaysAudible(code)) audible.add(assetId);
-              resolve();
-            });
-          })
+        async ([assetId, assetPath]) => {
+          const probe = await runFfmpegPreparationProbe(executablePath, audioProbeArgs(assetPath));
+          if (probeSaysAudible(probe.exitCode)) audible.add(assetId);
+        }
       )
     );
     return audible;
@@ -294,18 +295,11 @@ export class ExportIpcService {
    * between a fixable message and a mysterious export.
    */
   private async titleFont(executablePath: string, weight: 'regular' | 'bold' = 'regular', family: TitleFontFamily = 'sans'): Promise<{ readonly path: string; readonly bytes: Uint8Array }> {
-    const filters = await new Promise<string>((resolve) => {
-      let listing = '';
-      const probe = spawn(executablePath, [...FILTER_LIST_ARGS]);
-      probe.stdout?.on('data', (chunk: Buffer) => {
-        listing += chunk.toString();
-      });
-      probe.on('error', () => resolve(''));
-      probe.on('close', () => resolve(listing));
-    });
+    const probe = await runFfmpegPreparationProbe(executablePath, FILTER_LIST_ARGS);
+    const filters = probe.exitCode === 0 ? probe.stdout : '';
     if (!supportsDrawtext(filters)) {
       throw new ExportAssetStagingError(
-        'This FFmpeg build cannot draw text — it was compiled without libfreetype, so titles cannot be rendered.'
+        'This FFmpeg build lacks the drawtext filter required for titles and captions. Configure VIDEO_TOOL_FFMPEG_PATH to a build with drawtext support.'
       );
     }
     const file = await readTitleFontFile({ family, weight });
@@ -379,6 +373,14 @@ export class ExportIpcService {
         frameRate,
         metadataPrivacyMode
       });
+      // A custom execution adapter supplies its own runtime. Production probes only
+      // the encoders this exact compiled command needs (AAC is absent on silent cuts).
+      if (this.dependencies.startProcess === undefined || this.dependencies.inspectEncoders !== undefined) {
+        const encoders = await (this.dependencies.inspectEncoders ?? inspectFfmpegEncoders)(input.executablePath);
+        assertPreparing();
+        const missing = missingFfmpegEncoders(compiled.args, encoders);
+        if (missing.length) throw new ExportAssetStagingError(`This FFmpeg build lacks required encoders: ${missing.join(', ')}. Configure VIDEO_TOOL_FFMPEG_PATH to a compatible build.`);
+      }
       return {
         executablePath: input.executablePath,
         outputPath,

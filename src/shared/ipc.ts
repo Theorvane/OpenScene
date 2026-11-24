@@ -1,4 +1,10 @@
 export const IPC_CHANNELS = {
+  shortsStart: 'shorts:start',
+  shortsGet: 'shorts:get',
+  shortsList: 'shorts:list',
+  shortsCancel: 'shorts:cancel',
+  shortsMaterialize: 'shorts:materialize',
+  shortsExport: 'shorts:export',
   getSettings: 'settings:get',
   listSources: 'sources:list',
   selectSource: 'sources:select',

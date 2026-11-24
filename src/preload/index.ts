@@ -52,6 +52,7 @@ import type {
   UpdateAssetMetadataInput
 } from '../shared/timelineTypes';
 import type { StartTranscriptionInput, TranscriptionJob, WhisperCppRuntimeStatus } from '../shared/transcription';
+import type { ShortsStartInput, ShortsJobInput, ShortsListInput, ShortsMaterializeInput, ShortsExportInput, ShortsJob } from '../shared/shortsTypes';
 import type { UpdaterState } from '../shared/updater';
 
 type ImportProjectAssetsResult = {
@@ -63,6 +64,12 @@ type AssetPlaybackUrl = {
 };
 
 export interface VideoToolApi {
+  shortsStart(input: ShortsStartInput): Promise<ApiResponse<ShortsJob>>;
+  shortsGet(input: ShortsJobInput): Promise<ApiResponse<ShortsJob>>;
+  shortsList(input: ShortsListInput): Promise<ApiResponse<readonly ShortsJob[]>>;
+  shortsCancel(input: ShortsJobInput): Promise<ApiResponse<{ accepted: boolean }>>;
+  shortsMaterialize(input: ShortsMaterializeInput): Promise<ApiResponse<ShortsJob>>;
+  shortsExport(input: ShortsExportInput): Promise<ApiResponse<ShortsJob>>;
   getTitleFontData(request: TitleFontRequest): Promise<ApiResponse<TitleFontData>>;
   performWindowMenuAction(action: WindowMenuAction): void;
   onTimelineMenuCommand(listener: (commandId: TimelineMenuCommandId) => void): () => void;
@@ -146,6 +153,12 @@ function parseUpdaterSnapshot(payload: unknown): UpdaterSnapshot | null {
 }
 
 const videoTool: VideoToolApi = {
+  shortsStart: input => ipcRenderer.invoke(IPC_CHANNELS.shortsStart, input) as Promise<ApiResponse<ShortsJob>>,
+  shortsGet: input => ipcRenderer.invoke(IPC_CHANNELS.shortsGet, input) as Promise<ApiResponse<ShortsJob>>,
+  shortsList: input => ipcRenderer.invoke(IPC_CHANNELS.shortsList, input) as Promise<ApiResponse<readonly ShortsJob[]>>,
+  shortsCancel: input => ipcRenderer.invoke(IPC_CHANNELS.shortsCancel, input) as Promise<ApiResponse<{ accepted: boolean }>>,
+  shortsMaterialize: input => ipcRenderer.invoke(IPC_CHANNELS.shortsMaterialize, input) as Promise<ApiResponse<ShortsJob>>,
+  shortsExport: input => ipcRenderer.invoke(IPC_CHANNELS.shortsExport, input) as Promise<ApiResponse<ShortsJob>>,
   getTitleFontData: request => ipcRenderer.invoke(IPC_CHANNELS.getTitleFontData, request) as Promise<ApiResponse<TitleFontData>>,
   performWindowMenuAction: (action) => ipcRenderer.send(IPC_CHANNELS.windowMenuAction, action),
   onTimelineMenuCommand: (listener) => {
