@@ -20,6 +20,55 @@ function fixture(replies: AIMessage[], options: { cancelCua?: (id: string) => Pr
 const send = { conversationId: 'conversation', text: 'move clip', modelId: 'qwen2.5-coder' };
 
 describe('CUA graph approval and cancellation lifecycle', () => {
+  it.each([
+    ['write', 'cuaAction'], ['cuaAction', 'write'],
+    ['observeEditorWindow', 'cuaAction'], ['observeEditorWindow', 'read'],
+    ['cuaAction', 'cuaAction']
+  ])('rejects the entire mixed step %s + %s before any tool or approval', async (first, second) => {
+    let calls = 0;
+    let modelCalls = 0;
+    const tools = [...new Set([first, second])].map((name) => tool(async () => { calls++; return 'ran'; }, { name, description: 'test', schema: z.object({}) }));
+    const session = new AgentChatSessionManager(buildAgentChatGraph({ tools, mutatingToolNames: new Set(['write']),
+      perCallApprovalToolNames: new Set(['cuaAction']), createModel: () => ({ invoke: async () => modelCalls++ === 0
+        ? new AIMessage({ content: '', tool_calls: [first, second].map((name, index) => ({ id: `call-${index}`, name, args: {} })) })
+        : new AIMessage('I will observe and act in separate steps.') }) }));
+    const result = await session.sendMessage(send);
+    expect(result.status).toBe('idle');
+    expect(result.pendingApproval).toBeNull();
+    expect(calls).toBe(0);
+    expect(result.messages.filter((message) => message.role === 'tool')).toHaveLength(2);
+    expect(result.messages.filter((message) => message.role === 'tool').every((message) => message.text.includes('No tool in this step ran'))).toBe(true);
+  });
+
+  it('bounds an autonomous observation loop without issuing any write approval', async () => {
+    let calls = 0;
+    const session = new AgentChatSessionManager(buildAgentChatGraph({
+      tools: [tool(async () => { calls++; return 'observation'; }, { name: 'observeEditorWindow', description: 'test', schema: z.object({}) })],
+      mutatingToolNames: new Set(), createModel: () => ({ invoke: async () => new AIMessage({ content: '',
+        tool_calls: [{ id: `observe-${calls}`, name: 'observeEditorWindow', args: {} }] }) })
+    }));
+    const result = await session.sendMessage(send);
+    expect(result.status).toBe('error');
+    expect(result.error).toMatch(/recursion|limit/i);
+    expect(calls).toBeGreaterThan(0);
+    expect(calls).toBeLessThanOrEqual(16);
+  });
+
+  it('recovers from a rejected mixed step only through a fresh, separately approved call', async () => {
+    const mixed = new AIMessage({ content: '', tool_calls: [
+      { id: 'old-action', name: 'cuaAction', args: {} },
+      { id: 'old-read', name: 'observeEditorWindow', args: {} }
+    ] });
+    const { session, inputs } = fixture([mixed, call('fresh-action'), new AIMessage('Done')]);
+    const pending = await session.sendMessage(send);
+    expect(inputs()).toBe(0);
+    expect(pending.pendingApproval?.toolCallId).toBe('fresh-action');
+    await session.respondToApproval({ conversationId: send.conversationId, toolCallId: 'old-action', decision: 'approve' });
+    expect(inputs()).toBe(0);
+    await session.respondToApproval({ conversationId: send.conversationId, toolCallId: 'fresh-action', decision: 'approve' });
+    expect(inputs()).toBe(1);
+  });
+
   it('always authorizes only the exact CUA call and prompts again for the next', async () => {
     const { session, inputs } = fixture([call('one'), call('two'), new AIMessage('Done')]);
     await session.sendMessage(send);
