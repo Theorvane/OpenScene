@@ -38,6 +38,7 @@ export class CuaDriver {
   private cleanupFailureLatched = false;
   private cancelAck: { token: string; runId: string; resolve: () => void } | null = null;
   private trustedApprovalPanel: CuaRect | null = null;
+  private observing = false;
   private state: CuaState;
 
   constructor(private readonly window: BrowserWindow, private readonly dependencies: CuaDriverDependencies) {
@@ -107,8 +108,11 @@ export class CuaDriver {
   }
   async observe(context: { sessionId: string; runId: string }): Promise<CuaFrame> {
     this.live();
-    if (this.state.phase === 'acting' || this.state.phase === 'stopping' || this.cleanupFailureLatched) throw new Error('CUA_BUSY');
+    if (this.observing || this.state.phase === 'acting' || this.state.phase === 'stopping' || this.cleanupFailureLatched) throw new Error('CUA_BUSY');
     if (!context.sessionId || !context.runId || !this.surface?.safeSurface?.interactive) throw new Error('CUA_UNSAFE_SURFACE');
+    this.observing = true;
+    this.frame = null;
+    try {
     const snapshot = structuredClone(this.surface);
     const revision = this.generation;
     const panel: unknown = await this.window.webContents.executeJavaScript(`(() => {
@@ -138,10 +142,11 @@ export class CuaDriver {
     this.frame = frame; this.frameTime = performance.now(); this.cancellation = null;
     this.publish({ ...context, phase: 'ready', error: null, cleanupComplete: true, releaseFailures: [] });
     return frame;
+    } finally { this.observing = false; }
   }
   private validate(request: CuaActionRequest): CuaPoint[] {
     this.live();
-    if (this.state.phase !== 'ready') throw new Error('CUA_BUSY');
+    if (this.observing || this.state.phase !== 'ready') throw new Error('CUA_BUSY');
     const f = this.frame, s = this.surface;
     if (!f || !s || request.sessionId !== f.sessionId || request.runId !== f.runId || request.windowId !== this.window.id || request.frameId !== f.frameId || request.layoutRevision !== f.layoutRevision || s.layoutRevision !== f.layoutRevision || performance.now() - this.frameTime > 120000 || this.window.webContents.getZoomFactor() !== f.zoomFactor
       || (this.dependencies.getDeviceScaleFactor?.() ?? 1) !== f.deviceScaleFactor) throw new Error('CUA_STALE_FRAME');

@@ -1,13 +1,13 @@
 import { EventEmitter } from 'node:events';
 import type { BrowserWindow, MouseInputEvent } from 'electron';
 import { describe, expect, it, vi } from 'vitest';
-import { CuaDriver } from '../src/main/cuaDriver';
+import { CuaDriver, type CuaDriverDependencies } from '../src/main/cuaDriver';
 import { cuaBitmapPointToViewport, type CuaActionRequest, type CuaSurfaceSnapshot } from '../src/shared/cua';
 
 function fixture(autoAck = true) {
   const contents = Object.assign(new EventEmitter(), {
     isDestroyed: vi.fn(() => false), isFocused: vi.fn(() => true), getZoomFactor: vi.fn(() => 1),
-    executeJavaScript: vi.fn(async () => true),
+    executeJavaScript: vi.fn<(script: string) => Promise<unknown>>(async () => true),
     capturePage: vi.fn(async () => ({ isEmpty: () => false, toPNG: () => {
       const png = Buffer.alloc(24); Buffer.from('89504e470d0a1a0a', 'hex').copy(png); png.writeUInt32BE(800,16); png.writeUInt32BE(600,20); return png;
     } })),
@@ -15,7 +15,8 @@ function fixture(autoAck = true) {
   });
   const window = Object.assign(new EventEmitter(), { id: 7, webContents: contents, isDestroyed: vi.fn(() => false), isFocused: vi.fn(() => true) });
   const consumePermit = vi.fn(); const onCancel = vi.fn();
-  const driver = new CuaDriver(window as unknown as BrowserWindow, { consumePermit, onCancel, onState: state => {
+  const getPendingApproval = vi.fn<NonNullable<CuaDriverDependencies['getPendingApproval']>>(() => null);
+  const driver = new CuaDriver(window as unknown as BrowserWindow, { consumePermit, onCancel, getPendingApproval, onState: state => {
     if (autoAck && state.phase === 'stopping' && state.cancelToken && state.runId) driver.acknowledgeCancel({ runId: state.runId, cancelToken: state.cancelToken });
   } });
   const surface: CuaSurfaceSnapshot = { executionBlocked: false, blockReason: null, layoutRevision: 1, viewport: { width: 800, height: 600 }, safeSurface: { kind: 'timeline', rect: { x: 0, y: 0, width: 800, height: 600 }, interactive: true }, protectedRects: [], focusedInSafeSurface: true, focusedTestId: null };
@@ -24,7 +25,7 @@ function fixture(autoAck = true) {
     const frame = await driver.observe({ sessionId: 's', runId: 'r' });
     return { sessionId: 's', runId: 'r', windowId: 7, frameId: frame.frameId, layoutRevision: 1, action: { kind: 'click', point: { x: 20, y: 20 } } };
   };
-  return { driver, window, contents, consumePermit, onCancel, surface, observe };
+  return { driver, window, contents, consumePermit, onCancel, getPendingApproval, surface, observe };
 }
 describe('self-window CUA safety', () => {
   it('uses actual bitmap ratio and rejects invalid pixels', () => {
@@ -131,5 +132,39 @@ describe('self-window CUA safety', () => {
     const r = await f.observe();
     await f.driver.execute(r, 'p');
     expect(f.contents.sendInputEvent.mock.calls[0]?.[0]).toMatchObject({ type: 'mouseMove', x: 40, y: 40 });
+  });
+  it('allows only current-ledger pending panel pointer as a cancellation exception', async () => {
+    const f = fixture(), panel = { x: 600, y: 0, width: 200, height: 600 };
+    f.contents.executeJavaScript.mockImplementation(async script => script.includes('const panels') ? panel : true);
+    const surface: CuaSurfaceSnapshot = { ...f.surface, safeSurface: { kind: 'timeline', rect: { x: 0, y: 0, width: 500, height: 600 }, interactive: true }, protectedRects: [{ id: 'panel', kind: 'agent-panel', rect: panel }] };
+    f.driver.reportSurface(surface);
+    const request = await f.observe(); f.driver.setExecutionBlocked(true);
+    f.getPendingApproval.mockReturnValue(request);
+    f.driver.reportSurface({ ...surface, executionBlocked: true, protectedRects: [...surface.protectedRects, { id: 'approval', kind: 'approval-ui', rect: { x: 610, y: 20, width: 180, height: 100 } }] });
+    f.contents.emit('before-mouse-event', {}, { type: 'mouseDown', x: 650, y: 40 });
+    expect(f.driver.getState().phase).toBe('ready');
+    expect(f.onCancel).not.toHaveBeenCalled();
+    await expect(f.driver.execute(request, 'forged')).rejects.toThrow('BLOCKED');
+    expect(f.consumePermit).not.toHaveBeenCalled();
+    f.getPendingApproval.mockReturnValue({ ...request, runId: 'another-run' });
+    f.contents.emit('before-mouse-event', {}, { type: 'mouseDown', x: 650, y: 40 });
+    expect(f.onCancel).toHaveBeenCalledOnce();
+  });
+  it('rejects a fresh-looking snapshot when the document rejects its safety claims', async () => {
+    const f = fixture(), r = await f.observe();
+    f.contents.executeJavaScript.mockResolvedValue({ safe: true });
+    await expect(f.driver.execute(r, 'p')).rejects.toThrow('UNSAFE_DOCUMENT');
+    expect(f.contents.sendInputEvent).not.toHaveBeenCalled();
+  });
+  it('serializes capture and prevents an older frame being used during recapture', async () => {
+    const f = fixture(), r = await f.observe();
+    let resolve!: (value: unknown) => void;
+    f.contents.executeJavaScript.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+    const capture = f.observe();
+    await expect(f.observe()).rejects.toThrow('BUSY');
+    await expect(f.driver.execute(r, 'p')).rejects.toThrow('BUSY');
+    resolve(null); await capture;
+    await expect(f.driver.execute(r, 'p')).rejects.toThrow('STALE');
+    expect(f.consumePermit).not.toHaveBeenCalled();
   });
 });
