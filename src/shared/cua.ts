@@ -2,6 +2,8 @@
 export interface CuaPoint { readonly x: number; readonly y: number }
 export interface CuaRect extends CuaPoint { readonly width: number; readonly height: number }
 export interface CuaSurfaceSnapshot {
+  readonly executionBlocked: boolean;
+  readonly blockReason: string | null;
   readonly layoutRevision: number;
   readonly viewport: { readonly width: number; readonly height: number };
   readonly safeSurface: { readonly kind: 'timeline' | 'canvas' | 'shorts-review'; readonly rect: CuaRect; readonly interactive: boolean } | null;
@@ -39,6 +41,9 @@ export interface CuaActionRequest {
 }
 export type CuaPhase = 'idle' | 'ready' | 'acting' | 'stopping' | 'stopped' | 'cleanup-failed';
 export interface CuaState {
+  /** Present only while a held drag awaits synchronous renderer rollback. */
+  readonly cancelToken: string | null;
+  readonly targetGone: boolean;
   readonly sessionId: string | null;
   readonly runId: string | null;
   readonly windowId: number;
@@ -52,6 +57,7 @@ export interface CuaState {
   readonly releaseFailures: readonly string[];
 }
 export interface CuaStopResult { readonly accepted: boolean }
+export interface CuaCancelAck { readonly runId: string; readonly cancelToken: string }
 
 /** Pixel conversion uses the actual returned bitmap, never DPR alone. */
 export function cuaBitmapPointToViewport(frame: Pick<CuaFrame, 'bitmap' | 'viewport'>, point: CuaPoint): CuaPoint {
