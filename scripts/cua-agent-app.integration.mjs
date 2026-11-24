@@ -106,7 +106,17 @@ async function pointFor(selector, text) {
       const r=e.getBoundingClientRect();return r.width>0&&r.height>0&&${text === undefined ? 'true' : `e.textContent.trim()===${JSON.stringify(text)}`};
     });
     if(!element||element.disabled) return null;
-    const r=element.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};
+    const r=element.getBoundingClientRect();
+    let left=Math.max(0,r.left),right=Math.min(innerWidth,r.right),top=Math.max(0,r.top),bottom=Math.min(innerHeight,r.bottom);
+    for(let p=element.parentElement;p;p=p.parentElement){
+      const style=getComputedStyle(p),pr=p.getBoundingClientRect();
+      if(/auto|scroll|hidden|clip/.test(style.overflowX)){left=Math.max(left,pr.left);right=Math.min(right,pr.right);}
+      if(/auto|scroll|hidden|clip/.test(style.overflowY)){top=Math.max(top,pr.top);bottom=Math.min(bottom,pr.bottom);}
+    }
+    if(right<=left||bottom<=top)return null;
+    const point={x:left+Math.min(right-left,160)/2,y:(top+bottom)/2};
+    const hit=document.elementFromPoint(point.x,point.y);
+    return hit&&(hit===element||element.contains(hit))?point:null;
   })()`);
 }
 function input(event) {
@@ -270,7 +280,10 @@ try {
     }
     input({ type: 'mouseUp', x: Math.round((point.x + 60) * zoom), y: Math.round(point.y * zoom), button: 'left', clickCount: 1 });
     await until('user-role fixture edit is visibly dirty', () => js('document.querySelector("[data-testid=timeline-canvas]")?.dataset.dirty==="true"'));
-    evidence.scenarios.push({ kind: 'user-role-dirty-fixture-setup', before, after: await liveClip(), savedPosition: await savedPosition() });
+    const after = await liveClip(), saved = await savedPosition();
+    assert.ok(after.timelineStartMs > before.timelineStartMs, 'User-role fixture setup changed the live timeline');
+    assert.equal(saved, before.timelineStartMs, 'User-role fixture setup has not saved the project');
+    evidence.scenarios.push({ kind: 'user-role-dirty-fixture-setup', before, after, savedPosition: saved });
   }
   await capture('00-actual-app-before-observe');
   const focusWaitMs = Number(process.env.CUA_AGENT_WAIT_FOR_FOCUS_MS || 0);
@@ -342,6 +355,16 @@ try {
     const after = await savedPosition();
     if (kind === 'move') {
       assert.ok(after > before, `MCP saved position changed: ${before} → ${after}`);
+      const modifier = process.platform === 'darwin' ? 'meta' : 'control';
+      input({ type: 'keyDown', keyCode: 'z', modifiers: [modifier] });
+      input({ type: 'keyUp', keyCode: 'z', modifiers: [modifier] });
+      await until('actual app native key Undo restores one live edit', async () => (await liveClip()).timelineStartMs === before);
+      evidence.scenarios.push({ kind: 'user-role-native-key-undo', key: `${modifier}+z`, live: await liveClip(),
+        savedBeforeUndoSave: await savedPosition(), productionCuaKeyValidated: false });
+      const redo = Menu.getApplicationMenu()?.getMenuItemById('timeline:redo');
+      assert.ok(redo?.enabled, 'The single live edit can be redone through the actual app menu');
+      redo.click(undefined, target, undefined);
+      await until('app menu Redo restores the moved live clip', async () => (await liveClip()).timelineStartMs === after);
       const undo = Menu.getApplicationMenu()?.getMenuItemById('timeline:undo');
       assert.ok(undo?.enabled, 'Actual app Undo menu is enabled');
       evidence.scenarios.push({ kind: 'ui-undo-menu', menuId: undo.id, at: performance.now() });
