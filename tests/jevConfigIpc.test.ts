@@ -7,7 +7,7 @@ function harness() {
   const frame = {};
   const contents = { mainFrame: frame, isDestroyed: () => false };
   const window = { webContents: contents, isDestroyed: () => false };
-  const store = { getSnapshot: vi.fn(() => DEFAULT_JEV_CONFIG), set: vi.fn(async () => DEFAULT_JEV_CONFIG) };
+  const store = { reload: vi.fn(async () => DEFAULT_JEV_CONFIG), set: vi.fn(async () => DEFAULT_JEV_CONFIG) };
   const handlers = new Map<string, (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown>();
   registerJevConfigIpc({
     ipcMain: { handle: (channel: string, handler: (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown) => { handlers.set(channel, handler); } } as unknown as Pick<IpcMain, 'handle'>,
@@ -34,7 +34,7 @@ describe('Jev config IPC', () => {
     }
     h.window.isDestroyed = () => true;
     expect(await h.invoke('get')).toMatchObject({ ok: false, error: { code: 'PERMISSION_DENIED' } });
-    expect(h.store.getSnapshot).not.toHaveBeenCalled();
+    expect(h.store.reload).not.toHaveBeenCalled();
     expect(h.store.set).not.toHaveBeenCalled();
   });
   it('rejects partial/extra/invalid/unknown fields and extra arguments', async () => {
@@ -52,5 +52,13 @@ describe('Jev config IPC', () => {
     expect(await h.invoke('set', [DEFAULT_JEV_CONFIG])).toEqual({
       ok: false, error: { code: 'UNKNOWN_ERROR', message: 'Jev configuration operation failed. Refresh configuration before retrying.' }
     });
+  });
+  it('requires successful authoritative disk refresh before get can succeed', async () => {
+    const h = harness();
+    h.store.reload.mockRejectedValueOnce(new Error('synthetic-private-path'));
+    expect(await h.invoke('get')).toEqual({
+      ok: false, error: { code: 'UNKNOWN_ERROR', message: 'Jev configuration operation failed. Refresh configuration before retrying.' }
+    });
+    expect(await h.invoke('get')).toEqual({ ok: true, value: DEFAULT_JEV_CONFIG });
   });
 });
