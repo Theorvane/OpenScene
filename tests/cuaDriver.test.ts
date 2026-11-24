@@ -291,4 +291,12 @@ describe('self-window CUA safety', () => {
     expect(f.consumePermit).not.toHaveBeenCalled();
     expect(f.contents.sendInputEvent).not.toHaveBeenCalled();
   });
+  it('copies validated surface fields rather than retaining cyclic untrusted renderer extras', async () => {
+    const f = fixture();
+    const rect: { x: number; y: number; width: number; height: number; extra?: unknown } = { ...f.surface.safeSurface!.rect };
+    rect.extra = rect;
+    expect(() => f.driver.reportSurface({ ...f.surface, safeSurface: { ...f.surface.safeSurface!, rect } })).not.toThrow();
+    expect((await f.driver.observe({ sessionId: 's', runId: 'r' })).contentRevision).toBe(0);
+    expect(f.contents.sendInputEvent).not.toHaveBeenCalled();
+  });
 });

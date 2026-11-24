@@ -142,7 +142,22 @@ export class CuaDriver {
       || !snapshot.viewport || ![snapshot.viewport.width, snapshot.viewport.height].every(n => Number.isFinite(n) && n > 0 && n < 32768)
       || !Array.isArray(snapshot.protectedRects) || snapshot.protectedRects.length > 256) this.invalidSurface();
     const validRect = (r: CuaRect): boolean => !!r && [r.x, r.y, r.width, r.height].every(Number.isFinite) && r.width >= 0 && r.height >= 0;
-    if (snapshot.protectedRects.some(p => !p || !validRect(p.rect)) || (snapshot.safeSurface !== null && (!validRect(snapshot.safeSurface.rect) || typeof snapshot.safeSurface.interactive !== 'boolean'))) this.invalidSurface();
+    const protectedKinds = ['stop-button', 'approval-ui', 'agent-panel', 'settings', 'chrome-menu', 'modal'];
+    if ((snapshot.blockReason !== null && (typeof snapshot.blockReason !== 'string' || snapshot.blockReason.length > 256))
+      || (snapshot.focusedTestId !== null && (typeof snapshot.focusedTestId !== 'string' || snapshot.focusedTestId.length > 512))
+      || snapshot.protectedRects.some(p => !p || typeof p.id !== 'string' || p.id.length > 256 || !protectedKinds.includes(p.kind) || !validRect(p.rect))
+      || (snapshot.safeSurface !== null && (!snapshot.safeSurface || !validRect(snapshot.safeSurface.rect)
+        || snapshot.safeSurface.rect.width <= 0 || snapshot.safeSurface.rect.height <= 0 || typeof snapshot.safeSurface.interactive !== 'boolean'
+        || !['timeline', 'canvas', 'shorts-review'].includes(snapshot.safeSurface.kind)))) this.invalidSurface();
+    const rect = (r: CuaRect): CuaRect => ({ x: r.x, y: r.y, width: r.width, height: r.height });
+    // Copy only validated contract fields; unknown/cyclic renderer properties
+    // must not survive into frame comparisons or fixed DOM verification.
+    snapshot = { contentRevision: snapshot.contentRevision, layoutRevision: snapshot.layoutRevision,
+      executionBlocked: snapshot.executionBlocked, blockReason: snapshot.blockReason,
+      viewport: { width: snapshot.viewport.width, height: snapshot.viewport.height },
+      safeSurface: snapshot.safeSurface && { kind: snapshot.safeSurface.kind, rect: rect(snapshot.safeSurface.rect), interactive: snapshot.safeSurface.interactive },
+      protectedRects: snapshot.protectedRects.map(p => ({ id: p.id, kind: p.kind, rect: rect(p.rect) })),
+      focusedInSafeSurface: snapshot.focusedInSafeSurface, focusedTestId: snapshot.focusedTestId };
     if (this.surface && snapshot.layoutRevision < this.surface.layoutRevision) this.invalidSurface('CUA_STALE_SURFACE');
     if (this.surface && snapshot.contentRevision < this.surface.contentRevision) this.invalidSurface('CUA_STALE_CONTENT');
     const changed = this.surface !== null && (snapshot.layoutRevision !== this.surface.layoutRevision

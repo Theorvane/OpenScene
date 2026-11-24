@@ -5,6 +5,7 @@ import type { BrowserWindow } from 'electron';
 import { expect, it, vi } from 'vitest';
 import { CuaSaveBridge, cuaSaveDigest } from '../src/main/cuaSaveBridge';
 import { ProjectStore } from '../src/main/projectStore';
+import { CuaSaveApprovalAuthority } from '../src/main/cuaSaveApprovalAuthority';
 import { IPC_CHANNELS } from '../src/shared/ipc';
 import type { CuaSaveReadyRequest, CuaSaveResult, CuaSaveScope, CuaSaveSnapshotRequest } from '../src/shared/cuaSave';
 import type { TimelineDocument } from '../src/shared/timelineTypes';
@@ -114,5 +115,23 @@ it('does not expose main-process filesystem errors through model or renderer rec
     const result = await f.bridge.saveApproved(proposal.proposalId, 'approved');
     expect(result).toMatchObject({ status: 'not-written', errorCode: 'CUA_SAVE_FAILED' });
     expect(JSON.stringify(result)).not.toContain('/private');
+  });
+});
+
+it('uses the real Save permit original clock again after async storage preparation', async () => {
+  await withBridge(async f => {
+    let clock = 0;
+    const authority = new CuaSaveApprovalAuthority({ permitTtlMs: 5000, proposalTtlMs: 120000, maxSavesPerRun: 2, now: () => clock });
+    f.checkPermit.mockImplementation((proposal, permit) => authority.check(proposal, permit));
+    f.consumePermit.mockImplementation((proposal, permit) => authority.consume(proposal, permit));
+    const proposal = await f.bridge.prepareSaveSnapshot(f.scope);
+    authority.propose('conversation', 'call', proposal);
+    const permit = authority.issueApproved('conversation', 'call', proposal);
+    const original = f.store.saveTimeline.bind(f.store);
+    vi.spyOn(f.store, 'saveTimeline').mockImplementation(async (...args) => { clock = 5000; return original(...args); });
+    const result = await f.bridge.saveApproved(proposal.proposalId, permit);
+    expect(result).toMatchObject({ status: 'not-written', errorCode: 'CUA_APPROVAL_EXPIRED' });
+    expect((await f.store.open(f.project.id))!.timeline).toEqual(f.project.timeline);
+    expect(() => authority.check(proposal, permit)).toThrow('CUA_ACTION_REPLAYED');
   });
 });
