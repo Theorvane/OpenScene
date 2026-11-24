@@ -40,6 +40,14 @@ function fixture() {
 }
 
 describe('CUA immutable run binding and dispatch', () => {
+  it('cannot bypass graph approval by invoking the action tool directly', async () => {
+    const f = fixture();
+    const request = f.requestFor((await f.orchestrator.observe('a')).frame);
+    const action = createCuaAgentChatTools(f.orchestrator).find((candidate) => candidate.name === 'executeCuaAction')!;
+    await expect(action.invoke(request)).rejects.toThrow('CUA_APPROVAL_MISMATCH');
+    expect(f.inputs()).toBe(0);
+  });
+
   it('carries PNG evidence to a synthetic model, displays exact approval, then reobserves without transcript base64', async () => {
     const f = fixture();
     let step = 0;

@@ -39,18 +39,28 @@ writeFileSync(join(projectDirectory, 'project.json'), JSON.stringify({
 const evidence = { head: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
   harnessSha256: createHash('sha256').update(readFileSync(new URL(import.meta.url))).digest('hex'),
   workingTree: execFileSync('git', ['status', '--short'], { encoding: 'utf8' }),
-  syntheticModel: true, liveModelQualityTested: false, profile, projectId, inputs: [], states: [], snapshots: [], surfaceReports: [], modelCalls: [], scenarios: [] };
+  syntheticModel: true, liveModelQualityTested: false, profile, projectId, inputs: [], states: [], snapshots: [], surfaceReports: [], saves: [], modelCalls: [], scenarios: [] };
 let target;
 let source = 'product';
 let scenario = { kind: 'move', stage: 0 };
 let callSequence = 0;
 let lastActionCallId = null;
 const originalHandle = ipcMain.handle.bind(ipcMain);
-ipcMain.handle = (channel, handler) => originalHandle(channel, channel !== 'cua:report-surface-snapshot' ? handler : (event, snapshot) => {
+ipcMain.handle = (channel, handler) => {
+  if (channel === 'project-timeline:save') return originalHandle(channel, async (event, payload) => {
+    const startedAt = performance.now();
+    const response = await handler(event, payload);
+    evidence.saves.push({ startedAt, completedAt: performance.now(), projectId: payload?.projectId,
+      ok: response?.ok, updatedAt: response?.value?.updatedAt,
+      clips: response?.value?.timeline?.tracks.flatMap(track => track.clips.map(clip => ({ id: clip.id, timelineStartMs: clip.timelineStartMs }))) });
+    return response;
+  });
+  return originalHandle(channel, channel !== 'cua:report-surface-snapshot' ? handler : (event, snapshot) => {
   // Passive evidence tap: original sender, payload, handler and return value.
   evidence.surfaceReports.push({ at: performance.now(), snapshot: structuredClone(snapshot) });
   return handler(event, snapshot);
-});
+  });
+};
 
 app.on('browser-window-created', (_event, window) => {
   if (target) throw new Error('Harness only permits one own app window');
@@ -179,9 +189,19 @@ const heldInputs = () => {
 };
 async function saveThroughUi() {
   const button = await pointFor('.oc-editor-host__save');
-  if (button) await clickPoint(button);
+  if (!button) {
+    evidence.scenarios.push({ kind: 'explicit-save', required: false, at: performance.now() });
+    return;
+  }
+  const previousAcks = evidence.saves.length;
+  evidence.scenarios.push({ kind: 'explicit-save', required: true, actor: 'harness-user-ui', at: performance.now() });
+  await clickPoint(button);
+  await until('actual main save acknowledgement', () => evidence.saves.length > previousAcks);
+  assert.equal(evidence.saves.at(-1).ok, true, JSON.stringify(evidence.saves.at(-1)));
+  assert.equal(evidence.saves.at(-1).projectId, projectId);
   await until('project save', () => js(`!document.querySelector('.oc-editor-host__save')?.textContent.includes('*')`));
 }
+const liveClip = () => js(`(() => {const e=document.querySelector('.timeline-clip');if(!e)return null;const r=e.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,left:e.style.left,selected:e.classList.contains('timeline-clip--selected')};})()`);
 async function savedPosition() {
   const state = await mcp('getProjectTimeline', { projectId });
   return state.project.timeline.tracks.flatMap((track) => track.clips)[0]?.timelineStartMs;
@@ -241,6 +261,7 @@ try {
   const scenarios = (process.env.CUA_AGENT_SCENARIOS || 'deny,stale,duplicate,move,cancel').split(',');
   for (const kind of scenarios) {
     const before = await savedPosition();
+    const liveBefore = await liveClip();
     const downs = productDowns();
     await prompt(kind);
     if (kind === 'stale') {
@@ -278,6 +299,7 @@ try {
         await until('actual CUA clip selection', () => pointFor('.timeline-clip--selected'));
       }
     }
+    const liveAfter = await liveClip();
     await saveThroughUi();
     const after = await savedPosition();
     if (kind === 'move') {
@@ -286,10 +308,12 @@ try {
       assert.ok(undo?.enabled, 'Actual app Undo menu is enabled');
       evidence.scenarios.push({ kind: 'ui-undo-menu', menuId: undo.id, at: performance.now() });
       undo.click(undefined, target, undefined);
+      await until('live UI Undo restores clip position before saving', async () => Math.abs((await liveClip()).x - liveBefore.x) <= 0.5);
+      evidence.scenarios.push({ kind: 'live-ui-undo-before-save', geometry: await liveClip(), savedPositionBeforeUndoSave: await savedPosition() });
       await saveThroughUi();
       assert.equal(await savedPosition(), before, 'One UI Undo restores the original saved timeline');
     } else assert.equal(after, before);
-    evidence.scenarios.push({ kind, before, after, driverDowns: productDowns() - downs, held: heldInputs(), passed: true });
+    evidence.scenarios.push({ kind, before, after, liveBefore, liveAfter, driverDowns: productDowns() - downs, held: heldInputs(), passed: true });
     await capture(`${kind}-settled`);
     // Actual reset waits driver release and removes the old run/checkpoint.
     await click('[aria-label="Reset conversation"]');

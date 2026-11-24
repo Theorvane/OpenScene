@@ -197,6 +197,10 @@ const AgentChatState = Annotation.Root({
   executedPerCallIds: Annotation<string[]>({
     reducer: (current, update) => [...new Set([...current, ...update])],
     default: () => []
+  }),
+  rejectedCuaBatchCallIds: Annotation<string[]>({
+    reducer: (current, update) => [...new Set([...current, ...update])],
+    default: () => []
   })
 });
 
@@ -210,6 +214,16 @@ export interface BuildAgentChatGraphOptions {
   readonly cua?: CuaAgentOrchestrator;
   readonly createModel: AgentChatModelFactory;
 }
+
+const SELF_WINDOW_CUA_POLICY = [
+  'For self-window UI actions, first call observeEditorWindow alone and use the exact returned session/run/window/frame/layout scope and CSS coordinates.',
+  'Then propose exactly one executeCuaAction alone in a later tool step; never combine CUA observation or input with any other tool call in the same step.',
+  'Each exact action needs a new approval. Never use UI actions to approve tools, change settings, or access other windows.',
+  'Inspect the returned frame after execution. MCP getProjectTimeline reports saved state and may lag unsaved UI edits; clearly distinguish the two and never claim a save occurred without the existing save acknowledgement.',
+  'Protected Save controls remain outside CUA scope; do not invent a shortcut or silently save.',
+  'If evidence is stale, cancelled or denied, stop or explicitly observe again and request a new approval; never silently rebind approved coordinates.',
+  'Prefer registered editing tools when they express the requested edit.'
+].join(' ');
 
 export function buildAgentChatGraph(options: BuildAgentChatGraphOptions) {
   const toolsByName = new Map(options.tools.map((tool) => [tool.name, tool]));
@@ -235,7 +249,7 @@ export function buildAgentChatGraph(options: BuildAgentChatGraphOptions) {
       const messages = hasSystemPrompt
         ? state.messages
         : [new SystemMessage(buildAgentSystemPrompt(getEditAssetContext(configurable.editAssetContext), getEditProjectContext(configurable.editProjectContext))
-          + (options.cua ? ' For self-window UI actions, first observeEditorWindow and use the exact returned session/run/window/frame/layout scope and CSS coordinates. Propose only one executeCuaAction at a time; each exact action needs a new approval. Never use UI actions to approve tools, change settings, or access other windows. After execution inspect the returned frame and getProjectTimeline to verify the saved result. If evidence is stale, cancelled or denied, stop or explicitly observe again and request a new approval; never silently rebind approved coordinates. Prefer registered editing tools when they express the requested edit.' : '')), ...state.messages];
+          + (options.cua ? ` ${SELF_WINDOW_CUA_POLICY}` : '')), ...state.messages];
 
       const response = await model.invoke(messages, config.signal ? { signal: config.signal } : undefined);
       if ((response.tool_calls?.length ?? 0) > 16) throw new Error('CUA_BUDGET_EXCEEDED: At most 16 tool calls per model step.');
@@ -248,8 +262,11 @@ export function buildAgentChatGraph(options: BuildAgentChatGraphOptions) {
       }
 
       const decisions: Record<string, AgentToolApprovalDecision> = {};
-      if (options.cua && (last.tool_calls?.filter((call) => call.name === 'executeCuaAction').length ?? 0) > 1) {
-        throw new Error('CUA_BUDGET_EXCEEDED: Propose one observed CUA action at a time.');
+      if (last.tool_calls.length > 1 && last.tool_calls.some((call) =>
+        perCallApprovalToolNames.has(call.name) || call.name === 'executeCuaAction' || call.name === 'observeEditorWindow')) {
+        // Reject the complete step before any proposal, approval or tool side
+        // effect. Even an earlier MCP call must not change the observed scene.
+        return { rejectedCuaBatchCallIds: last.tool_calls.flatMap((call) => call.id ? [call.id] : []) };
       }
       for (const call of last.tool_calls) {
         if (!call.id || (!options.mutatingToolNames.has(call.name)
@@ -300,6 +317,10 @@ export function buildAgentChatGraph(options: BuildAgentChatGraphOptions) {
       const model = typeof modelId === 'string' ? getLlmModel(modelId) : undefined;
       for (const call of last.tool_calls) {
         if (!call.id) continue;
+        if (state.rejectedCuaBatchCallIds.includes(call.id)) {
+          results.push(new ToolMessage({ content: 'CUA_MIXED_TOOL_STEP: No tool in this step ran. Call observeEditorWindow alone, then propose exactly one executeCuaAction alone in a later step. Use fresh call IDs; do not combine observation, UI input or MCP tools in one step.', tool_call_id: call.id, name: call.name }));
+          continue;
+        }
         const perCall = perCallApprovalToolNames.has(call.name);
         if (perCall && (state.executedPerCallIds.includes(call.id) || executedPerCallIds.includes(call.id))) {
           results.push(new ToolMessage({ content: 'CUA_ACTION_REPLAYED: This action call has already settled. Observe again and propose a new action.', tool_call_id: call.id, name: call.name }));
