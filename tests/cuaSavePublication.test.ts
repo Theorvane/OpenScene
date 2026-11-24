@@ -1,4 +1,5 @@
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { expect, it } from 'vitest';
@@ -11,7 +12,12 @@ it('checks authority only after staging and rejects publication without changing
     const file = join(root, project.id, 'project.json'), before = await readFile(file, 'utf8');
     let guardCalls = 0;
     await expect(store.saveTimeline(project.id, project.timeline, new Date(), current => {
-      guardCalls++; expect(current.id).toBe(project.id); throw new Error('CUA_CANCELLED');
+      guardCalls++; expect(current.id).toBe(project.id);
+      const staged = readdirSync(join(root, project.id)).filter(name => name.endsWith('.tmp'));
+      expect(staged).toHaveLength(1);
+      expect(JSON.parse(readFileSync(join(root, project.id, staged[0]!), 'utf8')).id).toBe(project.id);
+      expect(readFileSync(file, 'utf8')).toBe(before);
+      throw new Error('CUA_CANCELLED');
     })).rejects.toThrow('CUA_CANCELLED');
     expect(guardCalls).toBe(1);
     expect(await readFile(file, 'utf8')).toBe(before);

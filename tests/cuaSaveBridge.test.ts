@@ -7,6 +7,7 @@ import { CuaSaveBridge, cuaSaveDigest } from '../src/main/cuaSaveBridge';
 import { ProjectStore } from '../src/main/projectStore';
 import { IPC_CHANNELS } from '../src/shared/ipc';
 import type { CuaSaveReadyRequest, CuaSaveResult, CuaSaveScope, CuaSaveSnapshotRequest } from '../src/shared/cuaSave';
+import type { TimelineDocument } from '../src/shared/timelineTypes';
 
 async function withBridge(run: (context: Awaited<ReturnType<typeof fixture>>) => Promise<void>): Promise<void> {
   const f = await fixture();
@@ -17,14 +18,14 @@ async function fixture() {
   const project = await store.create({ name: 'Live timeline' });
   const timeline = { ...project.timeline, tracks: project.timeline.tracks.map((track, index) => index === 0 ? { ...track, name: 'Unsaved live edit' } : track) };
   const scope: CuaSaveScope = { projectId: project.id, sessionId: 's', runId: 'r', windowId: 7, frameId: 'f', layoutRevision: 1, contentRevision: 2 };
-  const options = { ready: true, commit: true, uiApplied: true };
+  const options: { ready: boolean; commit: boolean; uiApplied: boolean; dirty: boolean; snapshotTimeline: TimelineDocument } = { ready: true, commit: true, uiApplied: true, dirty: true, snapshotTimeline: timeline };
   const emitted: { channel: string; payload: unknown }[] = [];
   const checkPermit = vi.fn(), consumePermit = vi.fn(), assertScope = vi.fn();
   const window = { id: 7, isDestroyed: () => false, webContents: { isDestroyed: () => false, send: (channel: string, payload: unknown) => {
     emitted.push({ channel, payload });
     if (channel === IPC_CHANNELS.cuaSaveSnapshotRequested) {
       const request = payload as CuaSaveSnapshotRequest;
-      bridge.reportSnapshot({ requestToken: request.requestToken, runId: 'r', projectId: project.id, contentRevision: 2, dirty: true, timeline });
+      bridge.reportSnapshot({ requestToken: request.requestToken, runId: 'r', projectId: project.id, contentRevision: 2, dirty: options.dirty, timeline: options.snapshotTimeline });
     }
     if (channel === IPC_CHANNELS.cuaSaveRequested && options.ready) {
       const request = payload as CuaSaveReadyRequest;
@@ -92,5 +93,16 @@ it('retains a real publication receipt when cancellation arrives after the store
     const result = await f.bridge.saveApproved(proposal.proposalId, 'approved');
     expect(result).toMatchObject({ status: 'persisted-after-cancel', diskMatches: true });
     expect((await f.store.open(f.project.id))!.timeline.tracks[0]!.name).toBe('Unsaved live edit');
+  });
+});
+
+it('treats a clean report as already saved only after comparing real persisted bytes', async () => {
+  await withBridge(async f => {
+    f.options.dirty = false; f.options.snapshotTimeline = f.project.timeline;
+    const proposal = await f.bridge.prepareSaveSnapshot(f.scope);
+    const save = vi.spyOn(f.store, 'saveTimeline');
+    expect(await f.bridge.saveApproved(proposal.proposalId, 'approved')).toMatchObject({ status: 'already-clean', diskMatches: true, uiApplied: true });
+    expect(save).not.toHaveBeenCalled();
+    expect(f.consumePermit).toHaveBeenCalledOnce();
   });
 });
