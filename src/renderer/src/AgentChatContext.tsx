@@ -43,7 +43,6 @@ interface AgentChatController {
   readonly error: string | undefined;
   readonly errorCode: AgentCuaErrorCode | undefined;
   readonly isBusy: boolean;
-  readonly approvalInFlight: boolean;
   readonly activeProject: EditAgentProjectContext | null;
   /** Context window consumed by the conversation, when a turn reported it. */
   readonly contextUsage: AgentChatContextUsage | undefined;
@@ -91,7 +90,6 @@ export function AgentChatProvider({ activeProject, prepareProject, hasUnsavedTim
   const [error, setError] = useState<string | undefined>(undefined);
   const [errorCode, setErrorCode] = useState<AgentCuaErrorCode | undefined>(undefined);
   const [isBusy, setIsBusy] = useState(false);
-  const [approvalInFlight, setApprovalInFlight] = useState(false);
   const [contextUsage, setContextUsage] = useState<AgentChatContextUsage | undefined>(undefined);
   const [historyEntries, setHistoryEntries] = useState<readonly AgentChatHistoryEntry[]>([]);
   // Re-read after each turn so a session that just got its title shows it.
@@ -209,11 +207,6 @@ export function AgentChatProvider({ activeProject, prepareProject, hasUnsavedTim
     setInput('');
   };
 
-  const waitNextPaint = (): Promise<void> =>
-    typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'
-      ? new Promise((resolve) => { window.requestAnimationFrame(() => resolve()); })
-      : Promise.resolve();
-
   const sendMessage = async (text: string): Promise<void> => {
     if (text.trim().length === 0 || isBusy || pendingApproval || !modelReady) return;
 
@@ -236,8 +229,6 @@ export function AgentChatProvider({ activeProject, prepareProject, hasUnsavedTim
       if (activeProject !== null && !await prepareProjectForAgentSend(interactionMode, prepareProject)) {
         throw new Error('Save the open timeline before asking the agent to edit it.');
       }
-      // Allow CUA stop button & surface snapshot to flush before observe() runs.
-      await waitNextPaint();
       const response = await window.videoTool.agentChatSend({
         conversationId: conversationIdRef.current,
         text,
@@ -284,17 +275,11 @@ export function AgentChatProvider({ activeProject, prepareProject, hasUnsavedTim
 
     const executingApproved = decision !== 'deny';
     setIsBusy(true);
-    if (executingApproved) setApprovalInFlight(true);
     setError(undefined);
     setErrorCode(undefined);
     try {
       if (activeProject !== null && !await prepareProjectForAgentApproval(pendingApproval.toolName, decision, prepareProject, interactionMode)) {
         throw new Error('Save the open timeline before approving the agent edit.');
-      }
-      if (executingApproved) {
-        // Let React remove workspace `inert` and report executionBlocked=false
-        // BEFORE main's CuaDriver.validate() / verifyDom() runs.
-        await waitNextPaint();
       }
       const response = await window.videoTool.agentChatApprove({
         conversationId: conversationIdRef.current,
@@ -320,7 +305,6 @@ export function AgentChatProvider({ activeProject, prepareProject, hasUnsavedTim
       setError(cause instanceof Error ? cause.message : 'Agent approval failed.');
       setErrorCode(undefined);
     } finally {
-      setApprovalInFlight(false);
       setIsBusy(false);
     }
   };
@@ -438,7 +422,6 @@ export function AgentChatProvider({ activeProject, prepareProject, hasUnsavedTim
     error,
     errorCode,
     isBusy,
-    approvalInFlight,
     activeProject,
     contextUsage,
     sessions,

@@ -25,6 +25,7 @@ function makeMeasured(overrides: Partial<MeasuredSurfaceState> = {}): MeasuredSu
     rect: { x: 0, y: 0, width: 1400, height: 40 }
   };
   return {
+    contentRevision: 1,
     executionBlocked: false,
     blockReason: null,
     viewport: { width: 1400, height: 900 },
@@ -264,10 +265,28 @@ describe('cuaSurfaceSnapshot', () => {
     expect(buildSurfaceRevisionKey(makeMeasured())).toBe(buildSurfaceRevisionKey(makeMeasured()));
   });
 
-  it('coordinates workspace inertness and executionBlocked across pendingApproval, approvalInFlight, and CUA acting', () => {
+  it('keeps contentRevision monotonic without bumping layoutRevision while still triggering delivery', () => {
+    const tracker = new CuaSurfaceRevisionTracker();
+    const s1 = tracker.next(makeMeasured({ contentRevision: 2 }));
+    expect(s1.snapshot.layoutRevision).toBe(1);
+    expect(s1.snapshot.contentRevision).toBe(2);
+
+    const s2 = tracker.next(makeMeasured({ contentRevision: 3 }));
+    expect(s2.revisionChanged).toBe(false);
+    expect(s2.changed).toBe(true);
+    expect(s2.snapshot.layoutRevision).toBe(1);
+    expect(s2.snapshot.contentRevision).toBe(3);
+
+    // Monotonic floor prevents regression if a lower contentRevision is passed.
+    const s3 = tracker.next(makeMeasured({ contentRevision: 1 }));
+    expect(s3.snapshot.contentRevision).toBe(3);
+    expect(s3.changed).toBe(false);
+  });
+
+  it('coordinates workspace inertness and executionBlocked across pendingApproval, preparing, and CUA acting', () => {
     expect(computeWorkspaceInert({ isAgentBusy: false, hasPendingApproval: true, cuaPhase: 'idle' })).toBe(true);
     expect(computeWorkspaceInert({ isAgentBusy: false, hasPendingApproval: true, cuaPhase: 'ready' })).toBe(true);
-    expect(computeWorkspaceInert({ isAgentBusy: true, hasPendingApproval: true, approvalInFlight: true, cuaPhase: 'ready' })).toBe(false);
+    expect(computeWorkspaceInert({ isAgentBusy: true, hasPendingApproval: true, cuaPhase: 'preparing' })).toBe(false);
     expect(computeWorkspaceInert({ isAgentBusy: true, hasPendingApproval: false, cuaPhase: 'acting' })).toBe(false);
     expect(computeWorkspaceInert({ isAgentBusy: true, hasPendingApproval: false, cuaPhase: 'idle' })).toBe(true);
     expect(computeWorkspaceInert({ isAgentBusy: false, hasPendingApproval: false, cuaPhase: 'idle' })).toBe(false);
@@ -276,7 +295,6 @@ describe('cuaSurfaceSnapshot', () => {
       computeExecutionBlockState({
         isAgentBusy: false,
         hasPendingApproval: true,
-        approvalInFlight: false,
         hasBlockingOverlay: false,
         hasSafeSurface: true,
         cuaPhase: 'ready'
@@ -287,10 +305,9 @@ describe('cuaSurfaceSnapshot', () => {
       computeExecutionBlockState({
         isAgentBusy: true,
         hasPendingApproval: true,
-        approvalInFlight: true,
         hasBlockingOverlay: false,
         hasSafeSurface: true,
-        cuaPhase: 'ready'
+        cuaPhase: 'preparing'
       })
     ).toEqual({ executionBlocked: false, blockReason: null });
 
@@ -298,7 +315,6 @@ describe('cuaSurfaceSnapshot', () => {
       computeExecutionBlockState({
         isAgentBusy: false,
         hasPendingApproval: false,
-        approvalInFlight: false,
         hasBlockingOverlay: true,
         hasSafeSurface: false,
         cuaPhase: 'acting'
