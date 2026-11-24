@@ -258,4 +258,18 @@ describe('self-window CUA safety', () => {
     f.driver.reportSurface({ ...f.surface, executionBlocked: true, blockReason: 'blocking-overlay', safeSurface: { ...f.surface.safeSurface!, interactive: false } });
     await expect(f.observe()).rejects.toThrow('UNSAFE_SURFACE');
   });
+  it('reports a later close distinctly and cannot clear a failed release by closing or restarting observation', async () => {
+    const f = fixture(), request = await f.observe();
+    const execution = f.driver.execute({ ...request, action: { kind: 'drag', from: { x: 20, y: 20 }, to: { x: 200, y: 20 }, durationMs: 100 } }, 'p');
+    const rejected = expect(execution).rejects.toThrow('CANCELLED');
+    await f.acting;
+    f.window.isDestroyed.mockReturnValue(true);
+    f.window.emit('closed');
+    const state = await f.driver.cancel('closed');
+    expect(state).toMatchObject({ targetGone: true, phase: 'cleanup-failed', cleanupComplete: false });
+    expect(state.releaseFailures).toContain('target-gone-release-unconfirmed');
+    await rejected;
+    f.window.isDestroyed.mockReturnValue(false);
+    await expect(f.observe()).rejects.toThrow('BUSY');
+  });
 });
