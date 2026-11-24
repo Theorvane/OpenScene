@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import type { BrowserWindow, KeyboardInputEvent, MouseInputEvent } from 'electron';
+import type { CuaSaveScope } from '../shared/cuaSave';
 import { CUA_KEYS, type CuaActionRequest, type CuaCancelAck, type CuaFrame, type CuaPoint, type CuaPrepareAck, type CuaRect, type CuaState, type CuaSurfaceSnapshot } from '../shared/cua';
 
 export interface CuaDriverDependencies {
@@ -72,6 +73,17 @@ export class CuaDriver {
     });
   }
   getState(): CuaState { return structuredClone(this.state); }
+  /** Read-only main seam used to bind a separate approved Save capability. */
+  assertObservationScope(scope: CuaSaveScope): void {
+    this.live();
+    const frame = this.frame, surface = this.surface;
+    if (this.observing || this.state.phase !== 'ready' || !frame || !surface?.safeSurface || this.cleanupFailureLatched
+      || scope.windowId !== this.window.id || scope.sessionId !== frame.sessionId || scope.runId !== frame.runId || scope.frameId !== frame.frameId
+      || scope.layoutRevision !== frame.layoutRevision || surface.layoutRevision !== frame.layoutRevision
+      || scope.contentRevision !== frame.contentRevision || surface.contentRevision !== frame.contentRevision
+      || performance.now() - this.frameTime > 120000 || this.window.webContents.getZoomFactor() !== frame.zoomFactor
+      || (this.dependencies.getDeviceScaleFactor?.() ?? 1) !== frame.deviceScaleFactor) throw new Error('CUA_SAVE_SCOPE_CHANGED');
+  }
   acknowledgePrepare(ack: CuaPrepareAck): boolean {
     const pending = this.prepareAck;
     if (!ack || !pending || this.state.phase !== 'preparing' || ack.runId !== pending.request.runId || ack.prepareToken !== pending.token) return false;
