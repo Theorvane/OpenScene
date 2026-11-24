@@ -37,6 +37,7 @@ import { useEditorShortcutPreference } from './useEditorShortcutPreference';
 import type { TimelineEditorController } from './useTimelineEditor';
 import { useTimelineShortcuts } from './useTimelineShortcuts';
 import { useAgentChat } from '../AgentChatContext';
+import { useCuaActing } from '../cua/useCuaOverlay';
 import { useTheme } from '../ThemeProvider';
 import { THEME_PRESETS, type ThemePresetId } from '../theme';
 import type { TabDefinition } from '../ui';
@@ -143,6 +144,7 @@ export function TimelineEditor({ editor, onProjectSettings, onOpenSettings }: Ti
     };
   }, []);
   const { isBusy: isAgentBusy } = useAgentChat();
+  const isCuaActing = useCuaActing();
   const { mode: themeMode, preset, setPreset, toggleTheme } = useTheme();
   const [leftDockTabId, setLeftDockTabId] = useState<EditorLeftDockTabId>('project');
   const [inspectorTabId, setInspectorTabId] = useState<InspectorTabId>('selection');
@@ -263,6 +265,7 @@ export function TimelineEditor({ editor, onProjectSettings, onOpenSettings }: Ti
   useTimelineShortcuts({
     canSplit: editor.selectedClip !== null,
     isLocked: isAgentBusy,
+    cuaActing: isCuaActing,
     clearSelection: editor.clearSelection,
     deleteSelectedClip: editor.deleteSelectedClip,
     duplicateSelectedClip: editor.duplicateSelectedClip,
@@ -377,11 +380,11 @@ export function TimelineEditor({ editor, onProjectSettings, onOpenSettings }: Ti
             </button>
           </div>
         )}
-        <div className="editor-view" hidden={!canvasMode}>
+        <div className="editor-view" hidden={!canvasMode} data-cua-safe-surface={canvasMode && editor.project !== null ? 'canvas' : undefined}>
           {editor.project !== null && <VideoConnectionCanvas key={editor.project.id} editor={editor}
-            locked={isAgentBusy || editor.isBusy} onPreview={() => selectEditorView('timeline')} />}
+            locked={(isAgentBusy && !isCuaActing) || editor.isBusy} onPreview={() => selectEditorView('timeline')} />}
         </div>
-        <div className="editor-view" hidden={!shortsMode}>
+        <div className="editor-view" hidden={!shortsMode} data-cua-safe-surface={shortsMode && editor.project !== null ? 'shorts-review' : undefined}>
           {shortsMode && editor.project !== null && (
             <ShortsReviewWorkspace
               editor={editor}

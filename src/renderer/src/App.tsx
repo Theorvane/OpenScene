@@ -278,6 +278,8 @@ export function App(): ReactElement {
           <section
             aria-labelledby="settings-title"
             className="app-page app-page--settings"
+            data-cua-protected="settings"
+            data-cua-protected-id="settings-page"
             hidden={activePageId !== 'settings'}
             id="app-page-panel-settings"
             ref={setPagePanelRef('settings')}

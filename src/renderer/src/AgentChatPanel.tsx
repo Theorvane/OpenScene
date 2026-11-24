@@ -56,7 +56,14 @@ export function AgentChatPanel({ width, onCollapse }: AgentChatPanelProps): Reac
   const panelStyle: AgentChatPanelStyle = { '--agent-chat-panel-width': `${width}px` };
 
   return (
-    <aside id="app-shell-agent-chat" className="agent-chat-panel-shell" aria-label="OpenScene agent chat" style={panelStyle}>
+    <aside
+      id="app-shell-agent-chat"
+      className="agent-chat-panel-shell"
+      aria-label="OpenScene agent chat"
+      data-cua-protected="agent-panel"
+      data-cua-protected-id="agent-chat-panel"
+      style={panelStyle}
+    >
       <div className="agent-chat-panel">
         <div className="agent-chat-panel__header">
           <div className="agent-chat-panel__title">
@@ -140,7 +147,12 @@ export function AgentChatPanel({ width, onCollapse }: AgentChatPanelProps): Reac
           ))}
 
           {pendingApproval && (
-            <div className="status-card agent-chat-approval" role="status">
+            <div
+              className="status-card agent-chat-approval"
+              data-cua-protected="approval-ui"
+              data-cua-protected-id="agent-chat-approval"
+              role="status"
+            >
               <p className="agent-chat-approval__tool">
                 Run <strong>{pendingApproval.toolName}</strong>?
               </p>
