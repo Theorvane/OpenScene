@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
-import type { AgentChatContextUsage, AgentChatDisplayMessage, AgentChatHistoryEntry, AgentChatStatus, AgentCuaErrorCode, AgentToolApprovalDecision, AgentToolCallProposal } from '../../shared/agentChat';
-import { prepareProjectForAgentApproval } from '../../shared/agentChat';
+import type { AgentChatContextUsage, AgentChatDisplayMessage, AgentChatHistoryEntry, AgentChatStatus, AgentCuaErrorCode, AgentToolApprovalDecision, AgentToolCallProposal, AgentChatInteractionMode } from '../../shared/agentChat';
+import { prepareAgentInteractionModeChange, prepareProjectForAgentApproval, prepareProjectForAgentSend } from '../../shared/agentChat';
 import type { EditAgentProjectContext } from '../../shared/editAgentContext';
 import type { AiDomainModelConfig } from '../../shared/aiDomainModels';
 import { isProviderConnected } from '../../shared/llmProviders';
@@ -26,6 +26,8 @@ function createConversationId(): string {
 }
 
 interface AgentChatController {
+  readonly interactionMode: AgentChatInteractionMode;
+  readonly changeInteractionMode: (mode: AgentChatInteractionMode) => Promise<void>;
   readonly selectedModel: AiDomainModelConfig;
   readonly isLocalModel: boolean;
   /** True when the selected model's provider is usable: local, or cloud with a stored key. */
@@ -66,6 +68,7 @@ export type AgentChatRestoreRequest = {
 };
 
 type AgentChatProviderProps = {
+  readonly hasUnsavedTimeline?: boolean;
   readonly activeProject: EditAgentProjectContext | null;
   readonly prepareProject?: () => Promise<boolean>;
   readonly restoreRequest?: AgentChatRestoreRequest | null;
@@ -73,7 +76,8 @@ type AgentChatProviderProps = {
   readonly children: ReactNode;
 };
 
-export function AgentChatProvider({ activeProject, prepareProject, restoreRequest = null, onRestoreHandled, children }: AgentChatProviderProps): ReactElement {
+export function AgentChatProvider({ activeProject, prepareProject, hasUnsavedTimeline = true, restoreRequest = null, onRestoreHandled, children }: AgentChatProviderProps): ReactElement {
+  const [interactionMode, setInteractionMode] = useState<AgentChatInteractionMode>('project-tools');
   const { providerConfig, credentialStatus } = useLlmModel();
   const chatGptAuth = useChatGptAuth();
   const { selectedModel: getSelectedDomainModel } = useAiDomainModel();
@@ -135,6 +139,7 @@ export function AgentChatProvider({ activeProject, prepareProject, restoreReques
     conversationIdRef.current = restoreRequest.conversationId;
     setActiveConversationId(restoreRequest.conversationId);
     restoredSeedRef.current = restoreRequest.messages;
+    setInteractionMode('project-tools'); // Restoring history never opts into window control.
     setMessages(restoreRequest.messages);
     setPendingApproval(null);
     setStatus('idle');
@@ -164,7 +169,7 @@ export function AgentChatProvider({ activeProject, prepareProject, restoreReques
   const sessions = buildAgentChatSessionRows({ entries: historyEntries, projectId, activeConversationId });
 
   const startNewSession = (): void => {
-    if (isBusy) return;
+    if (isBusy || pendingApproval) return;
     // The previous session stays in the project's saved history; only the
     // thread this panel points at changes.
     conversationIdRef.current = createConversationId();
@@ -178,10 +183,11 @@ export function AgentChatProvider({ activeProject, prepareProject, restoreReques
     setInput('');
     setContextUsage(undefined);
     setHistoryRevision((revision) => revision + 1);
+    setInteractionMode('project-tools');
   };
 
   const switchSession = async (conversationId: string): Promise<void> => {
-    if (isBusy || projectId === null || conversationId === conversationIdRef.current) return;
+    if (isBusy || pendingApproval || projectId === null || conversationId === conversationIdRef.current) return;
     const response = await window.videoTool.agentChatHistoryGet({ projectId, conversationId });
     if (!response.ok || response.value === null) {
       setStatus('error');
@@ -194,6 +200,7 @@ export function AgentChatProvider({ activeProject, prepareProject, restoreReques
     // Seed the main-process thread from the stored transcript, the same path
     // the home screen uses when reopening a conversation.
     restoredSeedRef.current = response.value.messages;
+    setInteractionMode('project-tools');
     setMessages(response.value.messages);
     setPendingApproval(null);
     setStatus('idle');
@@ -208,7 +215,7 @@ export function AgentChatProvider({ activeProject, prepareProject, restoreReques
       : Promise.resolve();
 
   const sendMessage = async (text: string): Promise<void> => {
-    if (text.trim().length === 0 || isBusy || !modelReady) return;
+    if (text.trim().length === 0 || isBusy || pendingApproval || !modelReady) return;
 
     // Echo the turn immediately. The main-process round trip takes as long as
     // the model does, so waiting for it leaves the panel looking like the
@@ -226,7 +233,7 @@ export function AgentChatProvider({ activeProject, prepareProject, restoreReques
     setInput('');
 
     try {
-      if (activeProject !== null && prepareProject && !await prepareProject()) {
+      if (activeProject !== null && !await prepareProjectForAgentSend(interactionMode, prepareProject)) {
         throw new Error('Save the open timeline before asking the agent to edit it.');
       }
       // Allow CUA stop button & surface snapshot to flush before observe() runs.
@@ -235,6 +242,8 @@ export function AgentChatProvider({ activeProject, prepareProject, restoreReques
         conversationId: conversationIdRef.current,
         text,
         modelId: selectedModel.id,
+        interactionMode,
+        hasUnsavedTimeline,
         ollamaBaseUrl: providerConfig.ollamaBaseUrl,
         activeProject: activeProject ?? undefined,
         openAiAuthMode,
@@ -279,7 +288,7 @@ export function AgentChatProvider({ activeProject, prepareProject, restoreReques
     setError(undefined);
     setErrorCode(undefined);
     try {
-      if (activeProject !== null && !await prepareProjectForAgentApproval(pendingApproval.toolName, decision, prepareProject)) {
+      if (activeProject !== null && !await prepareProjectForAgentApproval(pendingApproval.toolName, decision, prepareProject, interactionMode)) {
         throw new Error('Save the open timeline before approving the agent edit.');
       }
       if (executingApproved) {
@@ -334,7 +343,7 @@ export function AgentChatProvider({ activeProject, prepareProject, restoreReques
   };
 
   const compactConversation = async (): Promise<void> => {
-    if (isBusy) return;
+    if (isBusy || pendingApproval) return;
     setIsBusy(true);
     setStatus('thinking');
     try {
@@ -389,6 +398,33 @@ export function AgentChatProvider({ activeProject, prepareProject, restoreReques
   };
 
   const controller: AgentChatController = {
+    interactionMode,
+    changeInteractionMode: async (mode) => {
+      if (mode === interactionMode || isBusy || pendingApproval) return;
+      setIsBusy(true);
+      try {
+        const ready = await prepareAgentInteractionModeChange(interactionMode, mode, isBusy, pendingApproval !== null, async () => {
+          const result = await window.videoTool.agentChatCancel({ conversationId: conversationIdRef.current });
+          if (!result.ok || result.value.errorCode) {
+            setError(result.ok ? result.value.error ?? 'The current run could not settle; mode was not changed.' : result.error.message);
+            if (result.ok) setErrorCode(result.value.errorCode);
+            return false;
+          }
+          return true;
+        });
+        if (!ready) return;
+        // Start a new thread only after actual release/write settlement. No
+        // project preparation or Save is performed by a mode change.
+        conversationIdRef.current = createConversationId();
+        setActiveConversationId(conversationIdRef.current);
+        restoredSeedRef.current = null;
+        setMessages([]); setPendingApproval(null); setInput(''); setStatus('idle');
+        setError(undefined); setErrorCode(undefined); setContextUsage(undefined);
+        setInteractionMode(mode);
+        setHistoryRevision((revision) => revision + 1);
+      } catch (cause) { setError(cause instanceof Error ? cause.message : 'Mode change failed.'); }
+      finally { setIsBusy(false); }
+    },
     selectedModel,
     isLocalModel,
     modelReady,

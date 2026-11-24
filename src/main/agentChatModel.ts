@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { ChatOllama } from '@langchain/ollama';
+import { toolsForAgentInteractionMode } from '../shared/agentChat';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { DynamicStructuredTool } from '@langchain/core/tools';
 import { getLlmModel, parseLlmModelKey } from '../shared/llmModels';
@@ -184,7 +185,8 @@ export function createAgentChatModel(
   credentialStore: CredentialStore | null = null,
   chatGptOAuthService: ChatGptOAuthCredentialsService | null = null
 ): AgentChatModelFactory {
-  return ({ modelId, ollamaBaseUrl, openAiAuthMode, reasoningEffort }) => {
+  return ({ modelId, ollamaBaseUrl, openAiAuthMode, reasoningEffort, interactionMode = 'project-tools' }) => {
+    const permittedTools = toolsForAgentInteractionMode(tools, interactionMode);
     const spec = resolveAgentChatModelSpec(modelId, openAiAuthMode);
 
     if (spec.kind === 'ollama') {
@@ -200,7 +202,7 @@ export function createAgentChatModel(
           const signals = [invocationSignal, init?.signal].filter((value): value is AbortSignal => value !== undefined && value !== null);
           return fetch(url, { ...init, ...(signals.length === 0 ? {} : { signal: AbortSignal.any(signals) }) });
         } });
-        const model = tools.length === 0 ? client : client.bindTools([...tools]);
+        const model = permittedTools.length === 0 ? client : client.bindTools([...permittedTools]);
         return model.invoke([...messages], options);
       } };
     }
@@ -218,7 +220,7 @@ export function createAgentChatModel(
           const cloudModel = new ChatOpenAI(
             resolveChatGptCodexClientConfig(spec, credentials, randomUUID(), reasoningEffort)
           );
-          const model = tools.length === 0 ? cloudModel : cloudModel.bindTools([...tools]);
+          const model = permittedTools.length === 0 ? cloudModel : cloudModel.bindTools([...permittedTools]);
           return model.invoke([...messages], options);
         }
       };
@@ -233,10 +235,10 @@ export function createAgentChatModel(
           throw new AgentChatModelConfigurationError(`API key for ${spec.providerLabel} is missing. Connect the provider in Settings first.`);
         }
         const cloudModel = await createCloudChatModel(spec, apiKey, reasoningEffort);
-        if (tools.length > 0 && cloudModel.bindTools === undefined) {
+        if (permittedTools.length > 0 && cloudModel.bindTools === undefined) {
           throw new Error(`${spec.providerLabel} client does not support tool calling in this build.`);
         }
-        const model = tools.length === 0 ? cloudModel : cloudModel.bindTools!([...tools]);
+        const model = permittedTools.length === 0 ? cloudModel : cloudModel.bindTools!([...permittedTools]);
         return model.invoke([...messages], options);
       }
     };

@@ -153,7 +153,7 @@ describe('approved Save dispatch orchestration', () => {
     const session = new AgentChatSessionManager(buildAgentChatGraph({ tools: createCuaSaveAgentChatTools(),
       mutatingToolNames: new Set(), cuaSave: f.orchestrator,
       createModel: () => ({ invoke: async () => step++ === 0 ? saveCall('first') : step === 2 ? saveCall('second') : new AIMessage('Done') }) }));
-    const pending = await session.sendMessage({ conversationId: 'a', text: 'save', modelId: 'qwen2.5-coder' });
+    const pending = await session.sendMessage({ conversationId: 'a', text: 'save', modelId: 'qwen2.5-coder', interactionMode: 'self-window', hasUnsavedTimeline: true });
     expect(pending.pendingApproval?.cuaApproval?.actionKind).toBe('save');
     expect(f.publications()).toBe(0);
     const second = await session.respondToApproval({ conversationId: 'a', toolCallId: 'first', decision: 'always' });
@@ -171,7 +171,7 @@ describe('approved Save dispatch orchestration', () => {
       mutatingToolNames: new Set(), createModel: () => ({ invoke: async () => step++ === 0
         ? new AIMessage({ content: '', tool_calls: [{ id: 'save', name: 'saveCuaEditorProject', args: { ...scope } }] })
         : new AIMessage('Done') }) }), { cancelCua: (id) => f.orchestrator.cancelConversation(id), getSaveResult: (id) => f.orchestrator.getLastResult(id) });
-    await session.sendMessage({ conversationId: 'a', text: 'save', modelId: 'qwen2.5-coder' });
+    await session.sendMessage({ conversationId: 'a', text: 'save', modelId: 'qwen2.5-coder', interactionMode: 'self-window', hasUnsavedTimeline: true });
     const active = session.respondToApproval({ conversationId: 'a', toolCallId: 'save', decision: 'approve' });
     for (let i = 0; i < 100 && !f.publications(); i++) await new Promise((resolve) => setTimeout(resolve, 1));
     expect(f.publications()).toBe(1);
@@ -194,7 +194,7 @@ describe('approved Save dispatch orchestration', () => {
       mutatingToolNames: new Set(), createModel: () => ({ invoke: async () => step++ === 0
         ? new AIMessage({ content: '', tool_calls: [{ id: 'save', name: 'saveCuaEditorProject', args: { ...scope } }] })
         : new AIMessage('Done') }) }), { getSaveResult: (id) => f.orchestrator.getLastResult(id) });
-    await session.sendMessage({ conversationId: 'a', text: 'save', modelId: 'qwen2.5-coder' });
+    await session.sendMessage({ conversationId: 'a', text: 'save', modelId: 'qwen2.5-coder', interactionMode: 'self-window', hasUnsavedTimeline: true });
     const result = await session.respondToApproval({ conversationId: 'a', toolCallId: 'save', decision: 'approve' });
     expect(result.errorCode).toBe('CUA_SAVE_OUTCOME_UNKNOWN');
     expect(result.status).toBe('error');
