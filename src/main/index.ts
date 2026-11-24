@@ -46,6 +46,10 @@ import { registerChatGptOAuthIpcHandlers } from './registerChatGptOAuthIpcHandle
 import { registerLlmPromptIpcHandler } from './registerLlmPromptIpcHandler';
 import { registerTranscriptionIpcHandlers } from './transcriptionIpcHandlers';
 import { TranscriptionService } from './transcriptionService';
+import { ShortsService } from './shortsService';
+import { createShortsCandidateProvider } from './shortsCandidateProvider';
+import { discoverFfmpeg } from './ffmpegDiscovery';
+import { measureExportedFile } from './exportMeasurement';
 
 try {
   // Node loads the developer's local .env without bundling its secrets into
@@ -111,6 +115,25 @@ const exportIpcService = new ExportIpcService({
   exportsRoot: join(app.getPath('userData'), 'exports'),
   openPath: (path) => shell.openPath(path),
   revealPath: (path) => shell.showItemInFolder(path)
+});
+
+const shortsService = new ShortsService({
+  projects: projectStore, assets: assetLibraryStore, exports: exportIpcService, transcription: transcriptionService,
+  jobsDirectory: join(app.getPath('userData'), 'shorts-jobs'),
+  providerFor: input => createShortsCandidateProvider(createAgentChatModel([], credentialStore, chatGptOAuthService)({
+    modelId: input.modelId, openAiAuthMode: input.openAiAuthMode, ollamaBaseUrl: input.ollamaBaseUrl, reasoningEffort: input.reasoningEffort
+  })),
+  measureSource: async (projectId, assetId) => {
+    const ffmpeg = await discoverFfmpeg();
+    if (ffmpeg.kind === 'unavailable') throw new Error('Source inspection requires configured FFmpeg and FFprobe.');
+    const source = await assetLibraryStore.openPlaybackSource(projectId, assetId);
+    if (!source) throw new Error('The local source is unavailable.');
+    try {
+      const measured = await measureExportedFile({ ffmpegPath: ffmpeg.executablePath, filePath: source.filePath });
+      if (!measured) throw new Error('Source inspection requires FFprobe beside FFmpeg.');
+      return { durationMs: measured.durationMs, width: measured.widthPx, height: measured.heightPx };
+    } finally { await source.file.close(); }
+  }
 });
 
 function resolveRecordingsDirectory(): string {
@@ -307,6 +330,12 @@ async function installIpcHandlers(): Promise<void> {
     listWindows: () => BrowserWindow.getAllWindows()
   });
   registerExportIpcHandlers(ipcMain, exportIpcService);
+  ipcMain.handle(IPC_CHANNELS.shortsStart, (_event, payload: unknown) => shortsService.start(payload));
+  ipcMain.handle(IPC_CHANNELS.shortsGet, (_event, payload: unknown) => shortsService.get(payload));
+  ipcMain.handle(IPC_CHANNELS.shortsList, (_event, payload: unknown) => shortsService.list(payload));
+  ipcMain.handle(IPC_CHANNELS.shortsCancel, (_event, payload: unknown) => shortsService.cancel(payload));
+  ipcMain.handle(IPC_CHANNELS.shortsMaterialize, (_event, payload: unknown) => shortsService.materialize(payload));
+  ipcMain.handle(IPC_CHANNELS.shortsExport, (_event, payload: unknown) => shortsService.export(payload));
   registerChatGptOAuthIpcHandlers({
     service: chatGptOAuthService,
     openDeviceAuthorizationPage: (url) => shell.openExternal(url),
@@ -422,6 +451,13 @@ app.on('window-all-closed', () => {
   }
 });
 
-app.on('before-quit', () => {
+let shortsShutdownComplete = false;
+app.on('before-quit', event => {
+  if (shortsShutdownComplete) return;
+  event.preventDefault();
   exportIpcService.cancelAll();
+  void shortsService.shutdown().finally(() => {
+    shortsShutdownComplete = true;
+    app.quit();
+  });
 });

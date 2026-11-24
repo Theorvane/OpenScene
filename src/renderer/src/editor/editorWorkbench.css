@@ -50,7 +50,8 @@
 .program-monitor .editor-preview-frame { aspect-ratio: auto; min-height: 0; height: 100%; grid-template-rows: minmax(0, 1fr); }
 .program-monitor .editor-preview-frame > video, .program-monitor .editor-preview-frame > img { min-height: 0; min-width: 0; }
 .program-monitor .monitor-controls { min-height: 30px; }
-.oc-editor-host.oc-editor-host--canvas.oc-editor-host--left-hidden { grid-template-rows: 46px minmax(0, 1fr); }
+.oc-editor-host.oc-editor-host--canvas.oc-editor-host--left-hidden,
+.oc-editor-host.oc-editor-host--shorts.oc-editor-host--left-hidden { grid-template-rows: 46px minmax(0, 1fr); }
 @media (max-width: 900px) {
   .video-canvas.canvas-workbench { grid-template-columns: 170px minmax(0, 1fr); }
   .canvas-library { padding: 10px 8px; }

@@ -48,6 +48,13 @@ describe('measuring a finished export with the discovered toolchain', () => {
     );
     expect(measurement).toEqual({ widthPx: 1080, heightPx: 1920, durationMs: 3_000, hasSoundTrack: false });
   });
+  it('uses displayed axes for phone rotation before planning portrait contain', () => {
+    const source = { codec_type: 'video', width: 1920, height: 1080, avg_frame_rate: '30/1' };
+    for (const metadata of [{ side_data_list: [{ rotation: -90 }] }, { tags: { rotate: '90' } }]) {
+      expect(parseFfprobeOutput(JSON.stringify({ streams: [{ ...source, ...metadata }], format: { duration: '12' } }))).toMatchObject({ widthPx: 1080, heightPx: 1920 });
+    }
+    expect(parseFfprobeOutput(JSON.stringify({ streams: [{ ...source, side_data_list: [{ rotation: 45 }] }], format: { duration: '12' } }))).toBeNull();
+  });
 
   it('reports a file with no video stream as having no picture', () => {
     const measurement = parseFfprobeOutput(JSON.stringify({ streams: [{ codec_type: 'audio' }], format: { duration: '5' } }));

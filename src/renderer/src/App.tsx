@@ -273,7 +273,7 @@ export function App(): ReactElement {
           </section>
           <section className="app-stack local-edit-bay" hidden={!workspaceIsVisible}
             id={EDIT_WORKSPACE.panelId} ref={setPagePanelRef('edit')} role="region" aria-label="Editing workspace" tabIndex={-1}>
-            <TimelineEditor editor={editor} onProjectSettings={() => setProjectSettingsOpen(true)} />
+            <TimelineEditor editor={editor} onProjectSettings={() => setProjectSettingsOpen(true)} onOpenSettings={() => setActivePage('settings')} />
           </section>
           <section
             aria-labelledby="settings-title"

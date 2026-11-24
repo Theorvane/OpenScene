@@ -31,6 +31,8 @@ extraResources:
     to: THIRD_PARTY_NOTICES.md
   - from: external/opencut/LICENSE
     to: licenses/OpenCut-LICENSE.txt
+  - from: external/autoclip/LICENSE
+    to: licenses/AutoClip-LICENSE.txt
 mac:
   category: public.app-category.video
   icon: build/icon.png

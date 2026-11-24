@@ -106,6 +106,9 @@ export class TranscriptionService {
     return this.jobs.get(jobId) ?? null;
   }
 
+  /** Includes process exit and input handle cleanup, unlike the cancelled status. */
+  isSettled(jobId: string): boolean { return !this.controllers.has(jobId); }
+
   cancel(jobId: string): ApiResponse<{ readonly cancelled: boolean }> {
     const job = this.jobs.get(jobId);
     if (job === undefined) return fail('JOB_NOT_FOUND', 'Transcription job was not found.');

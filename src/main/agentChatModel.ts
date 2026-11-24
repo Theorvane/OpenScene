@@ -189,39 +189,55 @@ export function createAgentChatModel(
 
     if (spec.kind === 'ollama') {
       const baseUrl = (ollamaBaseUrl || DEFAULT_OLLAMA_BASE_URL).replace(/\/$/, '');
-      const model = new ChatOllama({ model: modelId, baseUrl }).bindTools([...tools]);
-      return { invoke: (messages) => model.invoke([...messages]) };
+      return { invoke: (messages, options) => {
+        options?.signal?.throwIfAborted();
+        // Ollama's SDK does not register its streaming request until response
+        // headers arrive. client.abort() therefore cannot cancel a server that
+        // never sends headers. Bind the invocation signal to fetch itself,
+        // including body consumption, and isolate clients between invocations.
+        const invocationSignal = options?.signal;
+        const client = new ChatOllama({ model: modelId, baseUrl, fetch: (url, init) => {
+          const signals = [invocationSignal, init?.signal].filter((value): value is AbortSignal => value !== undefined && value !== null);
+          return fetch(url, { ...init, ...(signals.length === 0 ? {} : { signal: AbortSignal.any(signals) }) });
+        } });
+        const model = tools.length === 0 ? client : client.bindTools([...tools]);
+        return model.invoke([...messages], options);
+      } };
     }
 
     if (spec.kind === 'chatgpt-codex') {
       return {
-        invoke: async (messages) => {
+        invoke: async (messages, options) => {
+          options?.signal?.throwIfAborted();
           if (chatGptOAuthService === null) {
             throw new AgentChatModelConfigurationError('ChatGPT authentication is unavailable for Edit Agent.');
           }
           const credentials = await chatGptOAuthService.acquireCredentials();
+          options?.signal?.throwIfAborted();
           const { ChatOpenAI } = await import('@langchain/openai');
           const cloudModel = new ChatOpenAI(
             resolveChatGptCodexClientConfig(spec, credentials, randomUUID(), reasoningEffort)
           );
-          const model = cloudModel.bindTools([...tools]);
-          return model.invoke([...messages]);
+          const model = tools.length === 0 ? cloudModel : cloudModel.bindTools([...tools]);
+          return model.invoke([...messages], options);
         }
       };
     }
 
     return {
-      invoke: async (messages) => {
+      invoke: async (messages, options) => {
+        options?.signal?.throwIfAborted();
         const apiKey = (await credentialStore?.getCredentialValue(spec.credentialKey))?.trim();
+        options?.signal?.throwIfAborted();
         if (apiKey === undefined || apiKey.length === 0) {
-          throw new Error(`API key for ${spec.providerLabel} is missing. Connect the provider in Settings first.`);
+          throw new AgentChatModelConfigurationError(`API key for ${spec.providerLabel} is missing. Connect the provider in Settings first.`);
         }
         const cloudModel = await createCloudChatModel(spec, apiKey, reasoningEffort);
-        if (cloudModel.bindTools === undefined) {
+        if (tools.length > 0 && cloudModel.bindTools === undefined) {
           throw new Error(`${spec.providerLabel} client does not support tool calling in this build.`);
         }
-        const model = cloudModel.bindTools([...tools]);
-        return model.invoke([...messages]);
+        const model = tools.length === 0 ? cloudModel : cloudModel.bindTools!([...tools]);
+        return model.invoke([...messages], options);
       }
     };
   };
