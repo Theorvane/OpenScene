@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createJevObservationHook, DEFAULT_JEV_CONFIG, JEV_ENDPOINT, JEV_MODEL, type JevObservationContext } from '../src/main/jevObservationJudgment';
 import type { CuaFrame } from '../src/shared/cua';
+import { AIMessage, isToolMessage } from '@langchain/core/messages';
+import { tool } from '@langchain/core/tools';
+import { z } from 'zod';
+import { buildAgentChatGraph } from '../src/main/agentChatGraph';
+import { AgentChatSessionManager } from '../src/main/agentChatSession';
 
 const frame: CuaFrame = {
   sessionId: 'session', runId: 'run', windowId: 1, frameId: 'frame', layoutRevision: 1,
@@ -98,5 +103,32 @@ describe('Jev explicit observation advisory', () => {
   it('keeps key retrieval, network exceptions and missing keys opaque', async () => {
     const f = fixture(); f.getApiKey.mockRejectedValue(new Error('fake-private-key'));
     expect(await f.call()).toBeNull(); expect(f.fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe('Jev graph observation contact', () => {
+  it.each(['advisory', 'failure', 'absent'] as const)('preserves explicit observation and existing model with %s', async mode => {
+    const f = fixture();
+    const observe = vi.fn(async () => ({ success: true, summary: 'Explicit editor observation.', frame }));
+    let step = 0;
+    let observedContent = '';
+    const bundle = buildAgentChatGraph({
+      tools: [tool(observe, { name: 'observeEditorWindow', description: 'Observe editor', schema: z.object({}) })],
+      mutatingToolNames: new Set(),
+      ...(mode === 'absent' ? {} : { jevObservationHook: mode === 'failure' ? async () => { throw new Error('private'); } : f.hook }),
+      createModel: () => ({ invoke: async messages => {
+        if (step++ === 0) return new AIMessage({ content: '', tool_calls: [{ id: 'observation', name: 'observeEditorWindow', args: {} }] });
+        const message = messages.find(m => isToolMessage(m) && m.name === 'observeEditorWindow');
+        observedContent = String(message?.content);
+        return new AIMessage('Existing model continues.');
+      } })
+    });
+    const result = await new AgentChatSessionManager(bundle).sendMessage({ conversationId: 'c', text: 'Inspect', modelId: 'qwen2.5-coder', interactionMode: 'self-window' });
+    expect(result.status).toBe('idle');
+    expect(observe).toHaveBeenCalledTimes(1);
+    expect(observedContent).toContain('Explicit editor observation.');
+    expect(observedContent.includes('jev-advisory')).toBe(mode === 'advisory');
+    expect(f.fetch).toHaveBeenCalledTimes(mode === 'advisory' ? 1 : 0);
+    expect(observedContent).not.toContain('fake-key');
   });
 });
