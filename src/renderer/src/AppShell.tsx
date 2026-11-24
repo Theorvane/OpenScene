@@ -40,6 +40,7 @@ type AppShellProps = {
   readonly hasActiveProject: boolean;
   readonly onPageChange: (pageId: AppPageId) => void;
   readonly activeProjectContext: EditAgentProjectContext | null;
+  readonly contentRevision?: number;
   readonly prepareAgentProject?: () => Promise<boolean>;
   readonly studioLayout?: boolean;
   readonly projectTabs?: readonly ProjectTab[];
@@ -77,12 +78,12 @@ function FolderIcon(): ReactElement {
   );
 }
 
-function AppShellContent({ activePage, children, hasActiveProject, onPageChange, activeProjectContext, studioLayout = false, projectTabs = [], activeProjectId = null, onSelectProjectTab, onCloseProjectTab, chatRestoreRequest = null, canNavigateBack = false, onNavigateBack }: AppShellProps): ReactElement {
-  const { isBusy, pendingApproval, approvalInFlight, cancelConversation } = useAgentChat();
+function AppShellContent({ activePage, children, hasActiveProject, onPageChange, activeProjectContext, contentRevision = 0, studioLayout = false, projectTabs = [], activeProjectId = null, onSelectProjectTab, onCloseProjectTab, chatRestoreRequest = null, canNavigateBack = false, onNavigateBack }: AppShellProps): ReactElement {
+  const { isBusy, pendingApproval, cancelConversation } = useAgentChat();
   const cua = useCuaOverlayState({
+    contentRevision,
     isAgentBusy: isBusy,
     hasPendingApproval: pendingApproval !== null,
-    approvalInFlight,
     activePageId: activePage.id
   });
   const workspaceInert = cua.isWorkspaceInert;
@@ -239,7 +240,7 @@ function AppShellContent({ activePage, children, hasActiveProject, onPageChange,
       <div ref={shellBodyRef} className="app-shell__body">
         <div id="app-shell-workspace" className="agent-workspace-lock" aria-busy={isBusy} inert={workspaceInert}>
           <div className="agent-workspace-lock__content">{children}</div>
-          {isBusy && !cua.isActing && !approvalInFlight && (
+          {isBusy && !cua.isActing && !cua.isPreparing && (
             <div aria-live="polite">
               <div className="agent-workspace-lock__message" aria-hidden="true">
                 Edit Agent is updating your workspace...

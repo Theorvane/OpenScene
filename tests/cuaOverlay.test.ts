@@ -109,6 +109,32 @@ describe('CuaOverlay', () => {
     expect(html).toContain('data-cua-protected="stop-button"');
   });
 
+  it('renders preparing phase with stoppable fixed-footprint button and deterministic prepareAck wiring', async () => {
+    const { CuaOverlay } = await loadCuaOverlayModule();
+    expect(isCuaStoppablePhase('preparing')).toBe(true);
+    const html = renderToStaticMarkup(
+      createElement(CuaOverlay, {
+        state: makeState({ phase: 'preparing', prepareToken: 'prep-tok-1', label: 'drag' }),
+        stopPending: false,
+        stopError: null,
+        onStop: () => undefined
+      })
+    );
+    expect(html).toContain('data-cua-phase="preparing"');
+    expect(html).toContain('Preparing CUA…');
+    expect(html).toContain('data-testid="cua-stop-btn"');
+    expect(html).not.toContain('cua-stop-btn--idle');
+
+    const [useCuaOverlaySource, agentChatContextSource] = await Promise.all([
+      readFile(new URL('../src/renderer/src/cua/useCuaOverlay.ts', import.meta.url), 'utf8'),
+      readFile(new URL('../src/renderer/src/AgentChatContext.tsx', import.meta.url), 'utf8')
+    ]);
+    expect(useCuaOverlaySource).toContain('useLayoutEffect(');
+    expect(useCuaOverlaySource).toContain('cuaAckPrepare({ runId, prepareToken })');
+    expect(agentChatContextSource).not.toContain('approvalInFlight');
+    expect(agentChatContextSource).not.toContain('waitNextPaint');
+  });
+
   it('maintains stopping progress until main pushes stopped with cleanupComplete: true', async () => {
     const { CuaOverlay, getCuaCleanupStatusText } = await loadCuaOverlayModule();
     const acting = makeState({ phase: 'acting', cleanupComplete: false });

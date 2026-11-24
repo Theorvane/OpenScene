@@ -1,6 +1,7 @@
 import type { CuaPhase, CuaRect, CuaState, CuaSurfaceSnapshot } from '../../../shared/cua';
 
 export const INITIAL_CUA_STATE: CuaState = {
+  prepareToken: null,
   cancelToken: null,
   targetGone: false,
   sessionId: null,
@@ -17,7 +18,7 @@ export const INITIAL_CUA_STATE: CuaState = {
 };
 
 export function isCuaStoppablePhase(phase: CuaPhase): boolean {
-  return phase === 'ready' || phase === 'acting' || phase === 'stopping';
+  return phase === 'ready' || phase === 'preparing' || phase === 'acting' || phase === 'stopping';
 }
 
 export function isCuaStopSettled(state: CuaState): boolean {
@@ -31,20 +32,17 @@ export function isCuaStopSettled(state: CuaState): boolean {
 export function computeWorkspaceInert(input: {
   readonly isAgentBusy: boolean;
   readonly hasPendingApproval: boolean;
-  readonly approvalInFlight?: boolean;
   readonly cuaPhase: CuaPhase;
 }): boolean {
-  // While CUA is executing an approved action (or immediately after the user
-  // approves a CUA action so main's verifyDom sees a non-inert safe surface
-  // before publishing phase === 'acting'), unlock the workspace.
-  if (input.cuaPhase === 'acting' || input.approvalInFlight === true) return false;
+  // Deterministic prepareAck handshake: unlock workspace only when main explicitly
+  // enters `preparing` (bound to an approved main-only permit) or `acting`.
+  if (input.cuaPhase === 'preparing' || input.cuaPhase === 'acting') return false;
   return input.hasPendingApproval || input.isAgentBusy;
 }
 
 export function computeExecutionBlockState(input: {
   readonly isAgentBusy: boolean;
   readonly hasPendingApproval: boolean;
-  readonly approvalInFlight?: boolean;
   readonly hasBlockingOverlay: boolean;
   readonly hasSafeSurface: boolean;
   readonly cuaPhase: CuaPhase;
@@ -61,7 +59,7 @@ export function computeExecutionBlockState(input: {
   if (input.cuaPhase === 'stopping') {
     return { executionBlocked: true, blockReason: 'stopping' };
   }
-  if (input.cuaPhase === 'acting' || input.approvalInFlight === true) {
+  if (input.cuaPhase === 'preparing' || input.cuaPhase === 'acting') {
     return { executionBlocked: false, blockReason: null };
   }
   if (input.hasPendingApproval) {
@@ -84,6 +82,7 @@ export interface SurfaceScrollState {
 }
 
 export interface MeasuredSurfaceState {
+  readonly contentRevision: number;
   readonly executionBlocked: boolean;
   readonly blockReason: string | null;
   readonly viewport: { readonly width: number; readonly height: number };
@@ -266,6 +265,7 @@ export function buildSnapshotDeliveryKey(snapshot: CuaSurfaceSnapshot): string {
     .join('|');
   return [
     `rev:${snapshot.layoutRevision}`,
+    `crev:${snapshot.contentRevision}`,
     `blk:${snapshot.executionBlocked ? '1' : '0'}:${snapshot.blockReason ?? ''}`,
     `vp:${snapshot.viewport.width}x${snapshot.viewport.height}`,
     `safe:${safePart}`,
@@ -276,6 +276,7 @@ export function buildSnapshotDeliveryKey(snapshot: CuaSurfaceSnapshot): string {
 
 export class CuaSurfaceRevisionTracker {
   private revision = 0;
+  private contentRevisionFloor = 0;
   private lastGeometryKey: string | null = null;
   private lastFocusedInSafeSurface: boolean | null = null;
   private lastDeliveryKey: string | null = null;
@@ -299,7 +300,14 @@ export class CuaSurfaceRevisionTracker {
     this.lastGeometryKey = geometryKey;
     this.lastFocusedInSafeSurface = measured.focusedInSafeSurface;
 
+    const normalizedContentRevision = Math.max(
+      this.contentRevisionFloor,
+      Number.isSafeInteger(measured.contentRevision) && measured.contentRevision >= 0 ? measured.contentRevision : 0
+    );
+    this.contentRevisionFloor = normalizedContentRevision;
+
     const snapshot: CuaSurfaceSnapshot = {
+      contentRevision: normalizedContentRevision,
       executionBlocked: measured.executionBlocked,
       blockReason: measured.blockReason,
       layoutRevision: this.revision,
@@ -322,8 +330,13 @@ export class CuaSurfaceRevisionTracker {
     return { snapshot, changed, revisionChanged };
   }
 
-  failClosed(viewport: { readonly width: number; readonly height: number }, blockReason = 'surface-unavailable'): CuaSurfaceSnapshot {
+  failClosed(
+    viewport: { readonly width: number; readonly height: number },
+    blockReason = 'surface-unavailable',
+    contentRevision = this.contentRevisionFloor
+  ): CuaSurfaceSnapshot {
     return this.next({
+      contentRevision,
       executionBlocked: true,
       blockReason,
       viewport,
@@ -341,8 +354,14 @@ export class CuaSurfaceRevisionTracker {
   }
 }
 
-export function createFailClosedSnapshot(layoutRevision: number, viewport = { width: 1, height: 1 }, blockReason = 'unmounted'): CuaSurfaceSnapshot {
+export function createFailClosedSnapshot(
+  layoutRevision: number,
+  viewport = { width: 1, height: 1 },
+  blockReason = 'unmounted',
+  contentRevision = 0
+): CuaSurfaceSnapshot {
   return {
+    contentRevision: Math.max(0, Math.round(contentRevision)),
     executionBlocked: true,
     blockReason,
     layoutRevision,

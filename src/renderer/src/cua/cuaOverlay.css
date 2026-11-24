@@ -199,6 +199,10 @@
   background: #22c55e;
 }
 
+.cua-hud__phase--preparing .cua-hud__dot {
+  background: #38bdf8;
+}
+
 .cua-hud__phase--acting .cua-hud__dot {
   background: #38bdf8;
   box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.35);
