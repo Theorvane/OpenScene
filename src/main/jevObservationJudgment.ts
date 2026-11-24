@@ -93,7 +93,7 @@ export function createJevObservationHook(options: {
     let abort: (() => void) | undefined;
     let contextSignal: AbortSignal | undefined;
     try {
-      const config = options.getConfig();
+      const config = { ...options.getConfig() };
       if (!config.enabled || config.model !== JEV_MODEL || signal?.aborted
         || !Number.isFinite(config.minSelectedProbability) || config.minSelectedProbability < 0.5 || config.minSelectedProbability > 1
         || !Number.isInteger(config.timeoutMs) || config.timeoutMs < 1 || config.timeoutMs > 5000) return null;
@@ -112,8 +112,11 @@ export function createJevObservationHook(options: {
       let activeLease: JevJudgmentLease | null = null;
       const valid = () => {
         const current = options.getObservationContext(conversationId);
+        const currentConfig = options.getConfig();
         const age = now() - frame.capturedAt;
         return current !== null && !signal?.aborted && !current.signal.aborted
+          && currentConfig.enabled === true && currentConfig.model === config.model
+          && currentConfig.minSelectedProbability === config.minSelectedProbability && currentConfig.timeoutMs === config.timeoutMs
           && current.signal === initial.signal && current.heldInputCount === 0 && current.cleanupComplete === true
           && current.kind === kind && current.instructions === instructions
           && JSON.stringify(current.candidates) === JSON.stringify(candidates)
@@ -189,7 +192,7 @@ export function createJevObservationHook(options: {
           let offset = 0;
           for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
           const parsed = responseSchema.safeParse(JSON.parse(new TextDecoder().decode(bytes)));
-          if (!parsed.success || controller.signal.aborted || !valid() || JSON.stringify(options.getConfig()) !== JSON.stringify(config)) return null;
+          if (!parsed.success || controller.signal.aborted || !valid()) return null;
           const answer = parsed.data.answers.judgment;
           const ids = candidates.map(c => c.id);
           if (!ids.includes(answer.choice) || Object.keys(answer.probabilities).length !== ids.length
