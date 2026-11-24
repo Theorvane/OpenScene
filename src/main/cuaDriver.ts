@@ -5,6 +5,12 @@ import { CUA_KEYS, type CuaActionRequest, type CuaCancelAck, type CuaFrame, type
 
 export type CuaFrameScope = Pick<CuaFrame, 'sessionId' | 'runId' | 'windowId' | 'frameId' | 'layoutRevision' | 'contentRevision'>;
 export type CuaFrameMetadata = Omit<CuaFrame, 'pngDataUrl'>;
+export interface CuaObservationLease {
+  readonly frame: CuaFrameMetadata;
+  readonly signal: AbortSignal;
+  getCurrentFrame(): CuaFrameMetadata | null;
+  release(): void;
+}
 
 const ELECTRON_KEY_CODES: Readonly<Partial<Record<CuaKey, string>>> = {
   ArrowLeft: 'Left', ArrowRight: 'Right', ArrowUp: 'Up', ArrowDown: 'Down'
@@ -34,6 +40,7 @@ function crosses(a: CuaPoint, b: CuaPoint, r: CuaRect): boolean {
 
 /** Holds only the explicitly supplied app window; never discovers OS windows. */
 export class CuaDriver {
+  private observationLease: { controller: AbortController; settled: Promise<void> } | null = null;
   private surface: CuaSurfaceSnapshot | null = null;
   private frame: CuaFrame | null = null;
   private frameTime = 0;
@@ -85,12 +92,40 @@ export class CuaDriver {
     return Number(this.heldMouse !== null) + Number(this.heldKey !== null);
   }
   getCurrentFrame(scope: CuaFrameScope): CuaFrameMetadata | null {
+    return this.currentFrame(scope);
+  }
+  private currentFrame(scope: CuaFrameScope, owner?: object): CuaFrameMetadata | null {
     try {
+      if (this.observationLease && this.observationLease !== owner) return null;
       this.assertObservationScope(scope);
       if (this.getHeldInputCount() !== 0) return null;
       const { pngDataUrl: _png, ...metadata } = this.frame!;
       return structuredClone(metadata);
     } catch { return null; }
+  }
+  /** Main-only lifetime exclusion. Abort requests transport cancellation;
+   * only its owner's release confirms that transport has actually settled. */
+  acquireObservationLease(scope: CuaFrameScope, signal?: AbortSignal): CuaObservationLease | null {
+    if (signal?.aborted || this.observationLease) return null;
+    const immutableScope = structuredClone(scope);
+    const frame = this.currentFrame(immutableScope);
+    if (!frame) return null;
+    let settle!: () => void;
+    const owner = { controller: new AbortController(), settled: new Promise<void>(resolve => { settle = resolve; }) };
+    const abort = (): void => { owner.controller.abort(); };
+    signal?.addEventListener('abort', abort, { once: true });
+    this.observationLease = owner;
+    return {
+      frame, signal: owner.controller.signal,
+      getCurrentFrame: () => this.observationLease === owner && !owner.controller.signal.aborted ? this.currentFrame(immutableScope, owner) : null,
+      release: () => {
+        if (this.observationLease !== owner) return;
+        signal?.removeEventListener('abort', abort);
+        this.observationLease = null;
+        owner.controller.abort();
+        settle();
+      }
+    };
   }
   private markTargetGone(reason: string): void {
     this.publish({ targetGone: true });
@@ -186,7 +221,7 @@ export class CuaDriver {
   }
   async observe(context: { sessionId: string; runId: string }): Promise<CuaFrame> {
     this.live();
-    if (this.dependencies.getPendingApproval?.()) throw new Error('CUA_BUSY');
+    if (this.observationLease || this.dependencies.getPendingApproval?.()) throw new Error('CUA_BUSY');
     if (this.observing || this.state.phase === 'acting' || this.state.phase === 'preparing' || this.state.phase === 'stopping' || this.cleanupFailureLatched) throw new Error('CUA_BUSY');
     if (!context.sessionId || !context.runId || !this.surface?.safeSurface) throw new Error('CUA_UNSAFE_SURFACE');
     this.observing = true;
@@ -247,7 +282,7 @@ export class CuaDriver {
   }
   private validate(request: CuaActionRequest, preparing = false, preflight = false): CuaPoint[] {
     this.live();
-    if (this.observing || this.state.phase !== (preparing ? 'preparing' : 'ready')) throw new Error('CUA_BUSY');
+    if (this.observationLease || this.observing || this.state.phase !== (preparing ? 'preparing' : 'ready')) throw new Error('CUA_BUSY');
     const f = this.frame, s = this.surface;
     if (!f || !s || !Number.isSafeInteger(request.contentRevision) || request.contentRevision !== f.contentRevision || s.contentRevision !== f.contentRevision || request.sessionId !== f.sessionId || request.runId !== f.runId || request.windowId !== this.window.id || request.frameId !== f.frameId || request.layoutRevision !== f.layoutRevision || s.layoutRevision !== f.layoutRevision || performance.now() - this.frameTime > 120000 || this.window.webContents.getZoomFactor() !== f.zoomFactor
       || (this.dependencies.getDeviceScaleFactor?.() ?? 1) !== f.deviceScaleFactor) throw new Error('CUA_STALE_FRAME');
@@ -367,11 +402,14 @@ export class CuaDriver {
   }
   cancel(reason = 'stopped'): Promise<CuaState> {
     if (this.cancellation) return this.cancellation;
+    const lease = this.observationLease;
+    const leaseSettlement = lease?.settled;
     this.generation++; this.frame = null; this.executionBlocked = true;
     const pendingPrepare = this.prepareAck; this.prepareAck = null; pendingPrepare?.resolve(false);
     // Assign the promise before callbacks so recursive cancellation is idempotent.
     let settle!: (state: CuaState) => void;
     this.cancellation = new Promise(resolve => { settle = resolve; });
+    lease?.controller.abort();
     const needsAck = this.heldMouse !== null && this.state.dragStart !== null && this.state.runId !== null;
     let ackReceived = false;
     let resolveAck!: () => void;
@@ -396,6 +434,7 @@ export class CuaDriver {
       const targetGone = this.state.targetGone || this.window.isDestroyed() || this.window.webContents.isDestroyed();
       if (targetGone && hadHeldInput) failures.push('target-gone-release-unconfirmed');
       if (failures.length) this.cleanupFailureLatched = true;
+      if (leaseSettlement) await leaseSettlement; // Never claim stopped while transport is live.
       this.publish({ phase: this.cleanupFailureLatched ? 'cleanup-failed' : 'stopped', targetGone, error: reason, cleanupComplete: !this.cleanupFailureLatched, releaseFailures: failures.length ? failures : this.state.releaseFailures, dragStart: null, cancelToken: null });
       settle(this.getState());
     })();
