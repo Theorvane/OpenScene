@@ -14,6 +14,7 @@ import type { SaveAiProjectDocumentInput } from '../shared/aiProjectDomain';
 import type { ExportJobActionInput, LocalExportJob, LocalFfmpegRuntimeStatus, StartExportJobInput } from '../shared/exportTypes';
 import { IPC_CHANNELS } from '../shared/ipc';
 import { JEV_CREDENTIAL_CHANNELS, type JevCredentialApi } from '../shared/jevCredentials';
+import { JEV_CONFIG_CHANNELS, type JevConfigApi } from '../shared/jevConfig';
 import type {
   AbortRecordingInput,
   ApiResponse,
@@ -64,7 +65,7 @@ type AssetPlaybackUrl = {
   readonly url: string;
 };
 
-export interface VideoToolApi extends JevCredentialApi {
+export interface VideoToolApi extends JevCredentialApi, JevConfigApi {
   shortsStart(input: ShortsStartInput): Promise<ApiResponse<ShortsJob>>;
   shortsGet(input: ShortsJobInput): Promise<ApiResponse<ShortsJob>>;
   shortsList(input: ShortsListInput): Promise<ApiResponse<readonly ShortsJob[]>>;
@@ -154,6 +155,8 @@ function parseUpdaterSnapshot(payload: unknown): UpdaterSnapshot | null {
 }
 
 const videoTool: VideoToolApi = {
+  getJevConfig: () => ipcRenderer.invoke(JEV_CONFIG_CHANNELS.get),
+  setJevConfig: (config) => ipcRenderer.invoke(JEV_CONFIG_CHANNELS.set, config),
   getJevCredentialStatus: () => ipcRenderer.invoke(JEV_CREDENTIAL_CHANNELS.status),
   setJevCredential: (apiKey) => ipcRenderer.invoke(JEV_CREDENTIAL_CHANNELS.set, apiKey),
   clearJevCredential: () => ipcRenderer.invoke(JEV_CREDENTIAL_CHANNELS.clear),
