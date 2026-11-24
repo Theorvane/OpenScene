@@ -55,7 +55,7 @@ export async function createAgentChatTools(instance: OpenVideoMcpServer, cua?: C
 const point = z.object({ x: z.number().finite().nonnegative(), y: z.number().finite().nonnegative() }).strict();
 export const CUA_ACTION_TOOL_SCHEMA = z.object({
   sessionId: z.string().min(1), runId: z.string().min(1), windowId: z.number().int().nonnegative(),
-  frameId: z.string().min(1), layoutRevision: z.number().int().nonnegative(),
+  frameId: z.string().min(1), layoutRevision: z.number().int().nonnegative(), contentRevision: z.number().int().nonnegative(),
   action: z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('click'), point }).strict(),
     z.object({ kind: z.literal('drag'), from: point, to: point, durationMs: z.number().int().min(100).max(3000) }).strict(),
