@@ -4,6 +4,8 @@ import type { BrowserWindow, KeyboardInputEvent, MouseInputEvent } from 'electro
 import { CUA_KEYS, type CuaActionRequest, type CuaCancelAck, type CuaFrame, type CuaPoint, type CuaRect, type CuaState, type CuaSurfaceSnapshot } from '../shared/cua';
 
 export interface CuaDriverDependencies {
+  readonly getDeviceScaleFactor?: () => number;
+  readonly getPendingApproval?: () => Readonly<{ sessionId: string; runId: string; windowId: number; frameId: string; layoutRevision: number }> | null;
   readonly consumePermit: (request: CuaActionRequest, permit: unknown) => void;
   readonly onCancel?: (context: { sessionId: string | null; runId: string | null; reason: string }) => void;
   readonly onState?: (state: CuaState) => void;
@@ -34,6 +36,7 @@ export class CuaDriver {
   private injecting = false;
   private cleanupFailureLatched = false;
   private cancelAck: { token: string; runId: string; resolve: () => void } | null = null;
+  private trustedApprovalPanel: CuaRect | null = null;
   private state: CuaState;
 
   constructor(private readonly window: BrowserWindow, private readonly dependencies: CuaDriverDependencies) {
@@ -48,10 +51,18 @@ export class CuaDriver {
     // Electron 43 macOS probe verifies these events fire synchronously inside
     // sendInputEvent. This is a delivery guard, never a renderer isTrusted test.
     window.webContents.on('before-input-event', () => {
-      if (!this.injecting && this.state.phase === 'acting') void this.cancel('user-input');
+      if (!this.injecting && ['acting', 'ready'].includes(this.state.phase)) void this.cancel('user-input');
     });
-    window.webContents.on('before-mouse-event', () => {
-      if (!this.injecting && this.state.phase === 'acting') void this.cancel('user-input');
+    window.webContents.on('before-mouse-event', (_event, input) => {
+      if (this.injecting || !['acting', 'ready'].includes(this.state.phase)) return;
+      const pending = this.dependencies.getPendingApproval?.();
+      const frame = this.frame;
+      // A validated fixed panel is only a cancellation exception. It neither
+      // clears main execution blocking nor issues approval authority.
+      if (this.state.phase === 'ready' && this.executionBlocked && pending && frame && this.trustedApprovalPanel
+        && pending.sessionId === frame.sessionId && pending.runId === frame.runId && pending.windowId === this.window.id
+        && pending.frameId === frame.frameId && pending.layoutRevision === frame.layoutRevision && inside(input, this.trustedApprovalPanel)) return;
+      void this.cancel('user-input');
     });
   }
   getState(): CuaState { return structuredClone(this.state); }
@@ -91,15 +102,30 @@ export class CuaDriver {
     if (!context.sessionId || !context.runId || !this.surface?.safeSurface?.interactive) throw new Error('CUA_UNSAFE_SURFACE');
     const snapshot = structuredClone(this.surface);
     const revision = this.generation;
+    const panel: unknown = await this.window.webContents.executeJavaScript(`(() => {
+      const panels = [...document.querySelectorAll('[data-cua-protected="agent-panel"]')].filter(e => e.getBoundingClientRect().width > 0);
+      if (panels.length !== 1) return null;
+      const r = panels[0].getBoundingClientRect();
+      return {x:r.x,y:r.y,width:r.width,height:r.height};
+    })()`);
+    const candidate = panel as CuaRect | null;
+    const reported = snapshot.protectedRects.find(p => p.kind === 'agent-panel');
+    this.trustedApprovalPanel = candidate && reported && [candidate.x,candidate.y,candidate.width,candidate.height].every(Number.isFinite)
+      && candidate.width > 0 && candidate.width <= snapshot.viewport.width / 2
+      && ['x','y','width','height'].every(k => Math.abs(candidate[k as keyof CuaRect] - reported.rect[k as keyof CuaRect]) <= 0.5)
+      && !crosses({x:candidate.x,y:candidate.y},{x:candidate.x+candidate.width,y:candidate.y+candidate.height},snapshot.safeSurface!.rect)
+      ? candidate : null;
     const image = await this.window.webContents.capturePage();
     this.live();
     if (revision !== this.generation || !this.surface || snapshot.layoutRevision !== this.surface.layoutRevision
       || JSON.stringify(snapshot.safeSurface) !== JSON.stringify(this.surface.safeSurface)
       || JSON.stringify(snapshot.protectedRects) !== JSON.stringify(this.surface.protectedRects)
       || JSON.stringify(snapshot.viewport) !== JSON.stringify(this.surface.viewport)) throw new Error('CUA_STALE_FRAME');
-    const bitmap = image.getSize();
-    if (image.isEmpty() || bitmap.width <= 0 || bitmap.height <= 0) throw new Error('CUA_EMPTY_CAPTURE');
-    const frame: CuaFrame = { ...context, windowId: this.window.id, frameId: randomUUID(), layoutRevision: snapshot.layoutRevision, capturedAt: Date.now(), viewport: snapshot.viewport, bitmap, deviceScaleFactor: bitmap.width / snapshot.viewport.width / this.window.webContents.getZoomFactor(), zoomFactor: this.window.webContents.getZoomFactor(), pngDataUrl: image.toDataURL() };
+    const png = image.toPNG();
+    if (image.isEmpty() || png.length < 24 || png.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a') throw new Error('CUA_EMPTY_CAPTURE');
+    const bitmap = { width: png.readUInt32BE(16), height: png.readUInt32BE(20) };
+    if (bitmap.width <= 0 || bitmap.height <= 0) throw new Error('CUA_EMPTY_CAPTURE');
+    const frame: CuaFrame = { ...context, windowId: this.window.id, frameId: randomUUID(), layoutRevision: snapshot.layoutRevision, capturedAt: Date.now(), viewport: snapshot.viewport, bitmap, deviceScaleFactor: this.dependencies.getDeviceScaleFactor?.() ?? 1, zoomFactor: this.window.webContents.getZoomFactor(), pngDataUrl: `data:image/png;base64,${png.toString('base64')}` };
     this.frame = frame; this.frameTime = performance.now(); this.cancellation = null;
     this.publish({ ...context, phase: 'ready', error: null, cleanupComplete: true, releaseFailures: [] });
     return frame;

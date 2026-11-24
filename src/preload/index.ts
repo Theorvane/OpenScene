@@ -3,6 +3,7 @@ import type { CuaCancelAck, CuaState, CuaStopResult, CuaSurfaceSnapshot } from '
 
 import type {
   AgentChatApprovalInput,
+  AgentChatCancelInput,
   AgentChatCompactInput,
   AgentChatHistoryEntry,
   AgentChatHistoryGetInput,
@@ -132,6 +133,7 @@ export interface VideoToolApi {
   mcpGetTools(): Promise<ApiResponse<unknown>>;
   mcpExecuteTool(toolName: string, params: unknown): Promise<ApiResponse<unknown>>;
   agentChatSend(input: AgentChatSendInput): Promise<ApiResponse<AgentChatTurnState>>;
+  agentChatCancel(input: AgentChatCancelInput): Promise<ApiResponse<AgentChatTurnState>>;
   agentChatApprove(input: AgentChatApprovalInput): Promise<ApiResponse<AgentChatTurnState>>;
   agentChatReset(input: AgentChatResetInput): Promise<ApiResponse<AgentChatTurnState>>;
   agentChatCompact(input: AgentChatCompactInput): Promise<ApiResponse<AgentChatTurnState>>;
@@ -261,6 +263,7 @@ const videoTool: VideoToolApi = {
   mcpExecuteTool: (toolName: string, params: unknown) =>
     ipcRenderer.invoke(IPC_CHANNELS.mcpExecuteTool, toolName, params) as Promise<ApiResponse<unknown>>,
   agentChatSend: (input) => ipcRenderer.invoke(IPC_CHANNELS.agentChatSend, input) as Promise<ApiResponse<AgentChatTurnState>>,
+  agentChatCancel: input => ipcRenderer.invoke(IPC_CHANNELS.agentChatCancel, input) as Promise<ApiResponse<AgentChatTurnState>>,
   agentChatApprove: (input) =>
     ipcRenderer.invoke(IPC_CHANNELS.agentChatApprove, input) as Promise<ApiResponse<AgentChatTurnState>>,
   agentChatReset: (input) => ipcRenderer.invoke(IPC_CHANNELS.agentChatReset, input) as Promise<ApiResponse<AgentChatTurnState>>,

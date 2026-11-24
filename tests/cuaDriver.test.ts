@@ -8,7 +8,9 @@ function fixture() {
   const contents = Object.assign(new EventEmitter(), {
     isDestroyed: vi.fn(() => false), isFocused: vi.fn(() => true), getZoomFactor: () => 1,
     executeJavaScript: vi.fn(async () => true),
-    capturePage: vi.fn(async () => ({ getSize: () => ({ width: 800, height: 600 }), isEmpty: () => false, toDataURL: () => 'data:image/png;base64,test' })),
+    capturePage: vi.fn(async () => ({ isEmpty: () => false, toPNG: () => {
+      const png = Buffer.alloc(24); Buffer.from('89504e470d0a1a0a', 'hex').copy(png); png.writeUInt32BE(800,16); png.writeUInt32BE(600,20); return png;
+    } })),
     sendInputEvent: vi.fn((input: MouseInputEvent) => contents.emit(input.type.startsWith('mouse') ? 'before-mouse-event' : 'before-input-event', {}, input))
   });
   const window = Object.assign(new EventEmitter(), { id: 7, webContents: contents, isDestroyed: vi.fn(() => false), isFocused: vi.fn(() => true) });

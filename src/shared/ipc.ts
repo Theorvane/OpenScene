@@ -60,6 +60,7 @@ export const IPC_CHANNELS = {
   mcpGetTools: 'mcp:get-tools',
   mcpExecuteTool: 'mcp:execute-tool',
   agentChatSend: 'agent-chat:send',
+  agentChatCancel: 'agent-chat:cancel',
   agentChatApprove: 'agent-chat:approve',
   agentChatReset: 'agent-chat:reset',
   agentChatHistoryList: 'agent-chat:history-list',
