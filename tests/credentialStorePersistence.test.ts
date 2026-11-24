@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { safeStorage } from 'electron';
 import { CredentialStore } from '../src/main/credentialStore';
+import { createJevService } from '../src/main/jevCredentialService';
 
 vi.mock('electron', () => ({
   safeStorage: {
@@ -49,6 +50,20 @@ describe('CredentialStore committed persistence', () => {
     await Promise.all(Array.from({ length: 20 }, (_, index) =>
       store.setCredential('provider', `synthetic-${index}`)));
     expect(await new CredentialStore(directory).getCredentialValue('provider')).toBe('synthetic-19');
+  });
+
+  it('persists the fixed Jev slot and empty-value clear across service reloads without changing other slots', async () => {
+    await store.setCredential('seed', 'synthetic-seed');
+    const service = createJevService({ store });
+    await service.set('synthetic-jev');
+    const reloaded = createJevService({ store: new CredentialStore(directory) });
+    expect(await reloaded.getStatus()).toEqual({ configured: true });
+    await reloaded.clear();
+    const clearedStore = new CredentialStore(directory);
+    expect(await createJevService({ store: clearedStore }).getApiKey()).toBeNull();
+    expect(await clearedStore.getCredentialValue('typesafe-jev')).toBe('');
+    expect((await clearedStore.getCredentialValue('seed')) === 'synthetic-seed').toBe(true);
+    expect(await readdir(directory)).toEqual(['encrypted_credentials.bin']);
   });
 
   it('leaves the old bundle visible until replacement, with later saves queued', async () => {
