@@ -33,6 +33,13 @@ export function isActiveTimelineDragAborted(): boolean {
 }
 
 /**
+ * Synchronously checks whether a timeline pointer drag is currently in flight.
+ */
+export function hasActiveTimelineDrag(): boolean {
+  return activeDragRollback !== null;
+}
+
+/**
  * Synchronously aborts and rolls back any active timeline pointer drag
  * (clearing preview state and releasing pointer capture) without waiting for
  * a React render.

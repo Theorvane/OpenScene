@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 
 import {
   getEditorShortcutBindings,
@@ -58,9 +58,13 @@ const actionHandlers: Readonly<Record<EditorShortcutActionId, (input: TimelineSh
   undo: (input) => input.undoTimeline()
 };
 
-export function useTimelineShortcuts(input: TimelineShortcutInput): void {
+export function useTimelineShortcuts(latestInput: TimelineShortcutInput): void {
+  const inputRef = useRef(latestInput);
+  inputRef.current = latestInput;
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
+      const input = inputRef.current;
       if (event.defaultPrevented || (event.target instanceof Element && event.target.closest('[role="menu"], [role="menubar"]'))) return;
       if (input.cuaActing !== true) {
         if (input.isLocked) return;
@@ -79,5 +83,5 @@ export function useTimelineShortcuts(input: TimelineShortcutInput): void {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [input]);
+  }, []);
 }

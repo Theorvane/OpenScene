@@ -125,14 +125,26 @@ describe('CuaOverlay', () => {
     expect(html).toContain('data-testid="cua-stop-btn"');
     expect(html).not.toContain('cua-stop-btn--idle');
 
-    const [useCuaOverlaySource, agentChatContextSource] = await Promise.all([
+    const [useCuaOverlaySource, agentChatContextSource, appShellSource, shortcutsSource, panelSource] = await Promise.all([
       readFile(new URL('../src/renderer/src/cua/useCuaOverlay.ts', import.meta.url), 'utf8'),
-      readFile(new URL('../src/renderer/src/AgentChatContext.tsx', import.meta.url), 'utf8')
+      readFile(new URL('../src/renderer/src/AgentChatContext.tsx', import.meta.url), 'utf8'),
+      readFile(new URL('../src/renderer/src/AppShell.tsx', import.meta.url), 'utf8'),
+      readFile(new URL('../src/renderer/src/editor/useTimelineShortcuts.ts', import.meta.url), 'utf8'),
+      readFile(new URL('../src/renderer/src/AgentChatPanel.tsx', import.meta.url), 'utf8')
     ]);
     expect(useCuaOverlaySource).toContain('useLayoutEffect(');
     expect(useCuaOverlaySource).toContain('cuaAckPrepare({ runId, prepareToken })');
+    expect(useCuaOverlaySource).toContain('void triggerStop()');
+    expect(useCuaOverlaySource).toContain('cua.isActing || cua.isPreparing');
+    expect(shortcutsSource).toContain('inputRef.current = latestInput');
     expect(agentChatContextSource).not.toContain('approvalInFlight');
     expect(agentChatContextSource).not.toContain('waitNextPaint');
+    expect(agentChatContextSource).toContain('cancelInFlightRef');
+    expect(agentChatContextSource).toContain('setCuaSaveResult');
+    expect(panelSource).toContain('data-testid="agent-cua-save-result"');
+    expect(panelSource).toContain('data-testid="agent-cua-approval-save-digest"');
+    expect(appShellSource).toContain('if (isBusy || pendingApproval !== null) void cancelConversation();');
+    expect(appShellSource).toContain('void cua.triggerStop();');
   });
 
   it('maintains stopping progress until main pushes stopped with cleanupComplete: true', async () => {
