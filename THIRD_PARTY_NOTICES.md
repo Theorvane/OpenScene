@@ -93,4 +93,4 @@ SOFTWARE.
 
 ## AutoClip
 
-AutoClip, copyright (c) 2024 AutoClip Team, MIT. Source: https://github.com/zhouxiaoka/autoclip; managed fork https://github.com/Theorvane/autoclip. Pinned source and full license: `external/autoclip/LICENSE`. OpenScene does not automatically execute the upstream runtime.
+AutoClip, copyright (c) 2024 AutoClip Team, MIT. Source: https://github.com/zhouxiaoka/autoclip. Pinned source and full license: `external/autoclip/LICENSE`. OpenScene does not automatically execute the upstream runtime.
