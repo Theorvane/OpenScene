@@ -188,7 +188,11 @@ function mount(element: ReactElement): DomEl {
   return container;
 }
 
-function dispatchKey(target: { dispatchEvent: (event: unknown) => boolean }, key: string, init: Record<string, unknown> = {}): boolean {
+function dispatchKey(
+  target: { dispatchEvent: (event: unknown) => boolean },
+  key: string,
+  init: Record<string, unknown> = {}
+): boolean {
   const win = getWindow();
   const event = new win.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init });
   let result = true;
@@ -205,7 +209,7 @@ async function flushMicroAndMacroTasks(): Promise<void> {
 }
 
 describe('Phase 0 Design System Tokens & Stylesheets', () => {
-  it('defines Orca-aligned neutral surfaces, foregrounds, radii, dense heights, status tokens, and zero gradients/glows', () => {
+  it('defines Orca-aligned neutral surfaces, cross-platform typography, 4px spacing, compact controls, status tokens, and zero gradients/glows', () => {
     for (const token of [
       '--os-ui-bg: #0a0a0a;',
       '--os-ui-canvas: #121212;',
@@ -222,12 +226,28 @@ describe('Phase 0 Design System Tokens & Stylesheets', () => {
       '--os-ui-cta-fg: #171717;',
       '--os-ui-cta-bg-hover: #ffffff;',
       '--os-ui-focus-ring: #737373;',
-      '--os-ui-radius-xs: 3px;',
+      '--os-space-1: 4px;',
+      '--os-space-2: 8px;',
+      '--os-space-3: 12px;',
+      '--os-space-4: 16px;',
+      '--os-space-5: 20px;',
+      '--os-space-6: 24px;',
+      '--os-ui-radius-xs: 4px;',
       '--os-ui-radius-sm: 5px;',
-      '--os-ui-radius-md: 7px;',
-      '--os-ui-height-sm: 26px;',
-      '--os-ui-height-md: 28px;',
-      '--os-ui-height-lg: 30px;',
+      '--os-ui-radius-md: 6px;',
+      '--os-ui-height-sm: 28px;',
+      '--os-ui-height-md: 32px;',
+      '--os-font-size-h1: 22px;',
+      '--os-font-size-h2: 18px;',
+      '--os-font-size-body-lg: 14px;',
+      '--os-font-size-body: 13px;',
+      '--os-font-size-sm: 12px;',
+      '--os-font-size-xs: 11px;',
+      '"Pretendard"',
+      '"Malgun Gothic"',
+      '"Apple SD Gothic Neo"',
+      '"Noto Sans KR"',
+      '"Cascadia Code"',
       '--os-ui-ok:',
       '--os-ui-warn:',
       '--os-ui-question:',
@@ -237,7 +257,10 @@ describe('Phase 0 Design System Tokens & Stylesheets', () => {
       expect(TOKENS_CSS).toContain(token);
     }
 
-    // Zero gradients, zero glow shadows, zero pill bloat.
+    expect(PRIMITIVES_CSS).toContain('font-variant-numeric: tabular-nums;');
+    expect(PRIMITIVES_CSS).toContain('word-break: keep-all;');
+
+    // Zero gradients, zero glow shadows, zero pill soup.
     expect(TOKENS_CSS).not.toMatch(/gradient\(|box-shadow:|999px|9999px/i);
     expect(PRIMITIVES_CSS).not.toMatch(/gradient\(|box-shadow:|999px|9999px/i);
 
@@ -247,25 +270,32 @@ describe('Phase 0 Design System Tokens & Stylesheets', () => {
     expect(MAIN_TSX).toContain("import '../styles/ui-primitives.css';");
   });
 
-  it('enforces --os-z-cua-stop strictly above every portal z-index token', () => {
+  it('enforces sheet < dialog < dropdown/popover < tooltip < cua-stop layering order', () => {
     const cuaStop = extractCssVarNumber(TOKENS_CSS, '--os-z-cua-stop');
+    const tooltip = extractCssVarNumber(TOKENS_CSS, '--os-z-tooltip');
+    const dropdown = extractCssVarNumber(TOKENS_CSS, '--os-z-dropdown');
+    const popover = extractCssVarNumber(TOKENS_CSS, '--os-z-popover');
     const dialog = extractCssVarNumber(TOKENS_CSS, '--os-z-dialog');
     const sheet = extractCssVarNumber(TOKENS_CSS, '--os-z-sheet');
-    const popover = extractCssVarNumber(TOKENS_CSS, '--os-z-popover');
-    const dropdown = extractCssVarNumber(TOKENS_CSS, '--os-z-dropdown');
-    const tooltip = extractCssVarNumber(TOKENS_CSS, '--os-z-tooltip');
 
-    expect(cuaStop).toBeGreaterThan(dialog);
-    expect(cuaStop).toBeGreaterThan(sheet);
-    expect(cuaStop).toBeGreaterThan(popover);
-    expect(cuaStop).toBeGreaterThan(dropdown);
+    // Nested dropdowns/popovers and tooltips MUST render above owning modals/sheets.
+    expect(dialog).toBeGreaterThan(sheet);
+    expect(dropdown).toBeGreaterThan(dialog);
+    expect(popover).toBeGreaterThan(dialog);
+    expect(tooltip).toBeGreaterThan(dropdown);
+    // CUA Stop MUST remain strictly above every portal layer.
     expect(cuaStop).toBeGreaterThan(tooltip);
 
     expect(UI.OS_Z_INDEX.cuaStop).toBe(cuaStop);
+    expect(UI.OS_Z_INDEX.tooltip).toBe(tooltip);
+    expect(UI.OS_Z_INDEX.dropdown).toBe(dropdown);
+    expect(UI.OS_Z_INDEX.popover).toBe(popover);
     expect(UI.OS_Z_INDEX.dialog).toBe(dialog);
     expect(UI.OS_Z_INDEX.sheet).toBe(sheet);
-    expect(UI.OS_Z_INDEX.popover).toBe(popover);
-    expect(UI.OS_Z_INDEX.tooltip).toBe(tooltip);
+
+    // Dropdown and tooltip CSS rules and popper wrappers reference the elevated tokens.
+    expect(PRIMITIVES_CSS).toContain('z-index: var(--os-z-dropdown);');
+    expect(PRIMITIVES_CSS).toContain('z-index: var(--os-z-tooltip);');
   });
 });
 
@@ -417,7 +447,7 @@ describe('Phase 0 Core Form & Navigation Primitives', () => {
   });
 });
 
-describe('Phase 0 Portal Primitives + CUA Safety & Keyboard Invariants', () => {
+describe('Phase 0 Portal Primitives + Nested Layering & CUA Safety Invariants', () => {
   it('Dialog renders in portal with CUA-protected attributes, custom container, focus management, and restores focus on normal Escape', async () => {
     const doc = getDocument();
     const portalHost = doc.createElement('div') as DomEl;
@@ -477,6 +507,181 @@ describe('Phase 0 Portal Primitives + CUA Safety & Keyboard Invariants', () => {
     expect(doc.activeElement).toBe(trigger);
 
     portalHost.remove();
+  });
+
+  it('nested DropdownMenu inside Dialog closes first on Escape without prematurely closing Dialog, then second Escape closes Dialog and restores focus', async () => {
+    const doc = getDocument();
+    const onSelectItem = vi.fn();
+
+    function NestedDialogMenuHarness(): ReactElement {
+      const [dialogOpen, setDialogOpen] = useState(false);
+      const [menuOpen, setMenuOpen] = useState(false);
+
+      return createElement(
+        UI.Dialog,
+        { open: dialogOpen, onOpenChange: setDialogOpen },
+        createElement(
+          UI.DialogTrigger,
+          { asChild: true },
+          createElement(UI.Button, { 'data-testid': 'nested-dlg-trigger' }, 'Open Dialog')
+        ),
+        createElement(
+          UI.DialogContent,
+          null,
+          createElement(UI.DialogTitle, null, 'Export Preset'),
+          createElement(UI.DialogDescription, null, 'Choose a preset inside the modal.'),
+          createElement(
+            UI.DropdownMenu,
+            { open: menuOpen, onOpenChange: setMenuOpen },
+            createElement(
+              UI.DropdownMenuTrigger,
+              { asChild: true },
+              createElement(UI.Button, { 'data-testid': 'nested-menu-trigger', onClick: () => setMenuOpen(true) }, 'Preset Menu')
+            ),
+            createElement(
+              UI.DropdownMenuContent,
+              null,
+              createElement(
+                UI.DropdownMenuItem,
+                { 'data-testid': 'nested-menu-item', onSelect: onSelectItem },
+                'YouTube 1080p'
+              )
+            )
+          )
+        )
+      );
+    }
+
+    const container = mount(createElement(NestedDialogMenuHarness));
+    const dialogTrigger = container.querySelector('[data-testid="nested-dlg-trigger"]') as DomEl;
+
+    act(() => {
+      dialogTrigger.focus();
+      dialogTrigger.click();
+    });
+
+    const menuTrigger = doc.querySelector('[data-testid="nested-menu-trigger"]') as DomEl;
+    act(() => {
+      menuTrigger.click();
+    });
+
+    const menuEl = doc.querySelector('[data-os-portal="dropdown-menu"][role="menu"]') as DomEl | null;
+    expect(menuEl).not.toBeNull();
+    expect(doc.querySelector('[data-os-portal="dialog"][role="dialog"]')).not.toBeNull();
+
+    // First Escape closes only the nested DropdownMenu, keeping parent Dialog open.
+    dispatchKey(menuEl as DomEl, 'Escape');
+    await flushMicroAndMacroTasks();
+    expect(doc.querySelector('[data-os-portal="dropdown-menu"][role="menu"]')).toBeNull();
+    const dialogAfterMenuClose = doc.querySelector('[data-os-portal="dialog"][role="dialog"]') as DomEl | null;
+    expect(dialogAfterMenuClose).not.toBeNull();
+
+    // Second Escape closes the parent Dialog and restores focus to dialogTrigger.
+    dispatchKey(dialogAfterMenuClose as DomEl, 'Escape');
+    await flushMicroAndMacroTasks();
+    expect(doc.querySelector('[data-os-portal="dialog"][role="dialog"]')).toBeNull();
+    expect(doc.activeElement).toBe(dialogTrigger);
+
+    // Re-open Dialog + nested menu and verify item selection works cleanly.
+    act(() => {
+      dialogTrigger.click();
+    });
+    const reopenedMenuTrigger = doc.querySelector('[data-testid="nested-menu-trigger"]') as DomEl;
+    act(() => {
+      reopenedMenuTrigger.click();
+    });
+    const menuItem = doc.querySelector('[data-testid="nested-menu-item"]') as DomEl | null;
+    expect(menuItem).not.toBeNull();
+    act(() => {
+      menuItem?.click();
+    });
+    expect(onSelectItem).toHaveBeenCalledTimes(1);
+    expect(doc.querySelector('[data-os-portal="dialog"][role="dialog"]')).not.toBeNull();
+  });
+
+  it('nested DropdownMenu and Tooltip inside Sheet close cleanly in layered order without closing Sheet prematurely', async () => {
+    const doc = getDocument();
+
+    function NestedSheetHarness(): ReactElement {
+      const [sheetOpen, setSheetOpen] = useState(false);
+      const [menuOpen, setMenuOpen] = useState(false);
+
+      return createElement(
+        UI.TooltipProvider,
+        null,
+        createElement(
+          UI.Sheet,
+          { open: sheetOpen, onOpenChange: setSheetOpen },
+          createElement(
+            UI.SheetTrigger,
+            { asChild: true },
+            createElement(UI.Button, { 'data-testid': 'nested-sheet-trigger' }, 'Open Sheet')
+          ),
+          createElement(
+            UI.SheetContent,
+            { side: 'right' },
+            createElement(UI.SheetTitle, null, 'Inspector'),
+            createElement(UI.SheetDescription, null, 'Layered controls inside drawer.'),
+            createElement(
+              UI.DropdownMenu,
+              { open: menuOpen, onOpenChange: setMenuOpen },
+              createElement(
+                UI.DropdownMenuTrigger,
+                { asChild: true },
+                createElement(UI.Button, { 'data-testid': 'sheet-menu-trigger', onClick: () => setMenuOpen(true) }, 'Track Actions')
+              ),
+              createElement(
+                UI.DropdownMenuContent,
+                null,
+                createElement(UI.DropdownMenuItem, { 'data-testid': 'sheet-menu-item' }, 'Detach Audio')
+              )
+            ),
+            createElement(
+              UI.Tooltip,
+              { defaultOpen: true },
+              createElement(UI.TooltipTrigger, { asChild: true }, createElement(UI.Button, null, 'Tip')),
+              createElement(UI.TooltipContent, null, 'Drawer tooltip')
+            )
+          )
+        )
+      );
+    }
+
+    const container = mount(createElement(NestedSheetHarness));
+    const sheetTrigger = container.querySelector('[data-testid="nested-sheet-trigger"]') as DomEl;
+    act(() => {
+      sheetTrigger.focus();
+      sheetTrigger.click();
+    });
+
+    expect(doc.querySelector('[data-os-portal="tooltip"]')).not.toBeNull();
+
+    const menuTrigger = doc.querySelector('[data-testid="sheet-menu-trigger"]') as DomEl;
+    act(() => {
+      menuTrigger.click();
+    });
+
+    const menuEl = doc.querySelector('[data-os-portal="dropdown-menu"][role="menu"]') as DomEl | null;
+    expect(menuEl).not.toBeNull();
+
+    // First Escape closes nested DropdownMenu (topmost layer), keeping Sheet & Tooltip open.
+    dispatchKey(menuEl as DomEl, 'Escape');
+    await flushMicroAndMacroTasks();
+    expect(doc.querySelector('[data-os-portal="dropdown-menu"][role="menu"]')).toBeNull();
+    const sheetEl = doc.querySelector('[data-os-portal="sheet"][role="dialog"]') as DomEl | null;
+    expect(sheetEl).not.toBeNull();
+
+    // Second Escape closes the open Tooltip layer inside Sheet, still keeping Sheet open.
+    dispatchKey(sheetEl as DomEl, 'Escape');
+    await flushMicroAndMacroTasks();
+    expect(doc.querySelector('[data-os-portal="tooltip"]')).toBeNull();
+    expect(doc.querySelector('[data-os-portal="sheet"][role="dialog"]')).not.toBeNull();
+
+    // Third Escape closes Sheet itself and restores focus to trigger.
+    dispatchKey(sheetEl as DomEl, 'Escape');
+    await flushMicroAndMacroTasks();
+    expect(doc.querySelector('[data-os-portal="sheet"][role="dialog"]')).toBeNull();
+    expect(doc.activeElement).toBe(sheetTrigger);
   });
 
   it('Dialog, Sheet, and DropdownMenu allow capture-phase window Escape (CUA emergency Stop) to fire FIRST', () => {
@@ -563,12 +768,9 @@ describe('Phase 0 Portal Primitives + CUA Safety & Keyboard Invariants', () => {
       }
 
       expect(order[0], `${testCase.name}: CUA capture-phase Escape must run first`).toBe('cua-capture-stop');
-      // Because CUA prevented default, portal escape callback must NOT override CUA Stop.
       expect(portalEscape).not.toHaveBeenCalled();
-      // Portal stays open when CUA intercepted Escape (user stays in control without competing dismiss).
       expect(doc.querySelector(testCase.portalSelector)).not.toBeNull();
 
-      // Cleanup before next subcase
       for (const entry of activeRoots.splice(0)) {
         act(() => entry.root.unmount());
         entry.container.remove();
@@ -588,7 +790,6 @@ describe('Phase 0 Portal Primitives + CUA Safety & Keyboard Invariants', () => {
     win.addEventListener('keydown', globalShortcutListener);
 
     try {
-      // Test Dialog with Input + Textarea
       mount(
         createElement(
           UI.Dialog,
@@ -614,7 +815,6 @@ describe('Phase 0 Portal Primitives + CUA Safety & Keyboard Invariants', () => {
 
       expect(leakedShortcuts).toEqual([]);
 
-      // Unmount Dialog and test Sheet (side=right & side=left)
       for (const entry of activeRoots.splice(0)) {
         act(() => entry.root.unmount());
         entry.container.remove();

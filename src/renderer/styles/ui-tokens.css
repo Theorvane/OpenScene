@@ -1,18 +1,22 @@
 /*
  * OpenScene Phase 0 Design System Tokens (Orca-aligned neutral desktop workbench).
  *
- * Strictly additive and scoped under `--os-ui-*` and `--os-z-*` so existing
- * renderer stylesheets (`src/renderer/src/styles.css`) and themes remain
- * unaffected during phased adoption.
+ * Strictly additive and scoped under `--os-*` so existing renderer stylesheets
+ * (`src/renderer/src/styles.css`) and themes remain unaffected during phased adoption.
  *
  * Visual rules:
  * - Pure achromatic neutral dark surfaces (#0a0a0a -> #262626)
  * - Crisp foreground hierarchy (#f0f0f0 -> #6b6b6b)
- * - Hairline 1px borders, small radii (3/5/7px), dense desktop control heights (26-30px)
- * - Monochrome primary CTA (#e5e5e5 on #171717, hover #ffffff)
+ * - Cross-platform Windows + macOS Korean/Latin typography scale (11-22px, body 13-14px)
+ * - Strict 4px spacing scale (4/8/12/16/20/24px)
+ * - Compact desktop controls (28px sm / 32px default), small radii (4-6px), hairline 1px dividers
+ * - Single monochrome primary CTA (#e5e5e5 on #171717, hover #ffffff)
  * - Restrained semantic status tokens only (ok, warn, question, danger, info)
- * - Zero gradients, zero decorative glow shadows, zero pill bloat
- * - Explicit z-index scale where `--os-z-cua-stop` sits strictly above all UI portals
+ * - Zero gradients, zero decorative glow shadows, zero pill soup
+ * - Explicit z-index scale:
+ *     sheet (500) < dialog (600) < dropdown/popover (700) < tooltip (750) < cua-stop (9999)
+ *   so nested menus and tooltips render above their owning modal while CUA Stop
+ *   always remains strictly on top and unobstructed.
  */
 
 :root {
@@ -66,36 +70,59 @@
   --os-ui-info-bg: rgba(96, 165, 250, 0.12);
   --os-ui-info-border: rgba(96, 165, 250, 0.28);
 
-  /* Radii */
-  --os-ui-radius-xs: 3px;
+  /* Strict 4px spacing scale */
+  --os-space-1: 4px;
+  --os-space-2: 8px;
+  --os-space-3: 12px;
+  --os-space-4: 16px;
+  --os-space-5: 20px;
+  --os-space-6: 24px;
+
+  /* Small radii (4px-6px) */
+  --os-ui-radius-xs: 4px;
   --os-ui-radius-sm: 5px;
-  --os-ui-radius-md: 7px;
+  --os-ui-radius-md: 6px;
 
-  /* Dense desktop control sizing */
-  --os-ui-height-sm: 26px;
-  --os-ui-height-md: 28px;
-  --os-ui-height-lg: 30px;
+  /* Compact desktop control heights (28px-32px) */
+  --os-ui-height-sm: 28px;
+  --os-ui-height-md: 32px;
+  --os-ui-height-lg: 32px;
 
-  /* Typography */
-  --os-ui-font-sans: Inter, "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --os-ui-font-mono: "JetBrains Mono", "SF Mono", "Fira Code", Menlo, monospace;
-  --os-ui-text-xs: 11px;
-  --os-ui-text-sm: 12px;
-  --os-ui-text-md: 13px;
-  --os-ui-text-lg: 14px;
+  /* Cross-platform Windows + macOS Korean/Latin typography */
+  --os-font-sans: "Geist", "Pretendard", "Segoe UI", "Malgun Gothic", -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  --os-font-mono: "SF Mono", "Cascadia Code", Consolas, ui-monospace, monospace;
+  --os-ui-font-sans: var(--os-font-sans);
+  --os-ui-font-mono: var(--os-font-mono);
+
+  /* Typography scale */
+  --os-font-size-h1: 22px;
+  --os-font-size-h2: 18px;
+  --os-font-size-body-lg: 14px;
+  --os-font-size-body: 13px;
+  --os-font-size-sm: 12px;
+  --os-font-size-xs: 11px;
+
+  /* Aliases for consistent component usage */
+  --os-ui-text-xs: var(--os-font-size-xs);
+  --os-ui-text-sm: var(--os-font-size-sm);
+  --os-ui-text-md: var(--os-font-size-body);
+  --os-ui-text-lg: var(--os-font-size-body-lg);
 
   /*
    * Z-index layering contract:
-   * `--os-z-cua-stop` MUST remain strictly above every portal layer so the
-   * user-only CUA emergency Stop control is never obscured or blocked.
+   * - Modals/sheets (500/600) sit below nested floating menus/popovers (700)
+   *   and tooltips (750) so opening a menu or tooltip inside a Dialog/Sheet
+   *   renders cleanly on top and stays clickable.
+   * - `--os-z-cua-stop` (9999) sits strictly above every portal layer so the
+   *   user-only CUA emergency Stop control is never obscured or blocked.
    */
   --os-z-base: 0;
   --os-z-sticky: 20;
   --os-z-header: 100;
-  --os-z-popover: 400;
-  --os-z-dropdown: 400;
   --os-z-sheet: 500;
   --os-z-dialog: 600;
-  --os-z-tooltip: 700;
+  --os-z-popover: 700;
+  --os-z-dropdown: 700;
+  --os-z-tooltip: 750;
   --os-z-cua-stop: 9999;
 }

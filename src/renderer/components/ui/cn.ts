@@ -28,17 +28,18 @@ export type OsPortalKind = 'dialog' | 'sheet' | 'dropdown-menu' | 'tooltip';
 
 /**
  * Numeric mirror of `--os-z-*` CSS tokens in `src/renderer/styles/ui-tokens.css`.
- * `cuaStop` MUST remain strictly above every portal layer.
+ * Layering order:
+ *   sheet (500) < dialog (600) < dropdown/popover (700) < tooltip (750) < cuaStop (9999)
  */
 export const OS_Z_INDEX = {
   base: 0,
   sticky: 20,
   header: 100,
-  popover: 400,
-  dropdown: 400,
   sheet: 500,
   dialog: 600,
-  tooltip: 700,
+  popover: 700,
+  dropdown: 700,
+  tooltip: 750,
   cuaStop: 9999
 } as const;
 
