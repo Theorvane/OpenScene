@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import { performance } from 'node:perf_hooks';
 import type { BrowserWindow, MouseInputEvent } from 'electron';
 import { describe, expect, it, vi } from 'vitest';
 import { CuaDriver, type CuaDriverDependencies } from '../src/main/cuaDriver';
@@ -56,7 +57,7 @@ describe('self-window CUA safety', () => {
     const r = await f.observe();
     await expect(f.driver.execute({ ...r, action: { kind: 'drag', from: { x: 20, y: 20 }, to: { x: 200, y: 20 }, durationMs: 100 } }, 'p')).rejects.toThrow('PROTECTED');
     f.driver.reportSurface({ ...f.surface, layoutRevision: 2 });
-    await expect(f.driver.execute(r, 'p')).rejects.toThrow('STALE');
+    await expect(f.driver.execute(r, 'p')).rejects.toThrow('BUSY');
     expect(f.consumePermit).not.toHaveBeenCalled();
   });
   it('releases a held drag on stop and sends no subsequent moves', async () => {
@@ -166,5 +167,19 @@ describe('self-window CUA safety', () => {
     resolve(null); await capture;
     await expect(f.driver.execute(r, 'p')).rejects.toThrow('STALE');
     expect(f.consumePermit).not.toHaveBeenCalled();
+  });
+  it('expires a frame by monotonic absolute age without resetting or rebinding it', async () => {
+    const f = fixture(), r = await f.observe();
+    vi.spyOn(performance, 'now').mockReturnValue(performance.now() + 120001);
+    await expect(f.driver.execute(r, 'p')).rejects.toThrow('STALE_FRAME');
+    expect(f.consumePermit).not.toHaveBeenCalled();
+    expect(f.contents.sendInputEvent).not.toHaveBeenCalled();
+  });
+  it('fails closed on malformed safety reports and revokes the ready run immediately', async () => {
+    const f = fixture(), r = await f.observe();
+    expect(() => f.driver.reportSurface({ ...f.surface, viewport: { width: NaN, height: 600 } })).toThrow('INVALID_SURFACE');
+    expect(f.onCancel).toHaveBeenCalledOnce();
+    await expect(f.driver.execute(r, 'p')).rejects.toThrow('BUSY');
+    expect(f.contents.sendInputEvent).not.toHaveBeenCalled();
   });
 });
