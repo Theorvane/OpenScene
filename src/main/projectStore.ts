@@ -284,7 +284,7 @@ export class ProjectStore {
     });
   }
 
-  async saveTimeline(projectId: string, timeline: TimelineDocument, now = new Date()): Promise<LocalProjectSnapshot> {
+  async saveTimeline(projectId: string, timeline: TimelineDocument, now = new Date(), beforePublish?: (current: LocalProjectSnapshot) => void): Promise<LocalProjectSnapshot> {
     const parsedTimeline = parseTimelineDocument(timeline);
     if (parsedTimeline === null) {
       throw new ProjectStoreError('Invalid timeline document.');
@@ -295,7 +295,7 @@ export class ProjectStore {
       if (invalidRelation !== null) {
         throw new ProjectStoreError(invalidAssetRelationMessage(invalidRelation));
       }
-      return this.persist({ ...current, updatedAt: now.toISOString(), timeline: parsedTimeline });
+      return this.persist({ ...current, updatedAt: now.toISOString(), timeline: parsedTimeline }, () => beforePublish?.(current));
     });
   }
 
@@ -403,12 +403,12 @@ export class ProjectStore {
     return project;
   }
 
-  private async persist(snapshot: LocalProjectSnapshot): Promise<LocalProjectSnapshot> {
+  private async persist(snapshot: LocalProjectSnapshot, beforePublish?: () => void): Promise<LocalProjectSnapshot> {
     const parsed = parsePersistedProject(snapshot, snapshot.id);
     if (parsed === null) {
       throw new ProjectStoreError('Invalid project snapshot.');
     }
-    await writeProjectSnapshotAtDirectory(await this.resolveDirectory(parsed.id), parsed);
+    await writeProjectSnapshotAtDirectory(await this.resolveDirectory(parsed.id), parsed, 'replace', beforePublish);
     return parsed;
   }
 
