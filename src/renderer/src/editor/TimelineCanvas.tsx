@@ -112,8 +112,7 @@ const ICONS = {
   lock: toolIcon(<><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V8a4 4 0 018 0v3" /></>, 12),
   unlock: toolIcon(<><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V8a4 4 0 017.8-1.3" /></>, 12),
   undo: toolIcon(<><path d="M9 14L4 9l5-5" /><path d="M20 20v-7a4 4 0 00-4-4H4" /></>),
-  redo: toolIcon(<><path d="M15 14l5-5-5-5" /><path d="M4 20v-7a4 4 0 014-4h12" /></>),
-  save: toolIcon(<><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" /><polyline points="17 21 17 13 7 13 7 21" /><polyline points="7 3 7 8 15 8" /></>)
+  redo: toolIcon(<><path d="M15 14l5-5-5-5" /><path d="M4 20v-7a4 4 0 014-4h12" /></>)
 } as const;
 
 /**
@@ -837,22 +836,6 @@ export function TimelineCanvas({ editor, id }: TimelineCanvasProps): ReactElemen
               title="Redo (Cmd/Ctrl+Shift+Z)"
             >
               {ICONS.redo}
-            </button>
-            <button
-              type="button"
-              data-testid="timeline-save-btn"
-              data-dirty={editor.hasUnsavedTimeline ? 'true' : 'false'}
-              data-saving={editor.isSavingTimeline ? 'true' : 'false'}
-              data-save-status={editor.timelineSaveStatus}
-              data-save-error={editor.timelineSaveError ?? undefined}
-              aria-busy={editor.isSavingTimeline}
-              onClick={() => { void editor.saveTimeline(); }}
-              disabled={project === null || !editor.hasUnsavedTimeline || editor.isSavingTimeline}
-              style={project === null || !editor.hasUnsavedTimeline || editor.isSavingTimeline ? DISABLED_TOOL_BUTTON_STYLE : TOOL_BUTTON_STYLE}
-              aria-label="Save timeline"
-              title={editor.isSavingTimeline ? 'Saving timeline…' : 'Save timeline (Cmd/Ctrl+S)'}
-            >
-              {ICONS.save}
             </button>
           </div>
         </div>

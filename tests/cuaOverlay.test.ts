@@ -202,7 +202,8 @@ describe('CuaOverlay', () => {
       readFile(new URL('../src/renderer/src/editor/TimelineCanvas.tsx', import.meta.url), 'utf8'),
       readFile(new URL('../src/renderer/src/editor/TimelineEditor.tsx', import.meta.url), 'utf8')
     ]);
-    expect(timelineCanvas).toContain('data-testid="timeline-save-btn"');
+    // Security invariant: Save must NOT live inside [data-cua-safe-surface="timeline"] where CUA click could trigger disk writes.
+    expect(timelineCanvas).not.toContain('timeline-save-btn');
     expect(timelineCanvas).toContain('data-dirty={editor.hasUnsavedTimeline');
     expect(timelineCanvas).toContain('data-saving={editor.isSavingTimeline');
     expect(timelineCanvas).toContain('data-save-status={editor.timelineSaveStatus}');
