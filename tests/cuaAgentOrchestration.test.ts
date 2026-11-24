@@ -3,6 +3,7 @@ import type { CuaActionRequest } from '../src/shared/cua';
 import { CuaApprovalAuthority } from '../src/main/cuaAgentOrchestration';
 
 const request: CuaActionRequest = {
+  contentRevision: 0,
   sessionId: 'session', runId: 'run', windowId: 1, frameId: 'frame', layoutRevision: 3,
   action: { kind: 'drag', from: { x: 10, y: 20 }, to: { x: 50, y: 20 }, durationMs: 100 }
 };

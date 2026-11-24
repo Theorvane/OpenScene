@@ -231,6 +231,7 @@ function createWindow(): void {
     getDeviceScaleFactor: () => screen.getDisplayMatching(mainWindow.getBounds()).scaleFactor,
     getPendingApproval: () => cuaAuthority.getPendingApproval(),
     consumePermit: (request, permit) => cuaAuthority.consume(request, permit),
+    checkPermit: (request, permit) => cuaAuthority.check(request, permit),
     onCancel: ({ runId }) => {
       if (runId) { cuaAuthority.revokeRun(runId); cuaAgent.abortRun(runId); }
     },
@@ -406,6 +407,7 @@ async function installIpcHandlers(): Promise<void> {
   // Agent tools write the project straight to disk; tell open editors to reload
   // so the change shows up on the timeline instead of being silently shadowed.
   mcpServerInstance.setProjectTimelineChangeNotifier((projectId) => {
+    cuaTarget?.driver.invalidateContent('mcp-project-changed');
     for (const window of BrowserWindow.getAllWindows()) {
       window.webContents.send(IPC_CHANNELS.projectTimelineChanged, { projectId });
     }

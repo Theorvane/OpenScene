@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
-import type { CuaCancelAck, CuaState, CuaStopResult, CuaSurfaceSnapshot } from '../shared/cua';
+import type { CuaCancelAck, CuaPrepareAck, CuaState, CuaStopResult, CuaSurfaceSnapshot } from '../shared/cua';
 
 import type {
   AgentChatApprovalInput,
@@ -67,6 +67,7 @@ type AssetPlaybackUrl = {
 
 export interface VideoToolApi {
   cuaAckCancel(ack: CuaCancelAck): Promise<ApiResponse<{ accepted: boolean }>>;
+  cuaAckPrepare(ack: CuaPrepareAck): Promise<ApiResponse<{ accepted: boolean }>>;
   cuaGetState(): Promise<ApiResponse<CuaState>>;
   cuaStop(): Promise<ApiResponse<CuaStopResult>>;
   cuaReportSurfaceSnapshot(snapshot: CuaSurfaceSnapshot): Promise<ApiResponse<{ accepted: boolean }>>;
@@ -162,6 +163,7 @@ function parseUpdaterSnapshot(payload: unknown): UpdaterSnapshot | null {
 
 const videoTool: VideoToolApi = {
   cuaAckCancel: ack => ipcRenderer.invoke(IPC_CHANNELS.cuaAckCancel, ack) as Promise<ApiResponse<{ accepted: boolean }>>,
+  cuaAckPrepare: ack => ipcRenderer.invoke(IPC_CHANNELS.cuaAckPrepare, ack) as Promise<ApiResponse<{ accepted: boolean }>>,
   cuaGetState: () => ipcRenderer.invoke(IPC_CHANNELS.cuaGetState) as Promise<ApiResponse<CuaState>>,
   cuaStop: () => ipcRenderer.invoke(IPC_CHANNELS.cuaStop) as Promise<ApiResponse<CuaStopResult>>,
   cuaReportSurfaceSnapshot: snapshot => ipcRenderer.invoke(IPC_CHANNELS.cuaReportSurfaceSnapshot, snapshot) as Promise<ApiResponse<{ accepted: boolean }>>,

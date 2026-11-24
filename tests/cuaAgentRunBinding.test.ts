@@ -7,7 +7,7 @@ import { createCuaAgentChatTools, AGENT_CHAT_CUA_PER_CALL_TOOL_NAMES } from '../
 import { AgentChatSessionManager } from '../src/main/agentChatSession';
 
 function fixture() {
-  let state: CuaState = { sessionId: null, runId: null, windowId: 7, phase: 'idle', cursor: null,
+  let state: CuaState = { prepareToken: null, sessionId: null, runId: null, windowId: 7, phase: 'idle', cursor: null,
     dragStart: null, target: null, label: null, error: null, cleanupComplete: true, releaseFailures: [], cancelToken: null, targetGone: false };
   let frameNumber = 0;
   let inputs = 0;
@@ -18,7 +18,7 @@ function fixture() {
   const driver: CuaAgentDriver = {
     observe: async (scope) => {
       state = { ...state, ...scope, phase: 'ready' };
-      return { ...scope, windowId: 7, frameId: `frame-${++frameNumber}`, layoutRevision: 1, capturedAt: 0,
+      return { ...scope, contentRevision: 0, windowId: 7, frameId: `frame-${++frameNumber}`, layoutRevision: 1, capturedAt: 0,
         viewport: { width: 100, height: 100 }, bitmap: { width: 100, height: 100 }, deviceScaleFactor: 1,
         zoomFactor: 1, pngDataUrl: 'data:image/png;base64,AAAA' };
     },
@@ -34,7 +34,7 @@ function fixture() {
   };
   const orchestrator = new CuaAgentOrchestrator(authority, { driver, onAbortConversation: (id) => { aborted.push(id); } });
   const requestFor = (frame: CuaFrame): CuaActionRequest => ({ sessionId: frame.sessionId, runId: frame.runId,
-    windowId: frame.windowId, frameId: frame.frameId, layoutRevision: frame.layoutRevision, action: { kind: 'click', point: { x: 10, y: 20 } } });
+    contentRevision: 0, windowId: frame.windowId, frameId: frame.frameId, layoutRevision: frame.layoutRevision, action: { kind: 'click', point: { x: 10, y: 20 } } });
   return { authority, driver, orchestrator, aborted, requestFor, inputs: () => inputs,
     cancellations: () => cancellations, blocked: () => blocked };
 }
