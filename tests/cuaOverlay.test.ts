@@ -136,6 +136,7 @@ describe('CuaOverlay', () => {
     expect(useCuaOverlaySource).toContain('cuaAckPrepare({ runId, prepareToken })');
     expect(useCuaOverlaySource).toContain('void triggerStop()');
     expect(useCuaOverlaySource).toContain('cua.isActing || cua.isPreparing');
+    expect(useCuaOverlaySource).toContain("options.cuaPhase === 'acting' || options.cuaPhase === 'preparing'");
     expect(shortcutsSource).toContain('inputRef.current = latestInput');
     expect(agentChatContextSource).not.toContain('approvalInFlight');
     expect(agentChatContextSource).not.toContain('waitNextPaint');

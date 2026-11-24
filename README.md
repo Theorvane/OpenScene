@@ -1,16 +1,24 @@
 # OpenScene
 
-OpenScene is a local video editor that combines a multitrack timeline, a node canvas and an editing agent. Import footage, build an edit visually or describe it in natural language, then review and export the same project.
+OpenScene is a natural-language video editor. Describe what you want, review the result, and refine it with timeline and node-based editing.
+
+자연어로 영상을 만들고 다듬는 영상 편집 도구.
+
+Start with your own local video files. One core workflow turns an imported video into multiple reviewable shorts: choose a configured model, review the proposed source ranges and captions, approve editable result projects, then refine and batch export the saved results. Candidate selection depends on transcript evidence and can return fewer clips or none. This edits supplied footage; it does not generate source video from a prompt.
 
 ## One project, three ways to edit
 
-| Surface | Use it for |
+| Step | Use it for |
 | --- | --- |
-| **Timeline** | Preview, trim, split, arrange tracks, adjust effects, and style titles and captions. |
-| **Canvas** | Connect processing blocks, combine video and audio, and apply a workflow to the timeline. |
-| **Assistant** | Inspect footage, discover editing operations, and propose approved changes to clips, blocks and connections. |
+| **1. Describe in natural language** | Tell Assistant the edit you want; inspect its proposal and approve changes using the shared editing operations. |
+| **2. Refine on Timeline** | Review the result, trim and split clips, arrange tracks, adjust effects, and style titles and captions. |
+| **3. Shape a node workflow** | Connect Canvas blocks or use quick-start recipes, adjust their parameters, and apply the result to Timeline. |
 
-Timeline is the sequence used for playback and export. Canvas stores a workflow alongside it; **Apply workflow** materializes its result into timeline tracks. Changing a node does not start a render.
+Timeline is the sequence used for playback and export. Canvas already supports saved node graphs, four quick starts and 12 processing blocks; **Apply workflow** materializes a branch into timeline tracks. Changing a node does not start a render. Quick-start recipes are fixed starting configurations, not automatic semantic highlight detection or a general recipe marketplace.
+
+The desktop **Shorts** workspace provides candidate review, editable result projects and batch export. Results use portrait framing with contain fit; automatic subject tracking is not implemented. Model quality and mobile-device behavior require separate validation. The dedicated multi-shorts workspace is desktop-only today; mobile shares the timeline, Canvas and approved editing core. See [current shorts scope](docs/local-shorts-backend.md) and [recorded verification limits](docs/shorts-media-validation.md).
+
+**Roadmap:** app-window computer-use automation (CUA) and Jev integration are separate work in progress, not capabilities promised by this introduction. Existing node editing and quick starts are available now; broader reusable recipe workflows remain a product direction.
 
 ## Start editing
 

@@ -173,7 +173,8 @@ ChatOllama.prototype.invoke = async function(messages, options) {
     if (!frame) return new AIMessage('Synthetic planner stopped after the actual observation tool refused. No input was requested.');
     const point = await pointFor('.timeline-clip', undefined, false);
     assert.ok(point, 'Fixture clip is visible to the deterministic synthetic planner');
-    const action = ['move', 'move-save', 'save-deny', 'cancel'].includes(scenario.kind)
+    const action = scenario.kind.startsWith('remap-') ? { kind: 'key', key: 'ArrowUp', modifiers: [] }
+      : ['move', 'move-save', 'save-deny', 'cancel'].includes(scenario.kind)
       ? { kind: 'drag', from: point, to: { x: point.x + 65, y: point.y }, durationMs: scenario.kind === 'cancel' ? 1800 : 600 }
       : { kind: 'click', point };
     lastActionCallId = `action-${++callSequence}`;
@@ -291,12 +292,18 @@ try {
   const clip = await mcp('addClipToTimeline', { projectId, assetId, durationSeconds: 2 });
   evidence.fixtureClip = clip;
   evidence.fixtureTimeline = await mcp('getProjectTimeline', { projectId });
+  if (process.env.CUA_AGENT_REMAP_SAVE_PROBE === '1') {
+    // Isolated-profile preference fixture only; editor/timeline state is untouched.
+    // Set before the editor mounts and reads its persisted shortcut preferences.
+    await js(`localStorage.setItem('window-loom-editor-shortcuts', JSON.stringify({schemaVersion:1,overrides:{saveTimeline:'ArrowUp'}}))`);
+    evidence.shortcutFixture = { storageKey: 'window-loom-editor-shortcuts', action: 'saveTimeline', key: 'ArrowUp' };
+  }
   await click('.projects-home__project');
   await until('MCP-created timeline clip', () => pointFor('.timeline-clip'));
   if (!await pointFor('[aria-label="Edit Agent prompt"]')) await click('button', 'Assistant');
   await click('[data-testid="agent-mode-self-window"]');
   await until('explicit Window CUA mode after cancellation settlement', () => js('document.querySelector("[data-testid=agent-mode-self-window]")?.getAttribute("aria-pressed")==="true"'));
-  if (process.env.CUA_AGENT_DIRTY_READ_PROBE === '1') {
+  if (process.env.CUA_AGENT_DIRTY_READ_PROBE === '1' || process.env.CUA_AGENT_REMAP_SAVE_PROBE === '1') {
     const before = await liveClip();
     const point = await pointFor('.timeline-clip');
     const zoom = target.webContents.getZoomFactor();
@@ -347,7 +354,7 @@ try {
     evidence.scenarios.push({ kind: 'dirty-observe-only', legacySaveRequests: 0, live: await liveClip(), savedPosition: savedBefore });
     await capture('dirty-observe-only-settled');
   } else {
-  const scenarios = (process.env.CUA_AGENT_SCENARIOS || 'deny,stale,duplicate,save-deny,move-save,cancel').split(',');
+  const scenarios = (process.env.CUA_AGENT_SCENARIOS || (process.env.CUA_AGENT_REMAP_SAVE_PROBE === '1' ? 'remap-deny,remap-cancel,remap-key' : 'deny,stale,duplicate,save-deny,move-save,cancel')).split(',');
   for (const kind of scenarios) {
     const before = await savedPosition();
     const liveBefore = await liveClip();
@@ -363,7 +370,8 @@ try {
       assert.equal(evidence.saveRequests.length, legacyBefore, 'Opening a CUA proposal must not perform legacy Save');
       assert.equal(productDowns(), downs);
       const conversation = kind === 'duplicate' ? (await bridge('agentChatHistoryList')).find((entry) => entry.projectId === projectId && entry.title.includes('duplicate')) : null;
-      await click('.agent-chat-approval button', kind === 'deny' ? 'Deny' : 'Run once');
+      if (kind === 'remap-cancel') await click('[data-testid="cua-stop-btn"]');
+      else await click('.agent-chat-approval button', ['deny', 'remap-deny'].includes(kind) ? 'Deny' : 'Run once');
       if (kind === 'duplicate') {
         assert.ok(conversation, 'Actual pending conversation was persisted');
         const duplicate = await bridge('agentChatApprove', { conversationId: conversation.conversationId, toolCallId: lastActionCallId, decision: 'approve' });
@@ -415,6 +423,14 @@ try {
       const undo = Menu.getApplicationMenu()?.getMenuItemById('timeline:undo');
       assert.ok(undo?.enabled); undo.click(undefined, target, undefined);
       await until('user-role cleanup Undo after denied Save', async () => (await liveClip()).timelineStartMs === before);
+    } else if (kind.startsWith('remap-')) {
+      assert.equal(evidence.saveRequests.length, legacyBefore, 'Remapped allowed CUA key must never dispatch legacy Save');
+      assert.equal(await savedPosition(), before, 'Remapped CUA key must not publish');
+      const keyDowns = evidence.inputs.filter(event => event.source === 'product' && event.type === 'keyDown' && event.keyCode === 'Up');
+      evidence.scenarios.push({ kind: 'remap-save-boundary', scenario: kind, productArrowUpDowns: keyDowns.length, legacySaveRequests: 0 });
+      if (kind === 'remap-key') assert.ok(keyDowns.length > 0, 'Focus/safety refusal is not proof of safe dispatched key semantics');
+      else assert.equal(keyDowns.length, 0, 'Denied/cancelled key must dispatch zero inputs');
+      assert.deepEqual(heldInputs(), []);
     } else await saveThroughUi();
     const after = await savedPosition();
     if (kind === 'move' || kind === 'move-save') {
@@ -446,6 +462,17 @@ try {
     // Actual reset waits driver release and removes the old run/checkpoint.
     await click('[aria-label="Reset conversation"]');
   }
+  }
+  if (process.env.CUA_AGENT_REMAP_SAVE_PROBE === '1') {
+    const legacyBefore = evidence.saveRequests.length;
+    await click('.timeline-clip');
+    input({ type: 'keyDown', keyCode: 'Up' });
+    input({ type: 'keyUp', keyCode: 'Up' });
+    await until('ordinary user remapped Save main acknowledgement', () => evidence.saves.some(save => save.ok === true && save.startedAt >= (evidence.saveRequests[legacyBefore]?.at ?? Infinity)));
+    await until('ordinary user remapped Save clears dirty', () => js('document.querySelector("[data-testid=timeline-canvas]")?.dataset.dirty==="false"'));
+    assert.ok(evidence.saveRequests.length > legacyBefore, 'Normal user remapped shortcut remains functional');
+    assert.equal(await savedPosition(), (await liveClip()).timelineStartMs);
+    evidence.scenarios.push({ kind: 'ordinary-user-remapped-save', legacySaveRequests: evidence.saveRequests.length - legacyBefore });
   }
   evidence.states = await js('window.__cuaAgentStates');
   evidence.domEvents = await js('window.__cuaAgentEvents');
