@@ -12,7 +12,7 @@ const adapter = resolve(process.cwd(), '.agents/skills/ffmpeg-skill');
 const root = resolve(process.cwd(), 'external/ffmpeg-skill');
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8');
 const manifest = JSON.parse(readFileSync(resolve(adapter, 'UPSTREAM.json'), 'utf8')) as {
-  path: string; managedFork: string; integration: string; repository: string; commit: string; version: string; files: Record<string, string>;
+  path: string; integration: string; repository: string; commit: string; version: string; files: Record<string, string>;
 };
 
 describe('pinned ffmpeg-skill integration', () => {
@@ -22,10 +22,9 @@ describe('pinned ffmpeg-skill integration', () => {
     expect(manifest.version).toBe('3.13.1');
     expect(manifest.path).toBe('external/ffmpeg-skill');
     expect(manifest.integration).toBe('git-submodule');
-    expect(manifest.managedFork).toBe('https://github.com/Theorvane/ffmpeg-skill');
     const modules = read('.gitmodules');
     expect(modules).toContain('path = external/ffmpeg-skill');
-    expect(modules).toContain('url = https://github.com/Theorvane/ffmpeg-skill.git');
+    expect(modules).toContain('url = https://github.com/kajisho5/ffmpeg-skill.git');
     expect(readFileSync(resolve(adapter, 'SKILL.md'), 'utf8')).toContain('external/ffmpeg-skill/SKILL.md');
     expect(Object.keys(manifest.files).length).toBeGreaterThan(60);
     for (const [path, expected] of Object.entries(manifest.files)) {

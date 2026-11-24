@@ -3,7 +3,7 @@
 	url = https://github.com/Theorvane/OpenCut.git
 [submodule "external/ffmpeg-skill"]
 	path = external/ffmpeg-skill
-	url = https://github.com/Theorvane/ffmpeg-skill.git
+	url = https://github.com/kajisho5/ffmpeg-skill.git
 [submodule "external/autoclip"]
 	path = external/autoclip
-	url = https://github.com/Theorvane/autoclip.git
+	url = https://github.com/zhouxiaoka/autoclip.git
