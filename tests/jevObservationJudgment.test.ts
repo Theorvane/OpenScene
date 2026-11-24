@@ -109,7 +109,8 @@ describe('Jev explicit observation advisory', () => {
 describe('Jev graph observation contact', () => {
   it.each(['advisory', 'failure', 'absent'] as const)('preserves explicit observation and existing model with %s', async mode => {
     const f = fixture();
-    const observe = vi.fn(async () => ({ success: true, summary: 'Explicit editor observation.', frame }));
+    // The actual registered CUA tool returns a JSON string, not an object.
+    const observe = vi.fn(async () => JSON.stringify({ success: true, summary: 'Explicit editor observation.', frame }));
     let step = 0;
     let observedContent = '';
     const bundle = buildAgentChatGraph({
