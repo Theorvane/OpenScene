@@ -2,7 +2,7 @@
 
 OpenScene is a natural-language video editor. Describe what you want, review the result, and refine it with timeline and node-based editing.
 
-The interaction order is natural-language editing → precise Timeline refinement → node workflows and quick-start recipes, all over supplied media and the same saved project. Local video to multiple reviewable shorts is a core desktop workflow: approve candidate ranges, refine separate editable projects, and batch export their saved timelines. Canvas graphs and quick starts exist today; broader reusable recipes, app-window CUA and Jev integration remain roadmap work rather than completed design claims.
+Timeline and Canvas are two views of the same saved timeline. The interaction order is natural-language editing → precise Timeline refinement → node workflows and quick-start recipes, all over supplied media and the same saved project. Local video to multiple reviewable shorts is a core desktop workflow: approve candidate ranges, refine separate editable projects, and batch export their saved timelines. Canvas graphs and quick starts exist today; broader reusable recipes, app-window CUA and Jev integration remain roadmap work rather than completed design claims.
 
 ## Timeline mode
 
