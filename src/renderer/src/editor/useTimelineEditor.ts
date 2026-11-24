@@ -68,6 +68,9 @@ export function useTimelineEditor() {
   const [timelineHistory, setTimelineHistory] = useState<TimelineHistory | null>(null);
   const [isBusy, setIsBusy] = useState(false);
   const [hasUnsavedTimeline, setHasUnsavedTimeline] = useState(false);
+  const [isSavingTimeline, setIsSavingTimeline] = useState(false);
+  const [timelineSaveError, setTimelineSaveError] = useState<string | null>(null);
+  const [hasSavedTimelineOnce, setHasSavedTimelineOnce] = useState(false);
   const [metadataProbeFailuresByAssetId, setMetadataProbeFailuresByAssetId] = useState<Readonly<Record<string, string>>>({});
   const [metadataProbeRetryRevisionsByAssetId, setMetadataProbeRetryRevisionsByAssetId] = useState<Readonly<Record<string, number>>>({});
   const [statusMessage, setStatusMessage] = useState<StatusMessage>({ tone: 'neutral', text: 'Create or open a project to start editing locally.' });
@@ -91,6 +94,8 @@ export function useTimelineEditor() {
     setProject(snapshot);
     setSelectedClipIds([]);
     setTimelineHistory(snapshot === null ? null : createTimelineHistory(snapshot.timeline));
+    setTimelineSaveError(null);
+    setHasSavedTimelineOnce(false);
     playback.resetPlayback();
   }, [playback]);
 
@@ -237,6 +242,7 @@ export function useTimelineEditor() {
     setTimelineHistory((current) => current === null ? createTimelineHistory(timeline) : pushTimelineHistory(current, timeline));
     playback.clampToTimeline(timeline);
     setHasUnsavedTimeline(true);
+    setTimelineSaveError(null);
     setStatusMessage({ tone: 'neutral', text: successText });
     return timeline;
   }, [playback, project]);
@@ -685,22 +691,45 @@ export function useTimelineEditor() {
 
   const saveTimeline = useCallback(async (): Promise<boolean> => {
     if (project === null) return false;
-    const response = await invokeWhileBusy(
-      () => window.videoTool.saveTimeline({ projectId: project.id, timeline: project.timeline }),
-      'The timeline could not be saved.'
-    );
-    if (response === null) return false;
-    if (response.ok) {
-      // Saving before an Agent turn must not move the playhead or clear the
-      // current selection. The persisted timeline is the one already shown.
-      setProject(response.value);
-      setHasUnsavedTimeline(false);
-      setStatusMessage({ tone: 'success', text: 'Timeline saved locally.' });
-      return true;
+    setIsSavingTimeline(true);
+    setTimelineSaveError(null);
+    try {
+      const response = await invokeWhileBusy(
+        () => window.videoTool.saveTimeline({ projectId: project.id, timeline: project.timeline }),
+        'The timeline could not be saved.'
+      );
+      if (response === null) {
+        setTimelineSaveError('The timeline could not be saved.');
+        return false;
+      }
+      if (response.ok) {
+        // Saving before an Agent turn must not move the playhead or clear the
+        // current selection. The persisted timeline is the one already shown.
+        setProject(response.value);
+        setHasUnsavedTimeline(false);
+        setTimelineSaveError(null);
+        setHasSavedTimelineOnce(true);
+        setStatusMessage({ tone: 'success', text: 'Timeline saved locally.' });
+        return true;
+      }
+      const message = errorMessage(response.error);
+      setTimelineSaveError(message);
+      setStatusMessage({ tone: 'danger', text: message });
+      return false;
+    } finally {
+      setIsSavingTimeline(false);
     }
-    setStatusMessage({ tone: 'danger', text: errorMessage(response.error) });
-    return false;
   }, [invokeWhileBusy, project]);
+
+  const timelineSaveStatus: 'clean' | 'dirty' | 'saving' | 'saved' | 'error' = isSavingTimeline
+    ? 'saving'
+    : timelineSaveError !== null
+      ? 'error'
+      : hasUnsavedTimeline
+        ? 'dirty'
+        : hasSavedTimelineOnce
+          ? 'saved'
+          : 'clean';
 
   const saveAiProjectDocument = useCallback(async (ai: AiProjectDocument): Promise<boolean> => {
     if (project === null) return false;
@@ -751,6 +780,7 @@ export function useTimelineEditor() {
       'Connected clips. The video track now plays continuously in the new order.'
     ),
     addTimelineTrack, removeTimelineTrack, renameTimelineTrack, insertTimelineTrack, createProject, deleteCurrentProject, deleteSelectedClip, duplicateSelectedClip, hasUnsavedTimeline, importAssets,
+    isSavingTimeline, timelineSaveError, timelineSaveStatus,
     importRecordingResult, isBusy, metadataProbeFailuresByAssetId, metadataProbeRetryRevisionsByAssetId, moveSelectedClip, newProjectName,
     cutAtPlayhead, transitionAtPlayhead, setTransitionAtPlayhead, removeTransitionAtPlayhead,
     addTitleAtPlayhead, editTitle, deleteTitle, applyTitleStyleToAutomaticCaptions, titleAtPlayhead, applyNarrationSubtitles, applyTranscriptionSubtitles,

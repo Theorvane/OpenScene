@@ -80,6 +80,8 @@ export function ProviderConnectDialog({ provider, onConnect, onClose, oauthMetho
     <div className="provider-connect-dialog__backdrop" role="presentation" onClick={onClose}>
       <div
         className="provider-connect-dialog"
+        data-cua-protected="modal"
+        data-cua-protected-id="provider-connect-dialog"
         role="dialog"
         aria-modal="true"
         aria-labelledby="provider-connect-dialog-title"
