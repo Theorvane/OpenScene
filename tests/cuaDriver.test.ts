@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { CuaDriver, type CuaDriverDependencies } from '../src/main/cuaDriver';
 import { cuaBitmapPointToViewport, type CuaActionRequest, type CuaSurfaceSnapshot } from '../src/shared/cua';
 
-function fixture(autoAck = true) {
+function fixture(autoAck = true, autoPrepare = true) {
   const contents = Object.assign(new EventEmitter(), {
     isDestroyed: vi.fn(() => false), isFocused: vi.fn(() => true), getZoomFactor: vi.fn(() => 1),
     executeJavaScript: vi.fn<(script: string) => Promise<unknown>>(async () => true),
@@ -15,18 +15,22 @@ function fixture(autoAck = true) {
     sendInputEvent: vi.fn((input: MouseInputEvent) => contents.emit(input.type.startsWith('mouse') ? 'before-mouse-event' : 'before-input-event', {}, input))
   });
   const window = Object.assign(new EventEmitter(), { id: 7, webContents: contents, isDestroyed: vi.fn(() => false), isFocused: vi.fn(() => true) });
-  const consumePermit = vi.fn(); const onCancel = vi.fn();
+  const consumePermit = vi.fn(); const checkPermit = vi.fn(); const onCancel = vi.fn();
   const getPendingApproval = vi.fn<NonNullable<CuaDriverDependencies['getPendingApproval']>>(() => null);
-  const driver = new CuaDriver(window as unknown as BrowserWindow, { consumePermit, onCancel, getPendingApproval, onState: state => {
+  let resolveActing!: () => void;
+  const acting = new Promise<void>(resolve => { resolveActing = resolve; });
+  const driver = new CuaDriver(window as unknown as BrowserWindow, { consumePermit, checkPermit, onCancel, getPendingApproval, onState: state => {
+    if (state.phase === 'acting') resolveActing();
+    if (autoPrepare && state.phase === 'preparing' && state.prepareToken && state.runId) driver.acknowledgePrepare({ runId: state.runId, prepareToken: state.prepareToken });
     if (autoAck && state.phase === 'stopping' && state.cancelToken && state.runId) driver.acknowledgeCancel({ runId: state.runId, cancelToken: state.cancelToken });
   } });
-  const surface: CuaSurfaceSnapshot = { executionBlocked: false, blockReason: null, layoutRevision: 1, viewport: { width: 800, height: 600 }, safeSurface: { kind: 'timeline', rect: { x: 0, y: 0, width: 800, height: 600 }, interactive: true }, protectedRects: [], focusedInSafeSurface: true, focusedTestId: null };
+  const surface: CuaSurfaceSnapshot = { contentRevision: 0, executionBlocked: false, blockReason: null, layoutRevision: 1, viewport: { width: 800, height: 600 }, safeSurface: { kind: 'timeline', rect: { x: 0, y: 0, width: 800, height: 600 }, interactive: true }, protectedRects: [], focusedInSafeSurface: true, focusedTestId: null };
   driver.reportSurface(surface); driver.setExecutionBlocked(false);
   const observe = async (): Promise<CuaActionRequest> => {
     const frame = await driver.observe({ sessionId: 's', runId: 'r' });
-    return { sessionId: 's', runId: 'r', windowId: 7, frameId: frame.frameId, layoutRevision: 1, action: { kind: 'click', point: { x: 20, y: 20 } } };
+    return { contentRevision: 0, sessionId: 's', runId: 'r', windowId: 7, frameId: frame.frameId, layoutRevision: 1, action: { kind: 'click', point: { x: 20, y: 20 } } };
   };
-  return { driver, window, contents, consumePermit, onCancel, getPendingApproval, surface, observe };
+  return { driver, window, contents, consumePermit, checkPermit, onCancel, getPendingApproval, surface, observe, acting };
 }
 describe('self-window CUA safety', () => {
   it('uses actual bitmap ratio and rejects invalid pixels', () => {
@@ -63,7 +67,7 @@ describe('self-window CUA safety', () => {
   it('releases a held drag on stop and sends no subsequent moves', async () => {
     const f = fixture(), r = await f.observe();
     const execution = f.driver.execute({ ...r, action: { kind: 'drag', from: { x: 20, y: 20 }, to: { x: 200, y: 20 }, durationMs: 3000 } }, 'p');
-    await Promise.resolve(); await Promise.resolve();
+    await f.acting;
     const rejected = expect(execution).rejects.toThrow('CANCELLED');
     const cancelled = f.driver.cancel('user-stop');
     expect(f.driver.cancel()).toBe(cancelled);
@@ -77,7 +81,7 @@ describe('self-window CUA safety', () => {
   it('cancels real input during drag but ignores synchronous injected events', async () => {
     const f = fixture(), r = await f.observe();
     const execution = f.driver.execute({ ...r, action: { kind: 'drag', from: { x: 20, y: 20 }, to: { x: 200, y: 20 }, durationMs: 100 } }, 'p');
-    await Promise.resolve(); await Promise.resolve();
+    await f.acting;
     expect(f.driver.getState().phase).toBe('acting');
     f.contents.emit('before-input-event', {}, { type: 'keyDown', key: 'Escape' });
     await expect(execution).rejects.toThrow('CANCELLED');
@@ -87,7 +91,7 @@ describe('self-window CUA safety', () => {
   it('does not report clean stop if held input release throws', async () => {
     const f = fixture(), r = await f.observe();
     const execution = f.driver.execute({ ...r, action: { kind: 'drag', from: { x: 20, y: 20 }, to: { x: 200, y: 20 }, durationMs: 100 } }, 'p');
-    await Promise.resolve(); await Promise.resolve();
+    await f.acting;
     f.contents.sendInputEvent.mockImplementation(() => { throw new Error('closed'); });
     const stopped = await f.driver.cancel('closed');
     expect(stopped.phase).toBe('cleanup-failed');
@@ -107,7 +111,7 @@ describe('self-window CUA safety', () => {
   it('times out missing rollback acknowledgement, still releases and locks recovery', async () => {
     const f = fixture(false), r = await f.observe();
     const execution = f.driver.execute({ ...r, action: { kind: 'drag', from: { x: 20, y: 20 }, to: { x: 200, y: 20 }, durationMs: 3000 } }, 'p');
-    await Promise.resolve(); await Promise.resolve();
+    await f.acting;
     const rejected = expect(execution).rejects.toThrow('CANCELLED');
     const stop = f.driver.cancel('user-stop');
     const pending = f.driver.getState();
@@ -181,5 +185,66 @@ describe('self-window CUA safety', () => {
     expect(f.onCancel).toHaveBeenCalledOnce();
     await expect(f.driver.execute(r, 'p')).rejects.toThrow('BUSY');
     expect(f.contents.sendInputEvent).not.toHaveBeenCalled();
+  });
+  it('does not prepare without a valid non-consuming main permit check', async () => {
+    const f = fixture(), r = await f.observe();
+    f.checkPermit.mockImplementation(() => { throw new Error('CUA_APPROVAL_MISMATCH'); });
+    await expect(f.driver.execute(r, 'forged')).rejects.toThrow('APPROVAL_MISMATCH');
+    expect(f.driver.getState().prepareToken).toBeNull();
+    expect(f.driver.getState().phase).toBe('ready');
+    expect(f.consumePermit).not.toHaveBeenCalled();
+    expect(f.contents.sendInputEvent).not.toHaveBeenCalled();
+  });
+  it('prepares input-free until current renderer state is reported and a one-use ack arrives', async () => {
+    const f = fixture(true, false), r = await f.observe();
+    f.driver.reportSurface({ ...f.surface, executionBlocked: true, safeSurface: { ...f.surface.safeSurface!, interactive: false } });
+    const execution = f.driver.execute(r, 'approved');
+    const token = f.driver.getState().prepareToken!;
+    expect(f.driver.getState().phase).toBe('preparing');
+    expect(f.contents.sendInputEvent).not.toHaveBeenCalled();
+    expect(f.consumePermit).not.toHaveBeenCalled();
+    expect(f.driver.acknowledgePrepare({ runId: 'other', prepareToken: token })).toBe(false);
+    f.driver.reportSurface(f.surface);
+    expect(f.driver.acknowledgePrepare({ runId: 'r', prepareToken: token })).toBe(true);
+    expect(f.driver.acknowledgePrepare({ runId: 'r', prepareToken: token })).toBe(false);
+    expect((await execution).cleanupComplete).toBe(true);
+    expect(f.checkPermit).toHaveBeenCalledOnce();
+    expect(f.consumePermit).toHaveBeenCalledOnce();
+  });
+  it('times out input-free preparation without consuming or resetting the permit', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const f = fixture(true, false), r = await f.observe();
+      const execution = f.driver.execute(r, 'approved');
+      const rejected = expect(execution).rejects.toThrow('PREPARE_TIMEOUT');
+      await vi.advanceTimersByTimeAsync(500); await rejected;
+      expect(f.consumePermit).not.toHaveBeenCalled();
+      expect(f.contents.sendInputEvent).not.toHaveBeenCalled();
+      expect(f.onCancel).toHaveBeenCalledOnce();
+      expect(f.driver.getState()).toMatchObject({ phase: 'stopped', prepareToken: null, cleanupComplete: true });
+    } finally { vi.useRealTimers(); }
+  });
+  it('rejects changed content during preparation and clears stale acknowledgements', async () => {
+    const f = fixture(true, false), r = await f.observe();
+    const execution = f.driver.execute(r, 'approved');
+    const rejected = expect(execution).rejects.toThrow('CANCELLED');
+    const token = f.driver.getState().prepareToken!;
+    f.driver.reportSurface({ ...f.surface, contentRevision: 1 });
+    await rejected;
+    expect(f.driver.acknowledgePrepare({ runId: 'r', prepareToken: token })).toBe(false);
+    expect(f.consumePermit).not.toHaveBeenCalled();
+    expect(f.contents.sendInputEvent).not.toHaveBeenCalled();
+  });
+  it('accepts a released action commit without rewriting its success, but invalidates a new observed frame', async () => {
+    const f = fixture(), r = await f.observe();
+    const result = await f.driver.execute(r, 'approved');
+    f.driver.reportSurface({ ...f.surface, contentRevision: 1 });
+    expect(result.cleanupComplete).toBe(true);
+    expect(f.driver.getState().phase).toBe('ready');
+    expect(f.onCancel).not.toHaveBeenCalled();
+    expect((await f.driver.observe({ sessionId: 's', runId: 'r' })).contentRevision).toBe(1);
+    f.driver.reportSurface({ ...f.surface, contentRevision: 2 });
+    expect(f.onCancel).toHaveBeenCalledOnce();
+    expect(f.driver.getState().phase).toBe('stopped');
   });
 });

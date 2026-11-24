@@ -7,7 +7,7 @@ import { createCuaAgentChatTools, AGENT_CHAT_CUA_PER_CALL_TOOL_NAMES } from '../
 import { AgentChatSessionManager } from '../src/main/agentChatSession';
 
 function fixture() {
-  let state: CuaState = { sessionId: null, runId: null, windowId: 7, phase: 'idle', cursor: null,
+  let state: CuaState = { prepareToken: null, sessionId: null, runId: null, windowId: 7, phase: 'idle', cursor: null,
     dragStart: null, target: null, label: null, error: null, cleanupComplete: true, releaseFailures: [], cancelToken: null, targetGone: false };
   let frameNumber = 0;
   let inputs = 0;
@@ -18,7 +18,7 @@ function fixture() {
   const driver: CuaAgentDriver = {
     observe: async (scope) => {
       state = { ...state, ...scope, phase: 'ready' };
-      return { ...scope, windowId: 7, frameId: `frame-${++frameNumber}`, layoutRevision: 1, capturedAt: 0,
+      return { ...scope, contentRevision: 0, windowId: 7, frameId: `frame-${++frameNumber}`, layoutRevision: 1, capturedAt: 0,
         viewport: { width: 100, height: 100 }, bitmap: { width: 100, height: 100 }, deviceScaleFactor: 1,
         zoomFactor: 1, pngDataUrl: 'data:image/png;base64,AAAA' };
     },
@@ -34,12 +34,20 @@ function fixture() {
   };
   const orchestrator = new CuaAgentOrchestrator(authority, { driver, onAbortConversation: (id) => { aborted.push(id); } });
   const requestFor = (frame: CuaFrame): CuaActionRequest => ({ sessionId: frame.sessionId, runId: frame.runId,
-    windowId: frame.windowId, frameId: frame.frameId, layoutRevision: frame.layoutRevision, action: { kind: 'click', point: { x: 10, y: 20 } } });
+    contentRevision: frame.contentRevision, windowId: frame.windowId, frameId: frame.frameId, layoutRevision: frame.layoutRevision, action: { kind: 'click', point: { x: 10, y: 20 } } });
   return { authority, driver, orchestrator, aborted, requestFor, inputs: () => inputs,
     cancellations: () => cancellations, blocked: () => blocked };
 }
 
 describe('CUA immutable run binding and dispatch', () => {
+  it('cannot bypass graph approval by invoking the action tool directly', async () => {
+    const f = fixture();
+    const request = f.requestFor((await f.orchestrator.observe('a')).frame);
+    const action = createCuaAgentChatTools(f.orchestrator).find((candidate) => candidate.name === 'executeCuaAction')!;
+    await expect(action.invoke(request)).rejects.toThrow('CUA_APPROVAL_MISMATCH');
+    expect(f.inputs()).toBe(0);
+  });
+
   it('carries PNG evidence to a synthetic model, displays exact approval, then reobserves without transcript base64', async () => {
     const f = fixture();
     let step = 0;
@@ -54,6 +62,7 @@ describe('CUA immutable run binding and dispatch', () => {
           const metadata = JSON.parse(String(observation!.content).split('\n').at(-1)!) as CuaFrame;
           return new AIMessage({ content: '', tool_calls: [{ id: 'action', name: 'executeCuaAction', args: { ...f.requestFor(metadata) } }] });
         }
+        if (step === 3) return new AIMessage({ content: '', tool_calls: [{ id: 'observe-after-action', name: 'observeEditorWindow', args: {} }] });
         return new AIMessage('Action observed; inspect project timeline next.');
       } })
     });
@@ -77,11 +86,26 @@ describe('CUA immutable run binding and dispatch', () => {
     const summary = f.orchestrator.prepareApproval('a', 'one', request);
     expect(f.orchestrator.prepareApproval('a', 'one', request)).toEqual(summary);
     expect(f.authority.getPendingApproval()?.runId).toBe(observed.frame.runId);
-    await f.orchestrator.executeApproved('a', 'one', request);
+    const executed = await f.orchestrator.executeApproved('a', 'one', request);
+    expect(executed).toMatchObject({ success: true, actionExecuted: true, observationRequired: true });
     expect(f.inputs()).toBe(1);
     expect(f.blocked()).toBe(true);
     await expect(f.orchestrator.executeApproved('a', 'one', request)).rejects.toThrow();
     expect(f.inputs()).toBe(1);
+  });
+
+  it('does not recapture or retry successful input when a later explicit observation fails', async () => {
+    const f = fixture();
+    const request = f.requestFor((await f.orchestrator.observe('a')).frame);
+    f.orchestrator.prepareApproval('a', 'one', request);
+    f.driver.observe = async () => { throw new Error('CUA_STALE_FRAME'); };
+    const executed = await f.orchestrator.executeApproved('a', 'one', request);
+    expect(executed).toMatchObject({ success: true, actionExecuted: true });
+    expect(f.inputs()).toBe(1);
+    await expect(f.orchestrator.observe('a')).rejects.toThrow('CUA_STALE_FRAME');
+    expect(f.inputs()).toBe(1);
+    expect(f.cancellations()).toBe(0);
+    expect(() => f.orchestrator.prepareApproval('a', 'new-action', request)).toThrow();
   });
 
   it('refuses a newly observed frame to inherit an old approval', async () => {

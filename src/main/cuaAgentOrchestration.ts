@@ -99,19 +99,24 @@ export class CuaApprovalAuthority {
       sessionId, runId, windowId, frameId, layoutRevision });
   }
 
-  /** Synchronous, atomic and one-use, including attempts with wrong evidence. */
-  consume(request: CuaActionRequest, token: unknown): void {
+  /** Non-consuming preflight. It never extends time or changes approved scope. */
+  check(request: CuaActionRequest, token: unknown): void {
     this.checkRun(request.runId);
     if (this.pending !== null) throw new CuaApprovalError('CUA_BUSY');
     const permit = typeof token === 'string' ? this.permits.get(token) : undefined;
-    if (typeof token === 'string') this.permits.delete(token);
     if (permit === undefined) throw new CuaApprovalError('CUA_ACTION_REPLAYED');
     if (permit.digest !== digest(request)) throw new CuaApprovalError('CUA_APPROVAL_MISMATCH');
     const elapsed = this.options.now() - permit.issuedAt;
     if (elapsed < 0 || elapsed >= this.options.permitTtlMs) throw new CuaApprovalError('CUA_APPROVAL_EXPIRED');
     const count = this.actionsByRun.get(request.runId) ?? 0;
     if (count >= this.options.maxActionsPerRun) throw new CuaApprovalError('CUA_BUDGET_EXCEEDED');
-    this.actionsByRun.set(request.runId, count + 1);
+  }
+
+  /** Synchronous, atomic and one-use, including attempts with wrong evidence. */
+  consume(request: CuaActionRequest, token: unknown): void {
+    try { this.check(request, token); }
+    finally { if (typeof token === 'string') this.permits.delete(token); }
+    this.actionsByRun.set(request.runId, (this.actionsByRun.get(request.runId) ?? 0) + 1);
   }
 
   /** Called synchronously on every cancellation source before releasing input. */
@@ -231,8 +236,11 @@ export class CuaAgentOrchestrator {
         throw new CuaApprovalError('CUA_CLEANUP_FAILED');
       }
       run.frame = null;
-      this.options.driver.setExecutionBlocked(true);
-      return { state, ...await this.observe(conversationId) };
+      // Input has settled successfully. A later observation can race a real
+      // committed-content report, so it is a separate tool step and cannot
+      // turn this successful action into an apparent failure/retry.
+      return { success: true, actionExecuted: true, observationRequired: true, state,
+        summary: 'The approved input executed and released successfully. Its original frame is consumed. Call observeEditorWindow alone for new evidence before another action; observation failure must not retry this input.' };
     } catch (error) {
       await this.cancelConversation(conversationId);
       throw error;

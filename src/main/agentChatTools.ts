@@ -55,7 +55,7 @@ export async function createAgentChatTools(instance: OpenVideoMcpServer, cua?: C
 const point = z.object({ x: z.number().finite().nonnegative(), y: z.number().finite().nonnegative() }).strict();
 export const CUA_ACTION_TOOL_SCHEMA = z.object({
   sessionId: z.string().min(1), runId: z.string().min(1), windowId: z.number().int().nonnegative(),
-  frameId: z.string().min(1), layoutRevision: z.number().int().nonnegative(),
+  frameId: z.string().min(1), layoutRevision: z.number().int().nonnegative(), contentRevision: z.number().int().nonnegative(),
   action: z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('click'), point }).strict(),
     z.object({ kind: z.literal('drag'), from: point, to: point, durationMs: z.number().int().min(100).max(3000) }).strict(),
@@ -73,7 +73,7 @@ export function createCuaAgentChatTools(cua: CuaAgentOrchestrator): DynamicStruc
       return JSON.stringify(await cua.observe(conversationId));
     }, { name: 'observeEditorWindow', description: 'Observe only this OpenScene editor window. Returns a frame and CSS coordinate scope; use exactly those IDs for a proposed action. No OS-wide control.', schema: z.object({}).strict() }),
     tool(async () => { throw new Error('CUA_APPROVAL_MISMATCH: Only the main graph approval dispatch can execute an action.'); }, {
-      name: 'executeCuaAction', description: 'Propose one click, bounded drag or allowed key in the observed OpenScene editor. Requires a fresh exact per-call human approval; always never authorizes later actions. After execution inspect the returned frame and requery the project timeline. No implicit recapture or coordinate conversion.', schema: CUA_ACTION_TOOL_SCHEMA
+      name: 'executeCuaAction', description: 'Propose one click, bounded drag or allowed key in the observed OpenScene editor. Requires a fresh exact per-call human approval; always never authorizes later actions. Successful input consumes its frame; observeEditorWindow separately before another action. An observation failure must not retry successful input. MCP timeline reads saved state, which may lag unsaved UI. No implicit recapture or coordinate conversion.', schema: CUA_ACTION_TOOL_SCHEMA
     })
   ];
 }

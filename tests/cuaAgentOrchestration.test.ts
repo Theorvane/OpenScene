@@ -3,6 +3,7 @@ import type { CuaActionRequest } from '../src/shared/cua';
 import { CuaApprovalAuthority } from '../src/main/cuaAgentOrchestration';
 
 const request: CuaActionRequest = {
+  contentRevision: 0,
   sessionId: 'session', runId: 'run', windowId: 1, frameId: 'frame', layoutRevision: 3,
   action: { kind: 'drag', from: { x: 10, y: 20 }, to: { x: 50, y: 20 }, durationMs: 100 }
 };
@@ -17,6 +18,36 @@ function fixture(maxActionsPerRun = 2) {
 }
 
 describe('main CUA approval authority', () => {
+  it('can preflight repeatedly without consumption or extending the original TTL', () => {
+    const { authority, approve, advance } = fixture();
+    const token = approve();
+    authority.check(request, token);
+    authority.check(request, token);
+    advance(99);
+    authority.check(request, token);
+    advance(1);
+    expect(() => authority.check(request, token)).toThrow('CUA_APPROVAL_EXPIRED');
+    expect(() => authority.consume(request, token)).toThrow('CUA_APPROVAL_EXPIRED');
+    expect(() => authority.consume(request, token)).toThrow('CUA_ACTION_REPLAYED');
+  });
+
+  it('checks exact evidence without mutating a permit on failed preflight', () => {
+    const { authority, approve } = fixture();
+    const token = approve();
+    expect(() => authority.check({ ...request, frameId: 'different' }, token)).toThrow('CUA_APPROVAL_MISMATCH');
+    authority.check(request, token);
+    authority.consume(request, token);
+    expect(() => authority.check(request, token)).toThrow('CUA_ACTION_REPLAYED');
+  });
+
+  it('rejects cancellation between preflight and final consumption', () => {
+    const { authority, approve } = fixture();
+    const token = approve();
+    authority.check(request, token);
+    authority.revokeRun(request.runId);
+    expect(() => authority.consume(request, token)).toThrow('CUA_CANCELLED');
+  });
+
   it('denial dispatches nothing and cannot later be upgraded by replay', () => {
     const { authority } = fixture();
     authority.propose('conversation', 'call', request);
