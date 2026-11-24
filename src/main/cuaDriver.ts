@@ -2,7 +2,11 @@ import { randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import type { BrowserWindow, KeyboardInputEvent, MouseInputEvent } from 'electron';
 import type { CuaSaveScope } from '../shared/cuaSave';
-import { CUA_KEYS, type CuaActionRequest, type CuaCancelAck, type CuaFrame, type CuaPoint, type CuaPrepareAck, type CuaRect, type CuaState, type CuaSurfaceSnapshot } from '../shared/cua';
+import { CUA_KEYS, type CuaActionRequest, type CuaCancelAck, type CuaFrame, type CuaKey, type CuaPoint, type CuaPrepareAck, type CuaRect, type CuaState, type CuaSurfaceSnapshot } from '../shared/cua';
+
+const ELECTRON_KEY_CODES: Readonly<Partial<Record<CuaKey, string>>> = {
+  ArrowLeft: 'Left', ArrowRight: 'Right', ArrowUp: 'Up', ArrowDown: 'Down'
+};
 
 export interface CuaDriverDependencies {
   readonly isObservationInFlight?: (scope: { sessionId: string; runId: string }) => boolean;
@@ -243,6 +247,11 @@ export class CuaDriver {
   private input(event: MouseInputEvent | KeyboardInputEvent): void {
     const release = event.type === 'mouseUp' || event.type === 'keyUp';
     if (!release && (this.state.phase !== 'acting' || this.executionBlocked || this.surface?.executionBlocked || !this.surface?.safeSurface?.interactive)) throw new Error('CUA_CANCELLED');
+    if (!release) {
+      this.live();
+      if (!this.frame || this.window.webContents.getZoomFactor() !== this.frame.zoomFactor
+        || (this.dependencies.getDeviceScaleFactor?.() ?? 1) !== this.frame.deviceScaleFactor) throw new Error('CUA_STALE_FRAME');
+    }
     this.injecting = true;
     try { this.window.webContents.sendInputEvent(event); }
     finally { this.injecting = false; }
@@ -297,7 +306,7 @@ export class CuaDriver {
       this.publish({ phase: 'acting', prepareToken: null, cleanupComplete: false });
       if (generation !== this.generation || signal?.aborted) throw new Error('CUA_CANCELLED');
       if (request.action.kind === 'key') {
-        this.heldKey = { type: 'keyDown', keyCode: request.action.key, modifiers: [...request.action.modifiers] };
+        this.heldKey = { type: 'keyDown', keyCode: ELECTRON_KEY_CODES[request.action.key] ?? request.action.key, modifiers: [...request.action.modifiers] };
         this.input(this.heldKey);
       } else {
         const first = points[0]!;

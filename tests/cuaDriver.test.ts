@@ -272,4 +272,11 @@ describe('self-window CUA safety', () => {
     f.window.isDestroyed.mockReturnValue(false);
     await expect(f.observe()).rejects.toThrow('BUSY');
   });
+  it('maps logical DOM arrow keys to the Electron codes that actually deliver those keys', async () => {
+    const f = fixture(), request = await f.observe();
+    await f.driver.execute({ ...request, action: { kind: 'key', key: 'ArrowLeft', modifiers: [] } }, 'p');
+    expect(f.contents.sendInputEvent.mock.calls.map(call => call[0])).toMatchObject([
+      { type: 'keyDown', keyCode: 'Left' }, { type: 'keyUp', keyCode: 'Left' }
+    ]);
+  });
 });
