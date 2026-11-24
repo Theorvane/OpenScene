@@ -6,6 +6,9 @@ import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 import { CUA_KEYS } from '../shared/cua';
 import type { CuaAgentOrchestrator } from './cuaAgentOrchestration';
+import type { CuaAgentSaveOrchestrator } from './cuaAgentSaveOrchestration';
+import { parseEditAgentProjectContext } from '../shared/editAgentContext';
+import { AGENT_CHAT_CUA_ACTION_TOOL_NAME, AGENT_CHAT_CUA_SAVE_TOOL_NAME } from '../shared/agentChat';
 
 /**
  * The tools that read and change nothing.
@@ -46,10 +49,10 @@ export function agentChatMutatingToolNames(tools: readonly { readonly name: stri
   return new Set(tools.map((tool) => tool.name).filter((name) => !AGENT_CHAT_READ_ONLY_TOOL_NAMES.has(name)));
 }
 
-export async function createAgentChatTools(instance: OpenVideoMcpServer, cua?: CuaAgentOrchestrator): Promise<readonly DynamicStructuredTool[]> {
+export async function createAgentChatTools(instance: OpenVideoMcpServer, cua?: CuaAgentOrchestrator, cuaSave?: CuaAgentSaveOrchestrator): Promise<readonly DynamicStructuredTool[]> {
   const resolver: InstanceResolver<OpenVideoMcpServer> = { resolve: () => instance };
   const tools = await createLangChainTools(OpenVideoMcpServer, { resolver });
-  return cua ? [...tools, ...createCuaAgentChatTools(cua)] : tools;
+  return [...tools, ...(cua ? createCuaAgentChatTools(cua) : []), ...(cuaSave ? createCuaSaveAgentChatTools() : [])];
 }
 
 const point = z.object({ x: z.number().finite().nonnegative(), y: z.number().finite().nonnegative() }).strict();
@@ -63,17 +66,33 @@ export const CUA_ACTION_TOOL_SCHEMA = z.object({
   ])
 }).strict();
 
-export const AGENT_CHAT_CUA_PER_CALL_TOOL_NAMES: ReadonlySet<string> = new Set(['executeCuaAction']);
+/** Scope only. The backend supplies and pins the actual immutable proposal. */
+export const CUA_SAVE_TOOL_SCHEMA = z.object({
+  projectId: z.string().min(1), sessionId: z.string().min(1), runId: z.string().min(1),
+  windowId: z.number().int().nonnegative(), frameId: z.string().min(1),
+  layoutRevision: z.number().int().nonnegative(), contentRevision: z.number().int().nonnegative()
+}).strict();
+
+export const AGENT_CHAT_CUA_PER_CALL_TOOL_NAMES: ReadonlySet<string> = new Set([AGENT_CHAT_CUA_ACTION_TOOL_NAME, AGENT_CHAT_CUA_SAVE_TOOL_NAME]);
+
+export function createCuaSaveAgentChatTools(): DynamicStructuredTool[] {
+  return [tool(async () => { throw new Error('CUA_APPROVAL_MISMATCH: Only the main graph approval dispatch can save an approved snapshot.'); }, {
+    name: AGENT_CHAT_CUA_SAVE_TOOL_NAME, description: 'Explicitly request Save of the exact current live editor snapshot, using the latest observed project/session/run/window/frame/layout/content scope. Main pins and summarizes the snapshot before per-call approval. Run this tool alone. It cannot approve itself, use a pointer permit, bypass protected controls or silently autosave. Verify the terminal disk receipt and saved MCP timeline; never retry a confirmed write after a later observation/UI acknowledgement failure.', schema: CUA_SAVE_TOOL_SCHEMA
+  })];
+}
 
 export function createCuaAgentChatTools(cua: CuaAgentOrchestrator): DynamicStructuredTool[] {
   return [
     tool(async (_args, config) => {
       const conversationId = config?.configurable?.thread_id;
       if (typeof conversationId !== 'string') throw new Error('CUA_SCOPE_CHANGED');
-      return JSON.stringify(await cua.observe(conversationId));
+      let projectId: string | undefined;
+      try { projectId = parseEditAgentProjectContext(JSON.parse(config?.configurable?.editProjectContext ?? 'null'))?.projectId; }
+      catch { /* Missing main conversation project context cannot authorize Save. */ }
+      return JSON.stringify(await cua.observe(conversationId, projectId));
     }, { name: 'observeEditorWindow', description: 'Observe only this OpenScene editor window. Returns a frame and CSS coordinate scope; use exactly those IDs for a proposed action. No OS-wide control.', schema: z.object({}).strict() }),
     tool(async () => { throw new Error('CUA_APPROVAL_MISMATCH: Only the main graph approval dispatch can execute an action.'); }, {
-      name: 'executeCuaAction', description: 'Propose one click, bounded drag or allowed key in the observed OpenScene editor. Requires a fresh exact per-call human approval; always never authorizes later actions. Successful input consumes its frame; observeEditorWindow separately before another action. An observation failure must not retry successful input. MCP timeline reads saved state, which may lag unsaved UI. No implicit recapture or coordinate conversion.', schema: CUA_ACTION_TOOL_SCHEMA
+      name: AGENT_CHAT_CUA_ACTION_TOOL_NAME, description: 'Propose one click, bounded drag or allowed key in the observed OpenScene editor. Requires a fresh exact per-call human approval; always never authorizes later actions. Successful input consumes its frame; observeEditorWindow separately before another action. An observation failure must not retry successful input. MCP timeline reads saved state, which may lag unsaved UI. No implicit recapture or coordinate conversion.', schema: CUA_ACTION_TOOL_SCHEMA
     })
   ];
 }

@@ -24,17 +24,24 @@ app.whenReady().then(async () => {
   send('mouseMove',40,30); send('mouseDown',40,30,true);
   for(let y=35;y<=150;y+=5){send('mouseMove',40,y,true);await delay(16);}
   send('mouseUp',40,150);
-  for (const type of ['keyDown', 'keyUp']) {
-    injecting=true;
-    try { win.webContents.sendInputEvent({type,keyCode:'z',modifiers:['meta']}); }
-    finally { injecting=false; }
+  const keyResults = [];
+  const keys = process.env.CUA_PROBE_KEYS === '1' ? ['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Left','Right','Up','Down','Delete','Backspace','Space','z','y'] : ['z'];
+  for (const keyCode of keys) {
+    try {
+      for (const type of ['keyDown', 'keyUp']) {
+        injecting=true;
+        try { win.webContents.sendInputEvent({type,keyCode,modifiers:process.env.CUA_PROBE_KEYS==='1'?[]:['meta']}); }
+        finally { injecting=false; }
+      }
+      keyResults.push({keyCode,accepted:true});
+    } catch(error) { keyResults.push({keyCode,accepted:false,error:String(error)}); }
   }
   await delay(300);
   const events = await win.webContents.executeJavaScript('window.events');
   const out = process.env.CUA_PROBE_DIR || '/tmp/openscene-cua-probe';
   fs.mkdirSync(out,{recursive:true});
   const viewport = await win.webContents.executeJavaScript('({width:innerWidth,height:innerHeight,dpr:devicePixelRatio})');
-  fs.writeFileSync(path.join(out,'input.json'),JSON.stringify({profile,windowId:win.id,title:win.getTitle(),initialFocusRequested:process.env.CUA_PROBE_INITIAL_FOCUS==='1',focused,viewport,zoom:win.webContents.getZoomFactor(),before,events},null,2));
+  fs.writeFileSync(path.join(out,'input.json'),JSON.stringify({profile,windowId:win.id,title:win.getTitle(),initialFocusRequested:process.env.CUA_PROBE_INITIAL_FOCUS==='1',focused,viewport,zoom:win.webContents.getZoomFactor(),keyResults,before,events},null,2));
   fs.writeFileSync(path.join(out,'capture.png'),(await win.webContents.capturePage()).toPNG());
   console.log(JSON.stringify({out,focused,beforeTypes:before.map(e=>e.type),domTypes:events.map(e=>e.type)}));
   win.destroy();app.exit(0);

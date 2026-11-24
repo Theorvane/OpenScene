@@ -39,7 +39,7 @@ writeFileSync(join(projectDirectory, 'project.json'), JSON.stringify({
 const evidence = { head: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
   harnessSha256: createHash('sha256').update(readFileSync(new URL(import.meta.url))).digest('hex'),
   workingTree: execFileSync('git', ['status', '--short'], { encoding: 'utf8' }),
-  syntheticModel: true, liveModelQualityTested: false, profile, projectId, inputs: [], states: [], snapshots: [], surfaceReports: [], saves: [], modelCalls: [], scenarios: [] };
+  syntheticModel: true, liveModelQualityTested: false, profile, projectId, inputs: [], states: [], snapshots: [], surfaceReports: [], saveRequests: [], agentRequests: [], saves: [], modelCalls: [], scenarios: [] };
 let target;
 let source = 'product';
 let scenario = { kind: 'move', stage: 0 };
@@ -49,11 +49,17 @@ const originalHandle = ipcMain.handle.bind(ipcMain);
 ipcMain.handle = (channel, handler) => {
   if (channel === 'project-timeline:save') return originalHandle(channel, async (event, payload) => {
     const startedAt = performance.now();
+    evidence.saveRequests.push({ at: startedAt, projectId: payload?.projectId, scenario: scenario.kind, modelStage: scenario.stage });
     const response = await handler(event, payload);
     evidence.saves.push({ startedAt, completedAt: performance.now(), projectId: payload?.projectId,
       ok: response?.ok, updatedAt: response?.value?.updatedAt,
       clips: response?.value?.timeline?.tracks.flatMap(track => track.clips.map(clip => ({ id: clip.id, timelineStartMs: clip.timelineStartMs }))) });
     return response;
+  });
+  if (['agent-chat:send', 'agent-chat:approve', 'agent-chat:cancel'].includes(channel)) return originalHandle(channel, (event, payload) => {
+    evidence.agentRequests.push({ channel, at: performance.now(), conversationId: payload?.conversationId,
+      interactionMode: payload?.interactionMode, hasUnsavedTimeline: payload?.hasUnsavedTimeline, decision: payload?.decision, toolCallId: payload?.toolCallId });
+    return handler(event, payload);
   });
   return originalHandle(channel, channel !== 'cua:report-surface-snapshot' ? handler : (event, snapshot) => {
   // Passive evidence tap: original sender, payload, handler and return value.
@@ -158,7 +164,7 @@ ChatOllama.prototype.invoke = async function(messages, options) {
     lastActionCallId = `action-${++callSequence}`;
     return new AIMessage({ content: '', tool_calls: [{ id: lastActionCallId, name: 'executeCuaAction', args: {
       sessionId: frame.sessionId, runId: frame.runId, windowId: frame.windowId,
-      frameId: scenario.kind === 'stale' ? `${frame.frameId}-stale` : frame.frameId, layoutRevision: frame.layoutRevision, action
+      frameId: scenario.kind === 'stale' ? `${frame.frameId}-stale` : frame.frameId, layoutRevision: frame.layoutRevision, contentRevision: frame.contentRevision, action
     } }] });
   }
   if (scenario.stage === 3) {
@@ -206,9 +212,9 @@ async function saveThroughUi() {
   await until('actual main save acknowledgement', () => evidence.saves.length > previousAcks);
   assert.equal(evidence.saves.at(-1).ok, true, JSON.stringify(evidence.saves.at(-1)));
   assert.equal(evidence.saves.at(-1).projectId, projectId);
-  await until('project save', () => js(`!document.querySelector('.oc-editor-host__save')?.textContent.includes('*')`));
+  await until('project save', () => js(`(() => {const b=document.querySelector('[data-testid="editor-save-btn"]');return b?.dataset.dirty==='false'&&b.dataset.saving!=='true'&&b.dataset.saveStatus!=='error';})()`));
 }
-const liveClip = () => js(`(() => {const e=document.querySelector('.timeline-clip');if(!e)return null;const r=e.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,left:e.style.left,selected:e.classList.contains('timeline-clip--selected')};})()`);
+const liveClip = () => js(`(() => {const e=document.querySelector('.timeline-clip');if(!e)return null;const r=e.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,left:e.style.left,timelineStartMs:Number(e.dataset.timelineStartMs),selected:e.classList.contains('timeline-clip--selected')};})()`);
 async function savedPosition() {
   const state = await mcp('getProjectTimeline', { projectId });
   return state.project.timeline.tracks.flatMap((track) => track.clips)[0]?.timelineStartMs;
@@ -250,6 +256,22 @@ try {
   await click('.projects-home__project');
   await until('MCP-created timeline clip', () => pointFor('.timeline-clip'));
   if (!await pointFor('[aria-label="Edit Agent prompt"]')) await click('button', 'Assistant');
+  await click('[data-testid="agent-mode-self-window"]');
+  await until('explicit Window CUA mode after cancellation settlement', () => js('document.querySelector("[data-testid=agent-mode-self-window]")?.getAttribute("aria-pressed")==="true"'));
+  if (process.env.CUA_AGENT_DIRTY_READ_PROBE === '1') {
+    const before = await liveClip();
+    const point = await pointFor('.timeline-clip');
+    const zoom = target.webContents.getZoomFactor();
+    input({ type: 'mouseMove', x: Math.round(point.x * zoom), y: Math.round(point.y * zoom) });
+    input({ type: 'mouseDown', x: Math.round(point.x * zoom), y: Math.round(point.y * zoom), button: 'left', clickCount: 1 });
+    for (let step = 1; step <= 12; step++) {
+      input({ type: 'mouseMove', x: Math.round((point.x + step * 5) * zoom), y: Math.round(point.y * zoom), modifiers: ['leftbuttondown'] });
+      await wait(12);
+    }
+    input({ type: 'mouseUp', x: Math.round((point.x + 60) * zoom), y: Math.round(point.y * zoom), button: 'left', clickCount: 1 });
+    await until('user-role fixture edit is visibly dirty', () => js('document.querySelector("[data-testid=timeline-canvas]")?.dataset.dirty==="true"'));
+    evidence.scenarios.push({ kind: 'user-role-dirty-fixture-setup', before, after: await liveClip(), savedPosition: await savedPosition() });
+  }
   await capture('00-actual-app-before-observe');
   const focusWaitMs = Number(process.env.CUA_AGENT_WAIT_FOR_FOCUS_MS || 0);
   assert.ok(Number.isFinite(focusWaitMs) && focusWaitMs >= 0 && focusWaitMs <= 60000, 'Focus wait must be between 0 and 60000 ms');
@@ -259,9 +281,15 @@ try {
     await capture('explicit-user-window-selection');
   }
   if (!target.isFocused() || !target.webContents.isFocused()) {
+    const legacyBefore = evidence.saveRequests.length;
+    const dirtyBefore = await js('document.querySelector("[data-testid=timeline-canvas]")?.dataset.dirty');
     await prompt('focus-probe');
     await until('actual product focus refusal', () => js('document.body.textContent.includes("CUA_NOT_FOCUSED")'));
     await capture('actual-product-focus-refusal');
+    assert.equal(evidence.saveRequests.length, legacyBefore, 'Explicit CUA first turn must emit zero legacy save requests');
+    assert.equal(await js('document.querySelector("[data-testid=timeline-canvas]")?.dataset.dirty'), dirtyBefore, 'Observation refusal must preserve dirty live UI');
+    evidence.scenarios.push({ kind: 'self-window-first-send-legacy-save-zero', dirtyBefore, dirtyAfter: dirtyBefore,
+      legacySaveRequests: evidence.saveRequests.length - legacyBefore, savedPosition: await savedPosition(), live: await liveClip() });
     assert.fail('CUA_NOT_FOCUSED: actual own OpenScene window/contents lack focus; observed product tool refusal, zero product input, guard remains enabled');
   }
   await until('Frontend safe surface marker', () => js('!!document.querySelector("[data-cua-safe-surface]")'));
@@ -270,6 +298,7 @@ try {
     const before = await savedPosition();
     const liveBefore = await liveClip();
     const downs = productDowns();
+    const legacyBefore = evidence.saveRequests.length;
     await prompt(kind);
     if (kind === 'stale') {
       await until('stale observation rejected', () => js('document.body.textContent.includes("CUA_FRAME_STALE")'));
@@ -277,6 +306,7 @@ try {
     } else {
       await until('exact CUA approval', () => js('document.querySelector(".agent-chat-approval")?.textContent.includes("executeCuaAction")'));
       await capture(`${kind}-pending`);
+      assert.equal(evidence.saveRequests.length, legacyBefore, 'Opening a CUA proposal must not perform legacy Save');
       assert.equal(productDowns(), downs);
       const conversation = kind === 'duplicate' ? (await bridge('agentChatHistoryList')).find((entry) => entry.projectId === projectId && entry.title.includes('duplicate')) : null;
       await click('.agent-chat-approval button', kind === 'deny' ? 'Deny' : 'Run once');
@@ -297,6 +327,7 @@ try {
         assert.deepEqual(heldInputs(), []);
       }
       await waitIdle();
+      assert.equal(evidence.saveRequests.length, legacyBefore, 'CUA approval/denial/cancel must not call legacy project-timeline:save');
       if (kind === 'deny') assert.equal(productDowns(), downs);
       if (kind === 'move' || kind === 'duplicate') {
         assert.equal(productDowns(), downs + 1, 'Only one approved pointer action dispatch');

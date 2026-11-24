@@ -40,6 +40,82 @@ function fixture() {
 }
 
 describe('CUA immutable run binding and dispatch', () => {
+  it('binds Save scope to the immutable main conversation/project and latest observation', async () => {
+    const f = fixture();
+    const frame = (await f.orchestrator.observe('a', 'project')).frame;
+    const scope = { projectId: 'project', sessionId: frame.sessionId, runId: frame.runId, windowId: frame.windowId,
+      frameId: frame.frameId, layoutRevision: frame.layoutRevision, contentRevision: frame.contentRevision };
+    f.orchestrator.assertSaveScope('a', scope);
+    expect(() => f.orchestrator.assertSaveScope('other', scope)).toThrow('CUA_SCOPE_CHANGED');
+    expect(() => f.orchestrator.assertSaveScope('a', { ...scope, projectId: 'other' })).toThrow('CUA_SCOPE_CHANGED');
+    expect(() => f.orchestrator.assertSaveScope('a', { ...scope, contentRevision: 99 })).toThrow('CUA_SCOPE_CHANGED');
+    await expect(f.orchestrator.observe('a', 'other')).rejects.toThrow('CUA_SCOPE_CHANGED');
+    await f.orchestrator.cancelConversation('a');
+    expect(() => f.orchestrator.assertSaveScope('a', scope)).toThrow('CUA_SCOPE_CHANGED');
+  });
+
+  it('reports observation only after driver promise assignment and clears it on settlement', async () => {
+    const f = fixture();
+    const originalObserve = f.driver.observe;
+    let scope!: { sessionId: string; runId: string };
+    let entered!: () => void;
+    let release!: () => void;
+    const enteredDriver = new Promise<void>((resolve) => { entered = resolve; });
+    const released = new Promise<void>((resolve) => { release = resolve; });
+    f.driver.observe = async (context) => {
+      scope = context;
+      expect(f.orchestrator.isObservationInFlight(context)).toBe(false);
+      await Promise.resolve();
+      expect(f.orchestrator.isObservationInFlight(context)).toBe(true);
+      entered();
+      await released;
+      return originalObserve(context);
+    };
+    const observation = f.orchestrator.observe('a');
+    await enteredDriver;
+    expect(f.orchestrator.isObservationInFlight(scope)).toBe(true);
+    expect(f.orchestrator.isObservationInFlight({ ...scope, sessionId: 'other' })).toBe(false);
+    expect(f.orchestrator.isObservationInFlight({ ...scope, runId: 'other' })).toBe(false);
+    release();
+    await observation;
+    expect(f.orchestrator.isObservationInFlight(scope)).toBe(false);
+  });
+
+  it('does not leave observation in flight after a synchronous driver throw', async () => {
+    const f = fixture();
+    let scope!: { sessionId: string; runId: string };
+    f.driver.observe = (context) => { scope = context; throw new Error('capture refused'); };
+    await expect(f.orchestrator.observe('a')).rejects.toThrow('capture refused');
+    expect(f.orchestrator.isObservationInFlight(scope)).toBe(false);
+  });
+
+  it('clears the read-only observation flag when the driver promise rejects', async () => {
+    const f = fixture();
+    let scope!: { sessionId: string; runId: string };
+    f.driver.observe = async (context) => { scope = context; throw new Error('capture failed'); };
+    const observation = f.orchestrator.observe('a');
+    expect(f.orchestrator.isObservationInFlight(scope)).toBe(true);
+    await expect(observation).rejects.toThrow('capture failed');
+    expect(f.orchestrator.isObservationInFlight(scope)).toBe(false);
+  });
+
+  it('stops reporting an in-flight observation synchronously when its run is aborted', async () => {
+    const f = fixture();
+    const originalObserve = f.driver.observe;
+    let scope!: { sessionId: string; runId: string };
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => { release = resolve; });
+    f.driver.observe = async (context) => { scope = context; await released; return originalObserve(context); };
+    const observation = f.orchestrator.observe('a');
+    expect(f.orchestrator.isObservationInFlight(scope)).toBe(true);
+    const stop = f.orchestrator.cancelConversation('a');
+    expect(f.orchestrator.isObservationInFlight(scope)).toBe(false);
+    const rejected = expect(observation).rejects.toThrow();
+    release();
+    await Promise.all([rejected, stop]);
+    expect(f.orchestrator.isObservationInFlight(scope)).toBe(false);
+  });
+
   it('cannot bypass graph approval by invoking the action tool directly', async () => {
     const f = fixture();
     const request = f.requestFor((await f.orchestrator.observe('a')).frame);
@@ -67,7 +143,7 @@ describe('CUA immutable run binding and dispatch', () => {
       } })
     });
     const session = new AgentChatSessionManager(bundle, { cancelCua: (id) => f.orchestrator.cancelConversation(id) });
-    const pending = await session.sendMessage({ conversationId: 'a', text: 'click', modelId: 'qwen2.5-coder' });
+    const pending = await session.sendMessage({ conversationId: 'a', text: 'click', modelId: 'qwen2.5-coder', interactionMode: 'self-window', hasUnsavedTimeline: false });
     expect(pending.pendingApproval?.cuaApproval?.frameId).toBe('frame-1');
     expect(pending.pendingApproval?.cuaApproval?.coords).toEqual({ x: 10, y: 20 });
     expect(f.inputs()).toBe(0);
@@ -114,6 +190,14 @@ describe('CUA immutable run binding and dispatch', () => {
     const second = await f.orchestrator.observe('a');
     expect(second.frame.frameId).not.toBe(first.frame.frameId);
     expect(() => f.orchestrator.prepareApproval('a', 'one', f.requestFor(first.frame))).toThrow('CUA_FRAME_STALE');
+    expect(f.inputs()).toBe(0);
+  });
+
+  it('rejects an altered content revision even when frame and layout IDs match', async () => {
+    const f = fixture();
+    const request = f.requestFor((await f.orchestrator.observe('a')).frame);
+    expect(() => f.orchestrator.prepareApproval('a', 'one', { ...request, contentRevision: request.contentRevision + 1 })).toThrow('CUA_FRAME_STALE');
+    expect(f.authority.getPendingApproval()).toBeNull();
     expect(f.inputs()).toBe(0);
   });
 

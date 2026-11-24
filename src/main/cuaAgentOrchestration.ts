@@ -1,6 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { CuaActionRequest, CuaFrame, CuaState } from '../shared/cua';
 import type { AgentCuaApprovalSummary, AgentCuaErrorCode } from '../shared/agentChat';
+import type { CuaSaveScope } from '../shared/cuaSave';
+import { CuaApprovalGate } from './cuaApprovalGate';
 
 export class CuaApprovalError extends Error {
   constructor(readonly code: AgentCuaErrorCode) { super(code); }
@@ -25,7 +27,7 @@ function digest(request: CuaActionRequest): string {
       : ['key', action.key, [...action.modifiers].sort()];
   return createHash('sha256').update(JSON.stringify([
     request.sessionId, request.runId, request.windowId, request.frameId,
-    request.layoutRevision, canonicalAction
+    request.layoutRevision, request.contentRevision, canonicalAction
   ])).digest('hex');
 }
 
@@ -36,6 +38,7 @@ function digest(request: CuaActionRequest): string {
  * trusted wiring, not by the model; the driver independently checks frame age.
  */
 export class CuaApprovalAuthority {
+  readonly approvalGate = new CuaApprovalGate();
   private pending: Proposal | null = null;
   private readonly permits = new Map<string, Permit>();
   private readonly seenCalls = new Set<string>();
@@ -62,10 +65,12 @@ export class CuaApprovalAuthority {
     if ((this.actionsByRun.get(request.runId) ?? 0) >= this.options.maxActionsPerRun) {
       throw new CuaApprovalError('CUA_BUDGET_EXCEEDED');
     }
-    this.seenCalls.add(callKey);
     // Approval evidence cannot be mutated while the human reads it.
     const snapshot = structuredClone(request);
-    this.pending = { conversationId, toolCallId, request: snapshot, digest: digest(snapshot) };
+    const requestDigest = digest(snapshot);
+    if (!this.approvalGate.acquire(this, request.runId)) throw new CuaApprovalError('CUA_BUSY');
+    this.seenCalls.add(callKey);
+    this.pending = { conversationId, toolCallId, request: snapshot, digest: requestDigest };
   }
 
   issueApproved(conversationId: string, toolCallId: string, request: CuaActionRequest): unknown {
@@ -86,17 +91,18 @@ export class CuaApprovalAuthority {
       throw new CuaApprovalError('CUA_APPROVAL_MISMATCH');
     }
     this.pending = null;
+    this.approvalGate.release(this);
   }
 
   getPendingApproval(): Readonly<{
     conversationId: string; toolCallId: string; sessionId: string; runId: string;
-    windowId: number; frameId: string; layoutRevision: number;
+    windowId: number; frameId: string; layoutRevision: number; contentRevision: number;
   }> | null {
     const pending = this.pending;
     if (!pending) return null;
-    const { sessionId, runId, windowId, frameId, layoutRevision } = pending.request;
+    const { sessionId, runId, windowId, frameId, layoutRevision, contentRevision } = pending.request;
     return Object.freeze({ conversationId: pending.conversationId, toolCallId: pending.toolCallId,
-      sessionId, runId, windowId, frameId, layoutRevision });
+      sessionId, runId, windowId, frameId, layoutRevision, contentRevision });
   }
 
   /** Non-consuming preflight. It never extends time or changes approved scope. */
@@ -107,7 +113,7 @@ export class CuaApprovalAuthority {
     if (permit === undefined) throw new CuaApprovalError('CUA_ACTION_REPLAYED');
     if (permit.digest !== digest(request)) throw new CuaApprovalError('CUA_APPROVAL_MISMATCH');
     const elapsed = this.options.now() - permit.issuedAt;
-    if (elapsed < 0 || elapsed >= this.options.permitTtlMs) throw new CuaApprovalError('CUA_APPROVAL_EXPIRED');
+    if (!Number.isFinite(elapsed) || elapsed < 0 || elapsed >= this.options.permitTtlMs) throw new CuaApprovalError('CUA_APPROVAL_EXPIRED');
     const count = this.actionsByRun.get(request.runId) ?? 0;
     if (count >= this.options.maxActionsPerRun) throw new CuaApprovalError('CUA_BUDGET_EXCEEDED');
   }
@@ -115,13 +121,17 @@ export class CuaApprovalAuthority {
   /** Synchronous, atomic and one-use, including attempts with wrong evidence. */
   consume(request: CuaActionRequest, token: unknown): void {
     try { this.check(request, token); }
-    finally { if (typeof token === 'string') this.permits.delete(token); }
+    finally {
+      if (typeof token === 'string') this.permits.delete(token);
+      if (!this.pending && !this.permits.size) this.approvalGate.release(this);
+    }
     this.actionsByRun.set(request.runId, (this.actionsByRun.get(request.runId) ?? 0) + 1);
   }
 
   /** Called synchronously on every cancellation source before releasing input. */
   revokeRun(runId: string): void {
     this.revokedRuns.add(runId);
+    this.approvalGate.revokeRun(runId);
     if (this.pending?.request.runId === runId) this.pending = null;
     for (const [token, permit] of this.permits) {
       if (permit.request.runId === runId) this.permits.delete(token);
@@ -133,6 +143,7 @@ export class CuaApprovalAuthority {
     this.cleanupFailed = true;
     this.pending = null;
     this.permits.clear();
+    this.approvalGate.release(this);
   }
 
   assertRunAllowed(runId: string): void { this.checkRun(runId); }
@@ -154,6 +165,7 @@ export interface CuaAgentDriver {
 
 interface BoundRun {
   readonly conversationId: string;
+  readonly projectId: string | null;
   readonly runId: string;
   readonly controller: AbortController;
   frame: CuaFrame | null;
@@ -173,15 +185,24 @@ export class CuaAgentOrchestrator {
     readonly onAbortConversation: (conversationId: string) => void;
   }) {}
 
-  async observe(conversationId: string): Promise<{ success: true; summary: string; frame: CuaFrame }> {
+  /** Trusted read-only driver query, after observe has yielded its first await. */
+  isObservationInFlight(scope: { sessionId: string; runId: string }): boolean {
+    const run = this.runs.get(scope.runId);
+    return scope.sessionId === this.sessionId && run !== undefined
+      && this.byConversation.get(run.conversationId) === run
+      && !run.controller.signal.aborted && run.observation !== null;
+  }
+
+  async observe(conversationId: string, projectId?: string): Promise<{ success: true; summary: string; frame: CuaFrame }> {
     let run = this.byConversation.get(conversationId);
     if (run?.controller.signal.aborted) throw new CuaApprovalError('CUA_CANCELLED');
     if (!run) {
       if (this.byConversation.size > 0) throw new CuaApprovalError('CUA_BUSY');
-      run = { conversationId, runId: randomUUID(), controller: new AbortController(), frame: null, observation: null, pending: null };
+      run = { conversationId, projectId: projectId ?? null, runId: randomUUID(), controller: new AbortController(), frame: null, observation: null, pending: null };
       this.byConversation.set(conversationId, run);
       this.runs.set(run.runId, run);
     }
+    if (projectId !== undefined && run.projectId !== projectId) throw new CuaApprovalError('CUA_SCOPE_CHANGED');
     if (run.pending) throw new CuaApprovalError('CUA_BUSY');
     this.authority.assertRunAllowed(run.runId);
     if (run.observation) throw new CuaApprovalError('CUA_BUSY');
@@ -192,13 +213,26 @@ export class CuaAgentOrchestrator {
     run.controller.signal.throwIfAborted();
     if (frame.sessionId !== this.sessionId || frame.runId !== run.runId) throw new CuaApprovalError('CUA_SCOPE_CHANGED');
     run.frame = structuredClone(frame);
-    return { success: true, summary: `Self-window observation frameId=${frame.frameId}, layoutRevision=${frame.layoutRevision}; CSS viewport ${frame.viewport.width}×${frame.viewport.height}.`, frame };
+    return { success: true, summary: `Self-window observation frameId=${frame.frameId}, layoutRevision=${frame.layoutRevision}, contentRevision=${frame.contentRevision}; CSS viewport ${frame.viewport.width}×${frame.viewport.height}.`, frame };
+  }
+
+  /** Main conversation/project binding in addition to the driver's scope checks. */
+  assertSaveScope(conversationId: string, scope: CuaSaveScope): void {
+    const run = this.byConversation.get(conversationId);
+    if (!run || run.projectId !== scope.projectId || run.runId !== scope.runId || scope.sessionId !== this.sessionId
+      || run.frame?.windowId !== scope.windowId || run.frame.frameId !== scope.frameId
+      || run.frame.layoutRevision !== scope.layoutRevision || run.frame.contentRevision !== scope.contentRevision) {
+      throw new CuaApprovalError('CUA_SCOPE_CHANGED');
+    }
+    run.controller.signal.throwIfAborted();
+    this.authority.assertRunAllowed(run.runId);
   }
 
   prepareApproval(conversationId: string, toolCallId: string, request: CuaActionRequest): AgentCuaApprovalSummary {
     const run = this.requireRun(conversationId, request);
     const frame = run.frame;
-    if (!frame || frame.frameId !== request.frameId || frame.layoutRevision !== request.layoutRevision) {
+    if (!frame || frame.frameId !== request.frameId || frame.layoutRevision !== request.layoutRevision
+      || frame.contentRevision !== request.contentRevision) {
       throw new CuaApprovalError('CUA_FRAME_STALE');
     }
     this.options.driver.setExecutionBlocked(true);
@@ -213,7 +247,7 @@ export class CuaAgentOrchestrator {
     }
     const action = request.action;
     return { actionKind: action.kind, actionLabel: action.kind === 'key' ? `Press ${action.modifiers.join('+')}${action.modifiers.length ? '+' : ''}${action.key}` : action.kind === 'drag' ? `Drag for ${action.durationMs} ms` : 'Click',
-      frameId: request.frameId, scopeRevision: request.layoutRevision, coordinateSpace: 'css',
+      frameId: request.frameId, scopeRevision: request.layoutRevision, contentRevision: request.contentRevision, coordinateSpace: 'css',
       ...(action.kind === 'click' ? { coords: action.point } : action.kind === 'drag' ? { coords: action.from, dragTo: action.to } : {}) };
   }
 

@@ -1,9 +1,17 @@
 import { randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import type { BrowserWindow, KeyboardInputEvent, MouseInputEvent } from 'electron';
-import { CUA_KEYS, type CuaActionRequest, type CuaCancelAck, type CuaFrame, type CuaPoint, type CuaPrepareAck, type CuaRect, type CuaState, type CuaSurfaceSnapshot } from '../shared/cua';
+import { CUA_KEYS, type CuaActionRequest, type CuaCancelAck, type CuaFrame, type CuaKey, type CuaPoint, type CuaPrepareAck, type CuaRect, type CuaState, type CuaSurfaceSnapshot } from '../shared/cua';
+
+export type CuaFrameScope = Pick<CuaFrame, 'sessionId' | 'runId' | 'windowId' | 'frameId' | 'layoutRevision' | 'contentRevision'>;
+export type CuaFrameMetadata = Omit<CuaFrame, 'pngDataUrl'>;
+
+const ELECTRON_KEY_CODES: Readonly<Partial<Record<CuaKey, string>>> = {
+  ArrowLeft: 'Left', ArrowRight: 'Right', ArrowUp: 'Up', ArrowDown: 'Down'
+};
 
 export interface CuaDriverDependencies {
+  readonly isObservationInFlight?: (scope: { sessionId: string; runId: string }) => boolean;
   readonly getDeviceScaleFactor?: () => number;
   readonly getPendingApproval?: () => Readonly<{ sessionId: string; runId: string; windowId: number; frameId: string; layoutRevision: number }> | null;
   readonly consumePermit: (request: CuaActionRequest, permit: unknown) => void;
@@ -48,9 +56,9 @@ export class CuaDriver {
     window.on('blur', () => { void this.cancel('blur'); });
     window.on('resize', () => { void this.cancel('resize'); });
     window.on('move', () => { void this.cancel('window-moved'); });
-    window.on('closed', () => { void this.cancel('closed'); });
+    window.on('closed', () => { this.markTargetGone('closed'); });
     window.webContents.on('did-start-navigation', () => { void this.cancel('navigation'); });
-    window.webContents.on('render-process-gone', () => { void this.cancel('renderer-gone'); });
+    window.webContents.on('render-process-gone', () => { this.markTargetGone('renderer-gone'); });
     window.webContents.on('zoom-changed', () => { void this.cancel('zoom'); });
     window.webContents.on('blur', () => { void this.cancel('contents-blur'); });
     // Electron 43 macOS probe verifies these events fire synchronously inside
@@ -72,6 +80,36 @@ export class CuaDriver {
     });
   }
   getState(): CuaState { return structuredClone(this.state); }
+  /** Main-only diagnostics; no input, capture or authority is granted. */
+  getHeldInputCount(): number {
+    return Number(this.heldMouse !== null) + Number(this.heldKey !== null);
+  }
+  getCurrentFrame(scope: CuaFrameScope): CuaFrameMetadata | null {
+    try {
+      this.assertObservationScope(scope);
+      if (this.getHeldInputCount() !== 0) return null;
+      const { pngDataUrl: _png, ...metadata } = this.frame!;
+      return structuredClone(metadata);
+    } catch { return null; }
+  }
+  private markTargetGone(reason: string): void {
+    this.publish({ targetGone: true });
+    // A later close is a new lifecycle observation, not a replay of an old
+    // already-settled Stop snapshot. Failure latches remain intact.
+    if (this.state.phase === 'stopped' || this.state.phase === 'cleanup-failed') this.cancellation = null;
+    void this.cancel(reason);
+  }
+  /** Read-only main seam used to bind a separate approved Save capability. */
+  assertObservationScope(scope: CuaFrameScope): void {
+    this.live();
+    const frame = this.frame, surface = this.surface;
+    if (this.observing || this.state.phase !== 'ready' || !frame || !surface?.safeSurface || this.cleanupFailureLatched
+      || scope.windowId !== this.window.id || scope.sessionId !== frame.sessionId || scope.runId !== frame.runId || scope.frameId !== frame.frameId
+      || scope.layoutRevision !== frame.layoutRevision || surface.layoutRevision !== frame.layoutRevision
+      || scope.contentRevision !== frame.contentRevision || surface.contentRevision !== frame.contentRevision
+      || performance.now() - this.frameTime > 120000 || this.window.webContents.getZoomFactor() !== frame.zoomFactor
+      || (this.dependencies.getDeviceScaleFactor?.() ?? 1) !== frame.deviceScaleFactor) throw new Error('CUA_SAVE_SCOPE_CHANGED');
+  }
   acknowledgePrepare(ack: CuaPrepareAck): boolean {
     const pending = this.prepareAck;
     if (!ack || !pending || this.state.phase !== 'preparing' || ack.runId !== pending.request.runId || ack.prepareToken !== pending.token) return false;
@@ -86,7 +124,10 @@ export class CuaDriver {
     if (!ack || this.state.phase !== 'stopping' || !this.cancelAck || ack.runId !== this.cancelAck.runId || ack.cancelToken !== this.cancelAck.token) return false;
     const pending = this.cancelAck; this.cancelAck = null; pending.resolve(); return true;
   }
-  setExecutionBlocked(blocked: boolean): void { this.executionBlocked = blocked; }
+  setExecutionBlocked(blocked: boolean): void {
+    this.executionBlocked = blocked;
+    if (blocked && (this.state.phase === 'acting' || this.state.phase === 'preparing')) void this.cancel('main-blocked');
+  }
   private publish(patch: Partial<CuaState>): void {
     this.state = { ...this.state, ...patch };
     // A disappearing renderer must never prevent held-input release.
@@ -102,10 +143,10 @@ export class CuaDriver {
       && p.rect.x >= panel.x && p.rect.y >= panel.y
       && p.rect.x + p.rect.width <= panel.x + panel.width && p.rect.y + p.rect.height <= panel.y + panel.height)));
   }
-  private invalidSurface(): never {
+  private invalidSurface(code = 'CUA_INVALID_SURFACE'): never {
     this.surface = null; this.frame = null;
     if (['ready', 'preparing', 'acting'].includes(this.state.phase)) void this.cancel('invalid-surface');
-    throw new Error('CUA_INVALID_SURFACE');
+    throw new Error(code);
   }
   reportSurface(snapshot: CuaSurfaceSnapshot): void {
     // Runtime validation is mandatory: the bridge does not make renderer data trusted.
@@ -115,9 +156,24 @@ export class CuaDriver {
       || !snapshot.viewport || ![snapshot.viewport.width, snapshot.viewport.height].every(n => Number.isFinite(n) && n > 0 && n < 32768)
       || !Array.isArray(snapshot.protectedRects) || snapshot.protectedRects.length > 256) this.invalidSurface();
     const validRect = (r: CuaRect): boolean => !!r && [r.x, r.y, r.width, r.height].every(Number.isFinite) && r.width >= 0 && r.height >= 0;
-    if (snapshot.protectedRects.some(p => !p || !validRect(p.rect)) || (snapshot.safeSurface !== null && (!validRect(snapshot.safeSurface.rect) || typeof snapshot.safeSurface.interactive !== 'boolean'))) this.invalidSurface();
-    if (this.surface && snapshot.layoutRevision < this.surface.layoutRevision) throw new Error('CUA_STALE_SURFACE');
-    if (this.surface && snapshot.contentRevision < this.surface.contentRevision) throw new Error('CUA_STALE_CONTENT');
+    const protectedKinds = ['stop-button', 'approval-ui', 'agent-panel', 'settings', 'chrome-menu', 'modal'];
+    if ((snapshot.blockReason !== null && (typeof snapshot.blockReason !== 'string' || snapshot.blockReason.length > 256))
+      || (snapshot.focusedTestId !== null && (typeof snapshot.focusedTestId !== 'string' || snapshot.focusedTestId.length > 512))
+      || snapshot.protectedRects.some(p => !p || typeof p.id !== 'string' || p.id.length > 256 || !protectedKinds.includes(p.kind) || !validRect(p.rect))
+      || (snapshot.safeSurface !== null && (!snapshot.safeSurface || !validRect(snapshot.safeSurface.rect)
+        || snapshot.safeSurface.rect.width <= 0 || snapshot.safeSurface.rect.height <= 0 || typeof snapshot.safeSurface.interactive !== 'boolean'
+        || !['timeline', 'canvas', 'shorts-review'].includes(snapshot.safeSurface.kind)))) this.invalidSurface();
+    const rect = (r: CuaRect): CuaRect => ({ x: r.x, y: r.y, width: r.width, height: r.height });
+    // Copy only validated contract fields; unknown/cyclic renderer properties
+    // must not survive into frame comparisons or fixed DOM verification.
+    snapshot = { contentRevision: snapshot.contentRevision, layoutRevision: snapshot.layoutRevision,
+      executionBlocked: snapshot.executionBlocked, blockReason: snapshot.blockReason,
+      viewport: { width: snapshot.viewport.width, height: snapshot.viewport.height },
+      safeSurface: snapshot.safeSurface && { kind: snapshot.safeSurface.kind, rect: rect(snapshot.safeSurface.rect), interactive: snapshot.safeSurface.interactive },
+      protectedRects: snapshot.protectedRects.map(p => ({ id: p.id, kind: p.kind, rect: rect(p.rect) })),
+      focusedInSafeSurface: snapshot.focusedInSafeSurface, focusedTestId: snapshot.focusedTestId };
+    if (this.surface && snapshot.layoutRevision < this.surface.layoutRevision) this.invalidSurface('CUA_STALE_SURFACE');
+    if (this.surface && snapshot.contentRevision < this.surface.contentRevision) this.invalidSurface('CUA_STALE_CONTENT');
     const changed = this.surface !== null && (snapshot.layoutRevision !== this.surface.layoutRevision
       || JSON.stringify(snapshot.viewport) !== JSON.stringify(this.surface.viewport)
       || JSON.stringify(snapshot.safeSurface && { kind: snapshot.safeSurface.kind, rect: snapshot.safeSurface.rect }) !== JSON.stringify(this.surface.safeSurface && { kind: this.surface.safeSurface.kind, rect: this.surface.safeSurface.rect })
@@ -126,16 +182,39 @@ export class CuaDriver {
     this.surface = structuredClone(snapshot);
     if (changed) { this.frame = null; if (['ready', 'preparing', 'acting'].includes(this.state.phase)) void this.cancel('surface-changed'); }
     else if (contentChanged) this.invalidateContent();
+    else if (this.state.phase === 'acting' && (snapshot.executionBlocked || !snapshot.safeSurface?.interactive)) void this.cancel('surface-blocked');
   }
   async observe(context: { sessionId: string; runId: string }): Promise<CuaFrame> {
     this.live();
+    if (this.dependencies.getPendingApproval?.()) throw new Error('CUA_BUSY');
     if (this.observing || this.state.phase === 'acting' || this.state.phase === 'preparing' || this.state.phase === 'stopping' || this.cleanupFailureLatched) throw new Error('CUA_BUSY');
-    if (!context.sessionId || !context.runId || !this.surface?.safeSurface?.interactive) throw new Error('CUA_UNSAFE_SURFACE');
+    if (!context.sessionId || !context.runId || !this.surface?.safeSurface) throw new Error('CUA_UNSAFE_SURFACE');
     this.observing = true;
     this.frame = null;
     try {
     const snapshot = structuredClone(this.surface);
     const revision = this.generation;
+    const safe = snapshot.safeSurface!;
+    const expected = JSON.stringify({ kind: safe.kind, rect: safe.rect, viewport: snapshot.viewport });
+    const safeDocument: unknown = await this.window.webContents.executeJavaScript(`(() => {
+      const expected = ${expected};
+      const visible = e => { const r=e.getBoundingClientRect(),s=getComputedStyle(e); return r.width>0 && r.height>0 && s.display!=='none' && s.visibility!=='hidden' && !e.closest('[hidden],[aria-hidden="true"]'); };
+      if (Math.abs(innerWidth-expected.viewport.width)>0.5 || Math.abs(innerHeight-expected.viewport.height)>0.5) return false;
+      if ([...document.querySelectorAll('[role="dialog"][aria-modal="true"],dialog[open],[role="menu"],[data-cua-protected="settings"]')].some(visible)) return false;
+      const e=[...document.querySelectorAll('[data-cua-safe-surface]')].find(e=>e.getAttribute('data-cua-safe-surface')===expected.kind && visible(e));
+      if (!e) return false;
+      const r=e.getBoundingClientRect(),p=expected.rect;
+      return p.x>=r.x-0.5 && p.y>=r.y-0.5 && p.x+p.width<=r.right+0.5 && p.y+p.height<=r.bottom+0.5;
+    })()`);
+    if (safeDocument !== true) throw new Error('CUA_UNSAFE_DOCUMENT');
+    // The await above lets the trusted orchestrator install its active
+    // observation promise. A renderer reason alone cannot authorize an inert read.
+    if (!safe.interactive) {
+      const pending = this.dependencies.getPendingApproval?.();
+      const causeMatches = snapshot.blockReason === 'agent-busy' || (snapshot.blockReason === 'pending-approval'
+        && pending?.sessionId === context.sessionId && pending.runId === context.runId && pending.windowId === this.window.id);
+      if (!snapshot.executionBlocked || !causeMatches || !this.dependencies.isObservationInFlight?.(context)) throw new Error('CUA_UNSAFE_SURFACE');
+    }
     const panel: unknown = await this.window.webContents.executeJavaScript(`(() => {
       const panels = [...document.querySelectorAll('[data-cua-protected="agent-panel"]')].filter(e => e.getBoundingClientRect().width > 0);
       if (panels.length !== 1) return null;
@@ -162,7 +241,7 @@ export class CuaDriver {
     if (bitmap.width <= 0 || bitmap.height <= 0) throw new Error('CUA_EMPTY_CAPTURE');
     const frame: CuaFrame = { ...context, contentRevision: snapshot.contentRevision, windowId: this.window.id, frameId: randomUUID(), layoutRevision: snapshot.layoutRevision, capturedAt: Date.now(), viewport: snapshot.viewport, bitmap, deviceScaleFactor: this.dependencies.getDeviceScaleFactor?.() ?? 1, zoomFactor: this.window.webContents.getZoomFactor(), pngDataUrl: `data:image/png;base64,${png.toString('base64')}` };
     this.frame = frame; this.frameTime = performance.now(); this.cancellation = null;
-    this.publish({ ...context, phase: 'ready', error: null, cleanupComplete: true, releaseFailures: [] });
+    this.publish({ ...context, targetGone: false, phase: 'ready', error: null, cleanupComplete: true, releaseFailures: [] });
     return frame;
     } finally { this.observing = false; }
   }
@@ -195,6 +274,13 @@ export class CuaDriver {
     this.input({ type, x: Math.round(point.x * zoom), y: Math.round(point.y * zoom), button: 'left', clickCount: 1, modifiers: this.heldMouse ? ['leftbuttondown'] : [] });
   }
   private input(event: MouseInputEvent | KeyboardInputEvent): void {
+    const release = event.type === 'mouseUp' || event.type === 'keyUp';
+    if (!release && (this.state.phase !== 'acting' || this.executionBlocked || this.surface?.executionBlocked || !this.surface?.safeSurface?.interactive)) throw new Error('CUA_CANCELLED');
+    if (!release) {
+      this.live();
+      if (!this.frame || this.window.webContents.getZoomFactor() !== this.frame.zoomFactor
+        || (this.dependencies.getDeviceScaleFactor?.() ?? 1) !== this.frame.deviceScaleFactor) throw new Error('CUA_STALE_FRAME');
+    }
     this.injecting = true;
     try { this.window.webContents.sendInputEvent(event); }
     finally { this.injecting = false; }
@@ -247,8 +333,9 @@ export class CuaDriver {
       points = this.validate(request, true);
       this.dependencies.consumePermit(request, permit);
       this.publish({ phase: 'acting', prepareToken: null, cleanupComplete: false });
+      if (generation !== this.generation || signal?.aborted) throw new Error('CUA_CANCELLED');
       if (request.action.kind === 'key') {
-        this.heldKey = { type: 'keyDown', keyCode: request.action.key, modifiers: [...request.action.modifiers] };
+        this.heldKey = { type: 'keyDown', keyCode: ELECTRON_KEY_CODES[request.action.key] ?? request.action.key, modifiers: [...request.action.modifiers] };
         this.input(this.heldKey);
       } else {
         const first = points[0]!;
@@ -302,11 +389,13 @@ export class CuaDriver {
         clearTimeout(timeout);
       }
       this.cancelAck = null;
+      const hadHeldInput = this.heldMouse !== null || this.heldKey !== null;
       const failures = this.release(); // Always attempt physical release, even without rollback ack.
       if (needsAck && !ackReceived) failures.push('renderer-rollback-unconfirmed');
       if (revokeFailed) failures.push('authority-revoke');
+      const targetGone = this.state.targetGone || this.window.isDestroyed() || this.window.webContents.isDestroyed();
+      if (targetGone && hadHeldInput) failures.push('target-gone-release-unconfirmed');
       if (failures.length) this.cleanupFailureLatched = true;
-      const targetGone = this.window.isDestroyed() || this.window.webContents.isDestroyed();
       this.publish({ phase: this.cleanupFailureLatched ? 'cleanup-failed' : 'stopped', targetGone, error: reason, cleanupComplete: !this.cleanupFailureLatched, releaseFailures: failures.length ? failures : this.state.releaseFailures, dragStart: null, cancelToken: null });
       settle(this.getState());
     })();

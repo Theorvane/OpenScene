@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import type { CuaCancelAck, CuaPrepareAck, CuaState, CuaStopResult, CuaSurfaceSnapshot } from '../shared/cua';
+import type { CuaSaveCommitAck, CuaSaveReadyAck, CuaSaveReadyRequest, CuaSaveResult, CuaSaveSnapshotReport, CuaSaveSnapshotRequest } from '../shared/cuaSave';
 
 import type {
   AgentChatApprovalInput,
@@ -66,6 +67,12 @@ type AssetPlaybackUrl = {
 };
 
 export interface VideoToolApi {
+  onCuaSaveSnapshotRequested(listener: (request: CuaSaveSnapshotRequest) => void): () => void;
+  cuaReportSaveSnapshot(report: CuaSaveSnapshotReport): Promise<ApiResponse<{ accepted: boolean }>>;
+  onCuaSaveRequested(listener: (request: CuaSaveReadyRequest) => void): () => void;
+  cuaAckSaveReady(ack: CuaSaveReadyAck): Promise<ApiResponse<{ accepted: boolean }>>;
+  onCuaSaveFinished(listener: (result: CuaSaveResult) => void): () => void;
+  cuaAckSaveCommit(ack: CuaSaveCommitAck): Promise<ApiResponse<{ accepted: boolean }>>;
   cuaAckCancel(ack: CuaCancelAck): Promise<ApiResponse<{ accepted: boolean }>>;
   cuaAckPrepare(ack: CuaPrepareAck): Promise<ApiResponse<{ accepted: boolean }>>;
   cuaGetState(): Promise<ApiResponse<CuaState>>;
@@ -162,6 +169,24 @@ function parseUpdaterSnapshot(payload: unknown): UpdaterSnapshot | null {
 }
 
 const videoTool: VideoToolApi = {
+  onCuaSaveSnapshotRequested: listener => {
+    const subscription = (_event: IpcRendererEvent, request: CuaSaveSnapshotRequest): void => listener(request);
+    ipcRenderer.on(IPC_CHANNELS.cuaSaveSnapshotRequested, subscription);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.cuaSaveSnapshotRequested, subscription);
+  },
+  cuaReportSaveSnapshot: report => ipcRenderer.invoke(IPC_CHANNELS.cuaReportSaveSnapshot, report) as Promise<ApiResponse<{ accepted: boolean }>>,
+  onCuaSaveRequested: listener => {
+    const subscription = (_event: IpcRendererEvent, request: CuaSaveReadyRequest): void => listener(request);
+    ipcRenderer.on(IPC_CHANNELS.cuaSaveRequested, subscription);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.cuaSaveRequested, subscription);
+  },
+  cuaAckSaveReady: ack => ipcRenderer.invoke(IPC_CHANNELS.cuaAckSaveReady, ack) as Promise<ApiResponse<{ accepted: boolean }>>,
+  onCuaSaveFinished: listener => {
+    const subscription = (_event: IpcRendererEvent, result: CuaSaveResult): void => listener(result);
+    ipcRenderer.on(IPC_CHANNELS.cuaSaveFinished, subscription);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.cuaSaveFinished, subscription);
+  },
+  cuaAckSaveCommit: ack => ipcRenderer.invoke(IPC_CHANNELS.cuaAckSaveCommit, ack) as Promise<ApiResponse<{ accepted: boolean }>>,
   cuaAckCancel: ack => ipcRenderer.invoke(IPC_CHANNELS.cuaAckCancel, ack) as Promise<ApiResponse<{ accepted: boolean }>>,
   cuaAckPrepare: ack => ipcRenderer.invoke(IPC_CHANNELS.cuaAckPrepare, ack) as Promise<ApiResponse<{ accepted: boolean }>>,
   cuaGetState: () => ipcRenderer.invoke(IPC_CHANNELS.cuaGetState) as Promise<ApiResponse<CuaState>>,

@@ -18,6 +18,8 @@ The zoom-2 probe records a CSS viewport of 350×184, PNG bitmap 700×368 and dev
 
 An explicitly authorized, initial-only test-entry selection (`CUA_PROBE_INITIAL_FOCUS=1`) called app.focus({ steal: true }), win.focus and webContents.focus with a separate temporary userData profile. On this host the resulting window ID 1, title `OpenScene CUA Input Probe`, still reported both focus flags false. `/tmp/openscene-cua-focused-isolated-probe/input.json` and `capture.png` retain this result, including all 29 injected mouse/key before-events observed synchronously inside sendInputEvent. No production focus guard was relaxed and the test never refocused mid-run. Orca's native provider reports `windows.focus: false`; its availability does not establish that this Electron window can become focused.
 
+With `CUA_PROBE_KEYS=1`, Electron accepted `ArrowLeft/Right/Up/Down` without throwing, but the DOM received empty key strings. Electron codes `Left/Right/Up/Down` delivered the expected DOM arrow keys. The driver therefore maps logical public arrow names to these adapter codes. Delete, Backspace, Space, z and y delivered their expected keys. `/tmp/openscene-cua-key-probe/input.json` retains the accepted-code and actual DOM-event evidence. This is a native API probe, not proof of the complete application's menu/shortcut behavior.
+
 Raw initial evidence: `/tmp/openscene-cua-probe/input.json`, `/tmp/openscene-cua-probe/capture.png`, `/tmp/openscene-cua-pointer-probe/input.json`, `/tmp/openscene-cua-pointer-probe/capture.png`. These are local experimental artifacts, not the required full application evidence.
 
 ## Remaining integration evidence

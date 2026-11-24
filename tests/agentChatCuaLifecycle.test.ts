@@ -17,9 +17,31 @@ function fixture(replies: AIMessage[], options: { cancelCua?: (id: string) => Pr
   });
   return { session: new AgentChatSessionManager(bundle, options), inputs: () => inputs };
 }
-const send = { conversationId: 'conversation', text: 'move clip', modelId: 'qwen2.5-coder' };
+const send = { conversationId: 'conversation', text: 'move clip', modelId: 'qwen2.5-coder', interactionMode: 'self-window' as const, hasUnsavedTimeline: false };
 
 describe('CUA graph approval and cancellation lifecycle', () => {
+  it('cannot compact away a pending exact-action approval', async () => {
+    const { session, inputs } = fixture([call('one'), new AIMessage('Done')]);
+    await session.sendMessage(send);
+    const compacted = await session.compactConversation({ conversationId: send.conversationId });
+    expect(compacted.pendingApproval?.toolCallId).toBe('one');
+    expect(compacted.status).toBe('awaiting-approval');
+    expect(inputs()).toBe(0);
+    await session.respondToApproval({ conversationId: send.conversationId, toolCallId: 'one', decision: 'approve' });
+    expect(inputs()).toBe(1);
+  });
+
+  it('rejects another send while approval is pending without replacing its project scope', async () => {
+    const { session, inputs } = fixture([call('one'), new AIMessage('Done')]);
+    await session.sendMessage({ ...send, activeProject: { projectId: 'original', name: 'Original', assetCount: 0, trackCount: 2 } });
+    const blocked = await session.sendMessage({ ...send, text: 'new request', activeProject: { projectId: 'other', name: 'Other', assetCount: 0, trackCount: 2 } });
+    expect(blocked.pendingApproval?.toolCallId).toBe('one');
+    expect(blocked.error).toContain('current approval');
+    expect(session.getActiveProject(send.conversationId)?.projectId).toBe('original');
+    await session.respondToApproval({ conversationId: send.conversationId, toolCallId: 'one', decision: 'approve' });
+    expect(inputs()).toBe(1);
+  });
+
   it.each([
     ['write', 'cuaAction'], ['cuaAction', 'write'],
     ['observeEditorWindow', 'cuaAction'], ['observeEditorWindow', 'read'],
@@ -139,6 +161,34 @@ describe('CUA graph approval and cancellation lifecycle', () => {
     release();
     await Promise.all([turn, cancel]);
     expect(settled).toBe(true);
+  });
+
+  it('does not return an aborted active tool turn before its actual release settles', async () => {
+    let entered!: () => void;
+    let release!: () => void;
+    let held = 0;
+    const started = new Promise<void>((resolve) => { entered = resolve; });
+    const released = new Promise<void>((resolve) => { release = resolve; });
+    let modelStep = 0;
+    const bundle = buildAgentChatGraph({
+      tools: [tool(async () => { held = 1; entered(); await released; held = 0; throw new Error('CUA_CANCELLED'); }, {
+        name: 'cuaAction', description: 'delayed held input', schema: z.object({})
+      })], mutatingToolNames: new Set(['cuaAction']), perCallApprovalToolNames: new Set(['cuaAction']),
+      createModel: () => ({ invoke: async () => modelStep++ === 0 ? call('active') : new AIMessage('Done') })
+    });
+    const session = new AgentChatSessionManager(bundle, { cancelCua: async () => { await released; held = 0; } });
+    await session.sendMessage(send);
+    const turn = session.respondToApproval({ conversationId: send.conversationId, toolCallId: 'active', decision: 'approve' });
+    await started;
+    session.abortConversation(send.conversationId); // Trusted driver callback, no recursive cancel.
+    let settled = false;
+    void turn.then(() => { settled = true; });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(settled).toBe(false);
+    expect(held).toBe(1);
+    release();
+    await turn;
+    expect(held).toBe(0);
   });
 
   it('reports failed release and does not delete the pending checkpoint as success', async () => {

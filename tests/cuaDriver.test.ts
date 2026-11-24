@@ -17,9 +17,10 @@ function fixture(autoAck = true, autoPrepare = true) {
   const window = Object.assign(new EventEmitter(), { id: 7, webContents: contents, isDestroyed: vi.fn(() => false), isFocused: vi.fn(() => true) });
   const consumePermit = vi.fn(); const checkPermit = vi.fn(); const onCancel = vi.fn();
   const getPendingApproval = vi.fn<NonNullable<CuaDriverDependencies['getPendingApproval']>>(() => null);
+  const isObservationInFlight = vi.fn(() => false);
   let resolveActing!: () => void;
   const acting = new Promise<void>(resolve => { resolveActing = resolve; });
-  const driver = new CuaDriver(window as unknown as BrowserWindow, { consumePermit, checkPermit, onCancel, getPendingApproval, onState: state => {
+  const driver = new CuaDriver(window as unknown as BrowserWindow, { consumePermit, checkPermit, onCancel, getPendingApproval, isObservationInFlight, onState: state => {
     if (state.phase === 'acting') resolveActing();
     if (autoPrepare && state.phase === 'preparing' && state.prepareToken && state.runId) driver.acknowledgePrepare({ runId: state.runId, prepareToken: state.prepareToken });
     if (autoAck && state.phase === 'stopping' && state.cancelToken && state.runId) driver.acknowledgeCancel({ runId: state.runId, cancelToken: state.cancelToken });
@@ -30,9 +31,34 @@ function fixture(autoAck = true, autoPrepare = true) {
     const frame = await driver.observe({ sessionId: 's', runId: 'r' });
     return { contentRevision: 0, sessionId: 's', runId: 'r', windowId: 7, frameId: frame.frameId, layoutRevision: 1, action: { kind: 'click', point: { x: 20, y: 20 } } };
   };
-  return { driver, window, contents, consumePermit, checkPermit, onCancel, getPendingApproval, surface, observe, acting };
+  return { driver, window, contents, consumePermit, checkPermit, onCancel, getPendingApproval, isObservationInFlight, surface, observe, acting };
 }
 describe('self-window CUA safety', () => {
+  it('returns cloned current frame metadata without capturing, DOM calls or renewing TTL', async () => {
+    const f = fixture(), r = await f.observe();
+    const captures = f.contents.capturePage.mock.calls.length, dom = f.contents.executeJavaScript.mock.calls.length;
+    const meta = f.driver.getCurrentFrame(r)!;
+    expect(meta.frameId).toBe(r.frameId);
+    expect(meta).not.toHaveProperty('pngDataUrl');
+    (meta.viewport as { width: number }).width = 1;
+    expect(f.driver.getCurrentFrame(r)?.viewport.width).toBe(800);
+    expect(f.driver.getCurrentFrame({ ...r, runId: 'other' })).toBeNull();
+    f.window.isFocused.mockReturnValue(false);
+    expect(f.driver.getCurrentFrame(r)).toBeNull();
+    f.window.isFocused.mockReturnValue(true);
+    const clock = vi.spyOn(performance, 'now');
+    const expired = performance.now() + 120001;
+    clock.mockReturnValue(expired);
+    expect(f.driver.getCurrentFrame(r)).toBeNull();
+    expect(f.driver.getCurrentFrame(r)).toBeNull();
+    clock.mockRestore();
+    expect(f.contents.capturePage).toHaveBeenCalledTimes(captures);
+    expect(f.contents.executeJavaScript).toHaveBeenCalledTimes(dom);
+    expect(f.contents.sendInputEvent).not.toHaveBeenCalled();
+    expect(f.consumePermit).not.toHaveBeenCalled();
+    f.driver.invalidateContent();
+    expect(f.driver.getCurrentFrame(r)).toBeNull();
+  });
   it('uses actual bitmap ratio and rejects invalid pixels', () => {
     const f = { bitmap: { width: 1600, height: 1200 }, viewport: { width: 800, height: 600 } };
     expect(cuaBitmapPointToViewport(f, { x: 200, y: 100 })).toEqual({ x: 100, y: 50 });
@@ -77,6 +103,7 @@ describe('self-window CUA safety', () => {
     expect(f.contents.sendInputEvent).toHaveBeenCalledTimes(count);
     expect(f.contents.sendInputEvent.mock.calls.at(-1)?.[0].type).toBe('mouseUp');
     expect(f.onCancel).toHaveBeenCalledTimes(1);
+    expect(f.driver.getHeldInputCount()).toBe(0);
   });
   it('cancels real input during drag but ignores synchronous injected events', async () => {
     const f = fixture(), r = await f.observe();
@@ -92,11 +119,15 @@ describe('self-window CUA safety', () => {
     const f = fixture(), r = await f.observe();
     const execution = f.driver.execute({ ...r, action: { kind: 'drag', from: { x: 20, y: 20 }, to: { x: 200, y: 20 }, durationMs: 100 } }, 'p');
     await f.acting;
+    expect(f.driver.getHeldInputCount()).toBe(1);
+    expect(f.driver.getCurrentFrame(r)).toBeNull();
     f.contents.sendInputEvent.mockImplementation(() => { throw new Error('closed'); });
     const stopped = await f.driver.cancel('closed');
     expect(stopped.phase).toBe('cleanup-failed');
     expect(stopped.cleanupComplete).toBe(false);
     expect(stopped.releaseFailures).toEqual(['left']);
+    expect(f.driver.getHeldInputCount()).toBe(1);
+    expect(f.driver.getCurrentFrame(r)).toBeNull();
     await expect(execution).rejects.toThrow('CANCELLED');
     await expect(f.observe()).rejects.toThrow('BUSY');
   });
@@ -168,7 +199,7 @@ describe('self-window CUA safety', () => {
     const capture = f.observe();
     await expect(f.observe()).rejects.toThrow('BUSY');
     await expect(f.driver.execute(r, 'p')).rejects.toThrow('BUSY');
-    resolve(null); await capture;
+    resolve(true); await capture;
     await expect(f.driver.execute(r, 'p')).rejects.toThrow('STALE');
     expect(f.consumePermit).not.toHaveBeenCalled();
   });
@@ -246,5 +277,56 @@ describe('self-window CUA safety', () => {
     f.driver.reportSurface({ ...f.surface, contentRevision: 2 });
     expect(f.onCancel).toHaveBeenCalledOnce();
     expect(f.driver.getState().phase).toBe('stopped');
+  });
+  it('allows a fixed-DOM-verified inert readonly observation only with a matching main busy cause', async () => {
+    const f = fixture();
+    f.driver.reportSurface({ ...f.surface, executionBlocked: true, blockReason: 'agent-busy', safeSurface: { ...f.surface.safeSurface!, interactive: false } });
+    await expect(f.observe()).rejects.toThrow('UNSAFE_SURFACE');
+    f.isObservationInFlight.mockReturnValue(true);
+    expect((await f.driver.observe({ sessionId: 's', runId: 'r' })).contentRevision).toBe(0);
+    expect(f.contents.sendInputEvent).not.toHaveBeenCalled();
+    f.driver.reportSurface({ ...f.surface, executionBlocked: true, blockReason: 'blocking-overlay', safeSurface: { ...f.surface.safeSurface!, interactive: false } });
+    await expect(f.observe()).rejects.toThrow('UNSAFE_SURFACE');
+  });
+  it('reports a later close distinctly and cannot clear a failed release by closing or restarting observation', async () => {
+    const f = fixture(), request = await f.observe();
+    const execution = f.driver.execute({ ...request, action: { kind: 'drag', from: { x: 20, y: 20 }, to: { x: 200, y: 20 }, durationMs: 100 } }, 'p');
+    const rejected = expect(execution).rejects.toThrow('CANCELLED');
+    await f.acting;
+    f.window.isDestroyed.mockReturnValue(true);
+    f.window.emit('closed');
+    const state = await f.driver.cancel('closed');
+    expect(state).toMatchObject({ targetGone: true, phase: 'cleanup-failed', cleanupComplete: false });
+    expect(state.releaseFailures).toContain('target-gone-release-unconfirmed');
+    await rejected;
+    f.window.isDestroyed.mockReturnValue(false);
+    await expect(f.observe()).rejects.toThrow('BUSY');
+  });
+  it('maps logical DOM arrow keys to the Electron codes that actually deliver those keys', async () => {
+    const f = fixture(), request = await f.observe();
+    await f.driver.execute({ ...request, action: { kind: 'key', key: 'ArrowLeft', modifiers: [] } }, 'p');
+    expect(f.contents.sendInputEvent.mock.calls.map(call => call[0])).toMatchObject([
+      { type: 'keyDown', keyCode: 'Left' }, { type: 'keyUp', keyCode: 'Left' }
+    ]);
+  });
+  it('does not retain an old trusted live surface when an unmounted source reports a stale revision', async () => {
+    const f = fixture();
+    f.driver.reportSurface({ ...f.surface, contentRevision: 1 });
+    const frame = await f.driver.observe({ sessionId: 's', runId: 'r' });
+    const scope = { projectId: 'p', sessionId: frame.sessionId, runId: frame.runId, windowId: frame.windowId,
+      frameId: frame.frameId, layoutRevision: frame.layoutRevision, contentRevision: frame.contentRevision };
+    expect(() => f.driver.assertObservationScope(scope)).not.toThrow();
+    expect(() => f.driver.reportSurface({ ...f.surface, safeSurface: null })).toThrow('STALE_CONTENT');
+    expect(() => f.driver.assertObservationScope(scope)).toThrow('SAVE_SCOPE_CHANGED');
+    expect(f.consumePermit).not.toHaveBeenCalled();
+    expect(f.contents.sendInputEvent).not.toHaveBeenCalled();
+  });
+  it('copies validated surface fields rather than retaining cyclic untrusted renderer extras', async () => {
+    const f = fixture();
+    const rect: { x: number; y: number; width: number; height: number; extra?: unknown } = { ...f.surface.safeSurface!.rect };
+    rect.extra = rect;
+    expect(() => f.driver.reportSurface({ ...f.surface, safeSurface: { ...f.surface.safeSurface!, rect } })).not.toThrow();
+    expect((await f.driver.observe({ sessionId: 's', runId: 'r' })).contentRevision).toBe(0);
+    expect(f.contents.sendInputEvent).not.toHaveBeenCalled();
   });
 });

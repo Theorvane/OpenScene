@@ -48,6 +48,13 @@ describe('main CUA approval authority', () => {
     expect(() => authority.consume(request, token)).toThrow('CUA_CANCELLED');
   });
 
+  it('fails closed if the trusted monotonic clock becomes invalid', () => {
+    const { authority, approve, advance } = fixture();
+    const token = approve();
+    advance(Number.NaN);
+    expect(() => authority.consume(request, token)).toThrow('CUA_APPROVAL_EXPIRED');
+  });
+
   it('denial dispatches nothing and cannot later be upgraded by replay', () => {
     const { authority } = fixture();
     authority.propose('conversation', 'call', request);
@@ -64,7 +71,7 @@ describe('main CUA approval authority', () => {
     expect(() => authority.consume(request, token)).toThrow('CUA_ACTION_REPLAYED');
   });
 
-  it.each(['sessionId', 'runId', 'windowId', 'frameId', 'layoutRevision'] as const)('binds %s to the original evidence', (field) => {
+  it.each(['sessionId', 'runId', 'windowId', 'frameId', 'layoutRevision', 'contentRevision'] as const)('binds %s to the original evidence', (field) => {
     const { authority, approve } = fixture();
     const token = approve();
     const changed = { ...request, [field]: typeof request[field] === 'number' ? 99 : 'different' } as CuaActionRequest;
