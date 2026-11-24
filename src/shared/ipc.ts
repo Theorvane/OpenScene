@@ -1,4 +1,8 @@
 export const IPC_CHANNELS = {
+  cuaGetState: 'cua:get-state',
+  cuaStop: 'cua:stop',
+  cuaReportSurfaceSnapshot: 'cua:report-surface-snapshot',
+  cuaStateChanged: 'cua:state-changed',
   shortsStart: 'shorts:start',
   shortsGet: 'shorts:get',
   shortsList: 'shorts:list',
