@@ -19,6 +19,8 @@ export function JevJudgmentSettings({ configApi, credentialApi = window.videoToo
   const [draft, setDraft] = useState<JevConfig>({ ...DEFAULT_JEV_CONFIG });
   const [configured, setConfigured] = useState(false);
   const [ready, setReady] = useState(false);
+  const [credentialReady, setCredentialReady] = useState(false);
+  const [unconfirmed, setUnconfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [failed, setFailed] = useState(false);
@@ -26,21 +28,37 @@ export function JevJudgmentSettings({ configApi, credentialApi = window.videoToo
 
   useEffect(() => {
     let active = true;
-    void Promise.all([configApi.getConfig(), credentialApi.getJevCredentialStatus()]).then(([settings, status]) => {
+    void Promise.allSettled([configApi.getConfig(), credentialApi.getJevCredentialStatus()]).then(([settings, status]) => {
       if (!active) return;
-      if (!settings.ok || !status.ok) { setFailed(true); setMessage('Jev settings could not be loaded.'); return; }
-      setConfig(settings.value); setDraft(settings.value); setConfigured(status.value.configured); setReady(true);
-    }).catch(() => { if (active) { setFailed(true); setMessage('Jev settings could not be loaded.'); } });
+      if (settings.status === 'fulfilled' && settings.value.ok) {
+        setConfig(settings.value.value); setDraft(settings.value.value); setReady(true);
+      } else { setUnconfirmed(true); setFailed(true); setMessage('Saved Jev settings could not be confirmed. Refresh before editing.'); }
+      if (status.status === 'fulfilled' && status.value.ok) {
+        setConfigured(status.value.value.configured); setCredentialReady(true);
+      } else { setFailed(true); setMessage('The Jev key status could not be loaded.'); }
+    });
     return () => { active = false; if (keyInput.current) keyInput.current.value = ''; };
   }, [configApi, credentialApi]);
+
+  const refreshConfig = async (): Promise<void> => {
+    setBusy(true);
+    try {
+      // The actual backend get operation revalidates disk in its serialized queue.
+      const response = await configApi.getConfig();
+      if (!response.ok) throw new Error('unconfirmed');
+      setConfig(response.value); setDraft(response.value); setReady(true); setUnconfirmed(false);
+      setFailed(false); setMessage('Saved Jev settings refreshed.');
+    } catch { setUnconfirmed(true); setFailed(true); setMessage('Saved Jev settings remain unconfirmed. Configuration editing is paused.'); }
+    finally { setBusy(false); }
+  };
 
   const saveConfig = async (): Promise<void> => {
     setBusy(true); setMessage('');
     try {
       const response = await configApi.setConfig(draft);
-      if (!response.ok) { setDraft(config); setFailed(true); setMessage('Jev settings were not saved.'); return; }
+      if (!response.ok) { setDraft(config); setUnconfirmed(true); setFailed(true); setMessage('The Jev save could not be confirmed. Refresh saved settings before retrying.'); return; }
       setConfig(response.value); setDraft(response.value); setFailed(false); setMessage('Jev settings saved.');
-    } catch { setDraft(config); setFailed(true); setMessage('Jev settings were not saved.'); }
+    } catch { setDraft(config); setUnconfirmed(true); setFailed(true); setMessage('The Jev save could not be confirmed. Refresh saved settings before retrying.'); }
     finally { setBusy(false); }
   };
   const saveKey = async (): Promise<void> => {
@@ -69,10 +87,12 @@ export function JevJudgmentSettings({ configApi, credentialApi = window.videoToo
 
   return <>
     <StatusCard tone="neutral">Optional typed judgments help decide whether an explicit editor observation needs more information. Your existing editing model stays selected. This feature is off by default.</StatusCard>
-    <StatusCard tone={config.enabled && configured ? 'success' : 'neutral'}>
-      {ready ? `${config.enabled ? 'Enabled' : 'Off'} · ${configured ? 'Key configured' : 'No key configured; existing model fallback'}` : 'Loading Jev settings…'}
+    <StatusCard tone={unconfirmed ? 'warning' : config.enabled && configured ? 'success' : 'neutral'}>
+      {unconfirmed ? `Saved state unconfirmed · Last confirmed setting: ${ready ? config.enabled ? 'Enabled' : 'Off' : 'unavailable'}`
+        : ready ? `${config.enabled ? 'Enabled' : 'Off'} · ${credentialReady ? configured ? 'Key configured' : 'No key configured; existing model fallback' : 'Key status unavailable'}` : 'Loading Jev settings…'}
     </StatusCard>
-    <fieldset className="jev-judgment-fields" disabled={!ready || busy}>
+    <Button variant="default" disabled={busy} onClick={() => void refreshConfig()}>Refresh saved settings</Button>
+    <fieldset className="jev-judgment-fields" disabled={!ready || busy || unconfirmed}>
       <label className="jev-judgment-toggle"><input type="checkbox" checked={draft.enabled} onChange={event => setDraft({ ...draft, enabled: event.target.checked })} /> Enable Jev observation judgments</label>
       <label className="field-label" htmlFor="jev-model">Model</label>
       <select id="jev-model" value={draft.model} onChange={() => undefined}><option value="jev-1.14.0">Jev 1.14.0 (pinned)</option></select>
@@ -84,6 +104,8 @@ export function JevJudgmentSettings({ configApi, credentialApi = window.videoToo
       <input id="jev-timeout" type="number" min="1" max="5000" step="1" value={draft.timeoutMs}
         onChange={event => setDraft({ ...draft, timeoutMs: event.target.valueAsNumber })} />
       <Button variant="default" onClick={() => void saveConfig()}>Save judgment settings</Button>
+    </fieldset>
+    <fieldset className="jev-judgment-fields" disabled={!credentialReady || busy}>
       <label className="field-label" htmlFor="jev-key">TypeSafe API key</label>
       <input ref={keyInput} id="jev-key" type="password" autoComplete="off" maxLength={JEV_API_KEY_MAX_LENGTH} placeholder="Enter a new key" />
       <div className="jev-judgment-actions">

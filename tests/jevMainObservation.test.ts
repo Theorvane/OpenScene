@@ -40,6 +40,30 @@ async function fixture() {
     input: { conversationId: 'c', output: { success: true, summary: 'Metadata only.', frame } } };
 }
 describe('trusted main Jev composition', () => {
+  it('uses persisted opt-in to reach the real observation adapter and disables it again', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'jev-persisted-wire-'));
+    try {
+      const f = await fixture();
+      const store = new JevConfigStore(directory); await store.load();
+      const network = vi.fn<typeof fetch>(async () => Response.json({ model: JEV_MODEL,
+        answers: { judgment: { type: 'choice', choice: 'reobserve', confidence: 0.98,
+          probabilities: { reobserve: 0.99, sufficient: 0.01 } } }, usage: { input_tokens: 1, output_tokens: 1 } }));
+      const hook = createMainJevObservationHook({
+        runtime: createJevRuntime({ service: { getApiKey: f.getApiKey }, readConfig: store.getSnapshot }),
+        agent: { getObservationBinding: f.getObservationBinding }, getDriver: () => f.driver, fetch: network
+      });
+      expect(await hook(f.input)).toBeNull(); expect(network).not.toHaveBeenCalled(); expect(f.getApiKey).not.toHaveBeenCalled();
+      await store.set({ ...DEFAULT_JEV_CONFIG, enabled: true });
+      expect((await hook({ ...f.input, output: JSON.stringify(f.input.output) }))?.selectedId).toBe('reobserve');
+      expect(network).toHaveBeenCalledTimes(1); expect(f.getApiKey).toHaveBeenCalledTimes(1);
+      const request = JSON.parse(network.mock.calls[0]![1]!.body as string);
+      expect(request).not.toHaveProperty('assets');
+      expect(request.questions.judgment.criteria).toHaveProperty('reobserve');
+      await store.set(DEFAULT_JEV_CONFIG);
+      expect(await hook(f.input)).toBeNull(); expect(network).toHaveBeenCalledTimes(1);
+      expect(f.contents.sendInputEvent).not.toHaveBeenCalled();
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  });
   it('reads committed persistent config through the actual main runtime closure', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'jev-main-config-'));
     try {
