@@ -41,6 +41,7 @@ type AppShellProps = {
   readonly onPageChange: (pageId: AppPageId) => void;
   readonly activeProjectContext: EditAgentProjectContext | null;
   readonly prepareAgentProject?: () => Promise<boolean>;
+  readonly hasUnsavedTimeline?: boolean;
   readonly studioLayout?: boolean;
   readonly projectTabs?: readonly ProjectTab[];
   readonly activeProjectId?: string | null;
@@ -292,6 +293,7 @@ export function AppShell(props: AppShellProps): ReactElement {
   return (
     <AgentChatProvider
       activeProject={props.activeProjectContext}
+      hasUnsavedTimeline={props.hasUnsavedTimeline ?? true}
       {...(props.prepareAgentProject === undefined ? {} : { prepareProject: props.prepareAgentProject })}
       restoreRequest={props.chatRestoreRequest ?? null}
       {...(props.onChatRestoreHandled === undefined ? {} : { onRestoreHandled: props.onChatRestoreHandled })}

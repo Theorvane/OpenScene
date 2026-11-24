@@ -5,6 +5,7 @@ import type { MemorySaver } from '@langchain/langgraph-checkpoint';
 import type { BaseMessage } from '@langchain/core/messages';
 import type {
   AgentChatApprovalInput,
+  AgentChatInteractionMode,
   AgentChatCancelInput,
   AgentChatDisplayMessage,
   AgentChatResetInput,
@@ -21,6 +22,7 @@ import { CuaApprovalError } from './cuaAgentOrchestration';
 import type { CuaSaveResult } from '../shared/cuaSave';
 
 interface ConversationConfig {
+  readonly interactionMode: AgentChatInteractionMode;
   readonly modelId: string;
   readonly openAiAuthMode: OpenAiAuthMode | undefined;
   readonly reasoningEffort: ReasoningEffort | undefined;
@@ -52,12 +54,22 @@ export class AgentChatSessionManager {
   }
 
   private async sendMessageUnchecked(input: AgentChatSendInput): Promise<AgentChatTurnState> {
+    const mode = input.interactionMode ?? 'project-tools';
+    const previous = this.conversationConfigs.get(input.conversationId);
     const existing = await this.graph.getState(this.runnableConfig(input.conversationId)).catch(() => null);
     const pending = existing ? findPendingProposal(existing) : null;
     if (pending) return { conversationId: input.conversationId,
       messages: toDisplayMessages((existing!.values as { messages?: BaseMessage[] }).messages ?? []),
       pendingApproval: pending, status: 'awaiting-approval', error: 'Respond to the current approval or cancel it before sending another request.' };
+    if ((mode !== 'project-tools' && mode !== 'self-window') || (previous && previous.interactionMode !== mode)) {
+      return this.errorState(input.conversationId, new CuaApprovalError('CUA_MODE_CHANGED'));
+    }
+    if (mode === 'self-window' && previous?.activeProject?.projectId
+      && previous.activeProject.projectId !== input.activeProject?.projectId) {
+      return this.errorState(input.conversationId, new CuaApprovalError('CUA_SCOPE_CHANGED'));
+    }
     this.conversationConfigs.set(input.conversationId, {
+      interactionMode: mode,
       modelId: input.modelId,
       openAiAuthMode: input.openAiAuthMode,
       reasoningEffort: input.reasoningEffort,
@@ -70,7 +82,7 @@ export class AgentChatSessionManager {
     try {
       const seed = await this.restoredSeed(input);
       const result = await this.graph.invoke(
-        { messages: [...seed, new HumanMessage(input.text)] },
+        { messages: [...seed, new HumanMessage(input.text)], selfWindowUnsaved: mode === 'self-window' && input.hasUnsavedTimeline !== false, lastPolicyError: null },
         this.runnableConfig(input.conversationId)
       );
       return await this.toTurnState(input.conversationId, result);
@@ -156,6 +168,9 @@ export class AgentChatSessionManager {
     try {
       const snapshot = await this.graph.getState(config);
       const messages = ((snapshot.values as { messages?: BaseMessage[] } | undefined)?.messages ?? []) as BaseMessage[];
+      const pendingApproval = findPendingProposal(snapshot);
+      if (pendingApproval) return { conversationId: input.conversationId, messages: toDisplayMessages(messages),
+        pendingApproval, status: 'awaiting-approval', error: 'Respond to the current approval or cancel it before compacting.' };
       const conversation = messages.filter((message) => !isSystemMessage(message));
       if (conversation.length <= COMPACTION_KEEP_RECENT) {
         return this.errorState(input.conversationId, new Error('This conversation is too short to compact.'));
@@ -169,7 +184,8 @@ export class AgentChatSessionManager {
         modelId: stored.modelId,
         openAiAuthMode: stored.openAiAuthMode,
         reasoningEffort: stored.reasoningEffort,
-        ollamaBaseUrl: stored.ollamaBaseUrl
+        ollamaBaseUrl: stored.ollamaBaseUrl,
+        interactionMode: stored.interactionMode
       });
       const summaryReply = await model.invoke([
         new HumanMessage(`${COMPACTION_PROMPT}\n\n<conversation>\n${transcriptForSummary(older)}\n</conversation>`)
@@ -183,7 +199,7 @@ export class AgentChatSessionManager {
       // with the summary followed by the untouched recent tail.
       await this.checkpointer.deleteThread(input.conversationId);
       const seeded = [new HumanMessage(`${COMPACTION_SUMMARY_PREFIX}\n\n${summary}`), ...recent];
-      await this.graph.updateState(config, { messages: seeded });
+      await this.graph.updateState(config, { messages: seeded, selfWindowUnsaved: stored.interactionMode === 'self-window', lastPolicyError: null });
 
       const state = await this.graph.getState(config);
       const compacted = ((state.values as { messages?: BaseMessage[] } | undefined)?.messages ?? []) as BaseMessage[];
@@ -286,6 +302,7 @@ export class AgentChatSessionManager {
       ...(this.activeTurns.get(conversationId) ? { signal: this.activeTurns.get(conversationId)!.controller.signal } : {}),
       configurable: {
         thread_id: conversationId,
+        interactionMode: stored?.interactionMode ?? 'project-tools',
         modelId: stored?.modelId,
         openAiAuthMode: stored?.openAiAuthMode,
         reasoningEffort: stored?.reasoningEffort,
@@ -311,11 +328,15 @@ export class AgentChatSessionManager {
     }
 
     const messages = ((invokeResult as { messages?: BaseMessage[] } | undefined)?.messages ?? []) as BaseMessage[];
+    const policyError = (invokeResult as { lastPolicyError?: 'CUA_MODE_REQUIRED' | 'CUA_EXPLICIT_SAVE_REQUIRED' } | undefined)?.lastPolicyError;
     return {
       conversationId,
       messages: toDisplayMessages(messages),
       pendingApproval: null,
-      status: 'idle',
+      status: policyError ? 'error' : 'idle',
+      ...(policyError ? { errorCode: policyError, error: policyError === 'CUA_MODE_REQUIRED'
+        ? 'Window controls require an explicitly selected Window CUA conversation.'
+        : 'The live editor may be dirty. Explicitly approve Save before using saved-project tools.' } : {}),
       ...this.contextUsageFor(conversationId, messages)
     };
   }

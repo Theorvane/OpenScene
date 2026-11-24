@@ -70,9 +70,13 @@ export type AgentCuaErrorCode =
   | 'CUA_CLEANUP_FAILED'
   | 'CUA_SAVE_OUTCOME_UNKNOWN'
   | 'CUA_SAVE_NOT_VERIFIED'
-  | 'CUA_SAVE_NOT_WRITTEN';
+  | 'CUA_SAVE_NOT_WRITTEN'
+  | 'CUA_MODE_REQUIRED'
+  | 'CUA_MODE_CHANGED'
+  | 'CUA_EXPLICIT_SAVE_REQUIRED';
 
 export type AgentChatStatus = 'idle' | 'thinking' | 'awaiting-approval' | 'error';
+export type AgentChatInteractionMode = 'project-tools' | 'self-window';
 
 /**
  * How much of the model's context window the conversation is using, measured
@@ -100,6 +104,9 @@ export interface AgentChatSendInput {
   readonly conversationId: string;
   readonly text: string;
   readonly modelId: string;
+  /** Explicit opt-in; omitted requests retain ordinary project-tool behavior. */
+  readonly interactionMode?: AgentChatInteractionMode | undefined;
+  readonly hasUnsavedTimeline?: boolean | undefined;
   readonly openAiAuthMode?: OpenAiAuthMode | undefined;
   readonly reasoningEffort?: ReasoningEffort | undefined;
   readonly ollamaBaseUrl?: string | undefined;
@@ -128,10 +135,28 @@ export const AGENT_CHAT_CUA_SAVE_TOOL_NAME = 'saveCuaEditorProject' as const;
 export async function prepareProjectForAgentApproval(
   toolName: string,
   decision: AgentToolApprovalDecision,
-  prepareProject?: () => Promise<boolean>
+  prepareProject?: () => Promise<boolean>,
+  interactionMode: AgentChatInteractionMode = 'project-tools'
 ): Promise<boolean> {
-  if (decision === 'deny' || toolName === AGENT_CHAT_CUA_ACTION_TOOL_NAME || toolName === AGENT_CHAT_CUA_SAVE_TOOL_NAME) return true;
+  if (interactionMode === 'self-window' || decision === 'deny' || toolName === AGENT_CHAT_CUA_ACTION_TOOL_NAME || toolName === AGENT_CHAT_CUA_SAVE_TOOL_NAME) return true;
   return prepareProject ? prepareProject() : true;
+}
+
+export async function prepareProjectForAgentSend(mode: AgentChatInteractionMode, prepareProject?: () => Promise<boolean>): Promise<boolean> {
+  return mode === 'self-window' || !prepareProject ? true : prepareProject();
+}
+
+export function toolsForAgentInteractionMode<T extends { readonly name: string }>(tools: readonly T[], mode: AgentChatInteractionMode): readonly T[] {
+  return mode === 'self-window' ? [...tools] : tools.filter((tool) =>
+    tool.name !== 'observeEditorWindow' && tool.name !== AGENT_CHAT_CUA_ACTION_TOOL_NAME && tool.name !== AGENT_CHAT_CUA_SAVE_TOOL_NAME);
+}
+
+export async function prepareAgentInteractionModeChange(
+  current: AgentChatInteractionMode, next: AgentChatInteractionMode,
+  busy: boolean, pendingApproval: boolean, cancelAndSettle: () => Promise<boolean>
+): Promise<boolean> {
+  if (current === next || busy || pendingApproval) return false;
+  return cancelAndSettle();
 }
 
 export interface AgentChatApprovalInput {

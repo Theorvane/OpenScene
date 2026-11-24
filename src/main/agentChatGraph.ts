@@ -174,9 +174,13 @@ export type AgentChatModelFactory = (config: {
   readonly openAiAuthMode: OpenAiAuthMode | undefined;
   readonly reasoningEffort: ReasoningEffort | undefined;
   readonly ollamaBaseUrl: string | undefined;
+  readonly interactionMode?: 'project-tools' | 'self-window';
 }) => AgentChatModelHandle;
 
 const AgentChatState = Annotation.Root({
+  lastPolicyError: Annotation<'CUA_MODE_REQUIRED' | 'CUA_EXPLICIT_SAVE_REQUIRED' | null>({ reducer: (_current, update) => update, default: () => null }),
+  selfWindowUnsaved: Annotation<boolean>({ reducer: (_current, update) => update, default: () => false }),
+  toolPolicyErrors: Annotation<Record<string, string>>({ reducer: (current, update) => ({ ...current, ...update }), default: () => ({}) }),
   messages: Annotation<BaseMessage[]>({
     reducer: (current, update) => current.concat(update),
     default: () => []
@@ -237,7 +241,7 @@ export function buildAgentChatGraph(options: BuildAgentChatGraphOptions) {
 
   const builder = new StateGraph(AgentChatState)
     .addNode('agent', async (state, config) => {
-      const configurable = (config?.configurable ?? {}) as { modelId?: string; openAiAuthMode?: OpenAiAuthMode; reasoningEffort?: ReasoningEffort; ollamaBaseUrl?: string; editAssetContext?: string; editProjectContext?: string };
+      const configurable = (config?.configurable ?? {}) as { modelId?: string; openAiAuthMode?: OpenAiAuthMode; reasoningEffort?: ReasoningEffort; ollamaBaseUrl?: string; editAssetContext?: string; editProjectContext?: string; interactionMode?: 'project-tools' | 'self-window' };
       if (!configurable.modelId) {
         throw new Error('agentChatGraph: a modelId must be provided via config.configurable.');
       }
@@ -246,14 +250,15 @@ export function buildAgentChatGraph(options: BuildAgentChatGraphOptions) {
         modelId: configurable.modelId,
         openAiAuthMode: configurable.openAiAuthMode,
         reasoningEffort: configurable.reasoningEffort,
-        ollamaBaseUrl: configurable.ollamaBaseUrl
+        ollamaBaseUrl: configurable.ollamaBaseUrl,
+        interactionMode: configurable.interactionMode ?? 'project-tools'
       });
       const hasSystemPrompt = state.messages.length > 0 && isSystemMessage(state.messages[0]!);
       const messages = hasSystemPrompt
         ? state.messages
         : [new SystemMessage(buildAgentSystemPrompt(getEditAssetContext(configurable.editAssetContext), getEditProjectContext(configurable.editProjectContext))
-          + (options.cua ? ` ${SELF_WINDOW_CUA_POLICY}` : '')
-          + (options.cuaSave ? ' To explicitly save live UI changes, first observe the new content, then call saveCuaEditorProject alone with the exact observed scope and active projectId. Main pins the canonical snapshot and asks a separate per-call approval. Only a terminal persisted/already-clean receipt with diskMatches=true verifies the saved state; keep current dirty UI and UI acknowledgement status distinct. Do not retry a confirmed Save because of later cancel or UI observation failure.' : '')), ...state.messages];
+          + (options.cua && configurable.interactionMode === 'self-window' ? ` ${SELF_WINDOW_CUA_POLICY}` : '')
+          + (options.cuaSave && configurable.interactionMode === 'self-window' ? ' To explicitly save live UI changes, first observe the new content, then call saveCuaEditorProject alone with the exact observed scope and active projectId. Main pins the canonical snapshot and asks a separate per-call approval. Only a terminal persisted/already-clean receipt with diskMatches=true verifies the saved state; keep current dirty UI and UI acknowledgement status distinct. Do not retry a confirmed Save because of later cancel or UI observation failure.' : '')), ...state.messages];
 
       const response = await model.invoke(messages, config.signal ? { signal: config.signal } : undefined);
       if ((response.tool_calls?.length ?? 0) > 16) throw new Error('CUA_BUDGET_EXCEEDED: At most 16 tool calls per model step.');
@@ -266,6 +271,16 @@ export function buildAgentChatGraph(options: BuildAgentChatGraphOptions) {
       }
 
       const decisions: Record<string, AgentToolApprovalDecision> = {};
+      const selfWindow = config.configurable?.interactionMode === 'self-window';
+      const cuaNames = new Set(['observeEditorWindow', 'executeCuaAction', 'saveCuaEditorProject']);
+      const requiresMode = !selfWindow && last.tool_calls.some((call) => cuaNames.has(call.name));
+      // Default deny while live UI is dirty. Only these explicit capabilities
+      // are independent of the saved project; unknown/new tools remain blocked.
+      const requiresSave = selfWindow && state.selfWindowUnsaved
+        && last.tool_calls.some((call) => !cuaNames.has(call.name) && call.name !== 'getEditingCapabilities');
+      if (requiresMode || requiresSave) return { lastPolicyError: requiresMode ? 'CUA_MODE_REQUIRED' as const : 'CUA_EXPLICIT_SAVE_REQUIRED' as const, toolPolicyErrors: Object.fromEntries(last.tool_calls.flatMap((call) => call.id ? [[call.id,
+        requiresMode ? 'CUA_MODE_REQUIRED: No tool in this step ran. Start an explicitly selected Window CUA conversation before using editor-window controls.'
+          : 'CUA_EXPLICIT_SAVE_REQUIRED: No tool in this step ran. The live editor may have unsaved changes. Observe and explicitly approve saveCuaEditorProject before relying on saved-project tools; do not silently save or claim old disk state is current.' ]] : [])) };
       if (last.tool_calls.length > 1 && last.tool_calls.some((call) =>
         perCallApprovalToolNames.has(call.name) || call.name === 'executeCuaAction' || call.name === 'observeEditorWindow' || call.name === 'saveCuaEditorProject')) {
         // Reject the complete step before any proposal, approval or tool side
@@ -311,7 +326,7 @@ export function buildAgentChatGraph(options: BuildAgentChatGraphOptions) {
         // though this pass correctly stopped to ask about this one.
         .filter((name) => !(options.spendToolNames?.has(name) ?? false)
           && !perCallApprovalToolNames.has(name));
-      return { toolDecisions: decisions, alwaysAllowedTools };
+      return { toolDecisions: decisions, alwaysAllowedTools, lastPolicyError: null };
     })
     .addNode('executeTools', async (state, config) => {
       const last = state.messages[state.messages.length - 1];
@@ -320,12 +335,18 @@ export function buildAgentChatGraph(options: BuildAgentChatGraphOptions) {
       }
 
       const results: BaseMessage[] = [];
+      let selfWindowUnsaved = state.selfWindowUnsaved;
       const executedPerCallIds: string[] = [];
       const visualEvidence: HumanMessage[] = [];
       const modelId = config?.configurable?.modelId;
       const model = typeof modelId === 'string' ? getLlmModel(modelId) : undefined;
       for (const call of last.tool_calls) {
         if (!call.id) continue;
+        const policyError = state.toolPolicyErrors[call.id];
+        if (policyError) {
+          results.push(new ToolMessage({ content: policyError, tool_call_id: call.id, name: call.name }));
+          continue;
+        }
         if (state.rejectedCuaBatchCallIds.includes(call.id)) {
           results.push(new ToolMessage({ content: 'CUA_MIXED_TOOL_STEP: No tool in this step ran. Call observeEditorWindow alone, then propose exactly one executeCuaAction alone in a later step. Use fresh call IDs; do not combine observation, UI input or MCP tools in one step.', tool_call_id: call.id, name: call.name }));
           continue;
@@ -371,6 +392,11 @@ export function buildAgentChatGraph(options: BuildAgentChatGraphOptions) {
             : options.cuaSave && call.name === 'saveCuaEditorProject'
               ? await options.cuaSave.executeApproved(String(config.configurable?.thread_id), call.id, CUA_SAVE_TOOL_SCHEMA.parse(call.args))
               : await tool.invoke(call.args ?? {}, config);
+          if (call.name === 'executeCuaAction' && (output as { actionExecuted?: boolean })?.actionExecuted === true) selfWindowUnsaved = true;
+          if (call.name === 'saveCuaEditorProject') {
+            const saved = output as { status?: string; diskMatches?: boolean; uiApplied?: boolean };
+            if (['persisted', 'persisted-after-cancel', 'already-clean'].includes(saved.status ?? '') && saved.diskMatches === true && saved.uiApplied === true) selfWindowUnsaved = false;
+          }
           const cuaEvidence = cuaVisualEvidence(output);
           if (cuaEvidence) {
             results.push(new ToolMessage({ content: cuaEvidence.summary, tool_call_id: call.id, name: call.name }));
@@ -390,7 +416,7 @@ export function buildAgentChatGraph(options: BuildAgentChatGraphOptions) {
           results.push(new ToolMessage({ content: `Tool "${call.name}" failed: ${detail}`, tool_call_id: call.id, name: call.name }));
         }
       }
-      return { messages: [...results, ...visualEvidence], executedPerCallIds };
+      return { messages: [...results, ...visualEvidence], executedPerCallIds, selfWindowUnsaved };
     })
     .addEdge(START, 'agent')
     .addConditionalEdges('agent', (state) => {

@@ -9,6 +9,9 @@ import { AgentModelPicker } from './AgentModelPicker';
 import { Button } from './ui';
 
 const CUA_ERROR_GUIDANCE: Readonly<Record<AgentCuaErrorCode, string>> = {
+  CUA_MODE_REQUIRED: 'Select Window CUA explicitly to use editor-window controls. Project tools mode does not expose or execute them.',
+  CUA_MODE_CHANGED: 'A conversation keeps its original mode. Select a mode to start a new conversation; restored chats never opt into Window CUA automatically.',
+  CUA_EXPLICIT_SAVE_REQUIRED: 'The live editor may be unsaved. Observe it and approve the explicit Save tool before using saved-project tools.',
   CUA_SAVE_OUTCOME_UNKNOWN: 'The Save publication outcome is unknown. Inspect the saved project before deciding whether to retry.',
   CUA_SAVE_NOT_VERIFIED: 'Save returned a persisted receipt, but the current disk snapshot could not be verified. UI acknowledgement does not verify the saved file.',
   CUA_SAVE_NOT_WRITTEN: 'The explicitly approved snapshot was not saved.',
@@ -47,6 +50,8 @@ export function AgentChatPanel({ width, onCollapse }: AgentChatPanelProps): Reac
     error,
     errorCode,
     isBusy,
+    interactionMode,
+    changeInteractionMode,
     reasoningEffort,
     setReasoningEffort,
     activeProject,
@@ -142,6 +147,16 @@ export function AgentChatPanel({ width, onCollapse }: AgentChatPanelProps): Reac
         </div>
 
         <div className="agent-chat-log" aria-live="polite">
+          <div role="group" aria-label="Agent interaction mode">
+            <Button variant={interactionMode === 'project-tools' ? 'primary' : 'ghost'} data-testid="agent-mode-project-tools"
+              aria-pressed={interactionMode === 'project-tools'} disabled={isBusy || pendingApproval !== null}
+              onClick={() => { void changeInteractionMode('project-tools'); }}>Project tools</Button>
+            <Button variant={interactionMode === 'self-window' ? 'primary' : 'ghost'} data-testid="agent-mode-self-window"
+              aria-pressed={interactionMode === 'self-window'} disabled={isBusy || pendingApproval !== null}
+              onClick={() => { void changeInteractionMode('self-window'); }}>Window CUA (desktop)</Button>
+          </div>
+          <p>Changing mode starts a new conversation after the current run settles. It does not save the project.</p>
+          {interactionMode === 'self-window' && <p>Window CUA observes live UI without automatically saving. Saved-project tools require an explicitly approved Save when the UI may be dirty.</p>}
 
           {!modelReady && (
             <div className="agent-chat-hint-card agent-chat-hint-card--warning">

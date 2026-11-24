@@ -143,7 +143,7 @@ describe('CUA immutable run binding and dispatch', () => {
       } })
     });
     const session = new AgentChatSessionManager(bundle, { cancelCua: (id) => f.orchestrator.cancelConversation(id) });
-    const pending = await session.sendMessage({ conversationId: 'a', text: 'click', modelId: 'qwen2.5-coder' });
+    const pending = await session.sendMessage({ conversationId: 'a', text: 'click', modelId: 'qwen2.5-coder', interactionMode: 'self-window', hasUnsavedTimeline: false });
     expect(pending.pendingApproval?.cuaApproval?.frameId).toBe('frame-1');
     expect(pending.pendingApproval?.cuaApproval?.coords).toEqual({ x: 10, y: 20 });
     expect(f.inputs()).toBe(0);
