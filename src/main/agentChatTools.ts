@@ -2,6 +2,10 @@ import type { DynamicStructuredTool } from '@langchain/core/tools';
 import type { InstanceResolver } from '@theorvane/type-mcp';
 import { createLangChainTools } from '@theorvane/type-mcp/langchain';
 import { OpenVideoMcpServer } from './openVideoMcpServer';
+import { tool } from '@langchain/core/tools';
+import { z } from 'zod';
+import { CUA_KEYS } from '../shared/cua';
+import type { CuaAgentOrchestrator } from './cuaAgentOrchestration';
 
 /**
  * The tools that read and change nothing.
@@ -28,7 +32,8 @@ export const AGENT_CHAT_READ_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set([
   'watchProjectVideo',
   'getEditingCapabilities',
   'planAutoClipEdit',
-  'getCanvasWorkflow'
+  'getCanvasWorkflow',
+  'observeEditorWindow'
 ]);
 
 /**
@@ -41,9 +46,36 @@ export function agentChatMutatingToolNames(tools: readonly { readonly name: stri
   return new Set(tools.map((tool) => tool.name).filter((name) => !AGENT_CHAT_READ_ONLY_TOOL_NAMES.has(name)));
 }
 
-export async function createAgentChatTools(instance: OpenVideoMcpServer): Promise<readonly DynamicStructuredTool[]> {
+export async function createAgentChatTools(instance: OpenVideoMcpServer, cua?: CuaAgentOrchestrator): Promise<readonly DynamicStructuredTool[]> {
   const resolver: InstanceResolver<OpenVideoMcpServer> = { resolve: () => instance };
-  return createLangChainTools(OpenVideoMcpServer, { resolver });
+  const tools = await createLangChainTools(OpenVideoMcpServer, { resolver });
+  return cua ? [...tools, ...createCuaAgentChatTools(cua)] : tools;
+}
+
+const point = z.object({ x: z.number().finite().nonnegative(), y: z.number().finite().nonnegative() }).strict();
+export const CUA_ACTION_TOOL_SCHEMA = z.object({
+  sessionId: z.string().min(1), runId: z.string().min(1), windowId: z.number().int().nonnegative(),
+  frameId: z.string().min(1), layoutRevision: z.number().int().nonnegative(),
+  action: z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('click'), point }).strict(),
+    z.object({ kind: z.literal('drag'), from: point, to: point, durationMs: z.number().int().min(1).max(3000) }).strict(),
+    z.object({ kind: z.literal('key'), key: z.enum(CUA_KEYS), modifiers: z.array(z.enum(['shift', 'control', 'meta', 'alt'])).max(4) }).strict()
+  ])
+}).strict();
+
+export const AGENT_CHAT_CUA_PER_CALL_TOOL_NAMES: ReadonlySet<string> = new Set(['executeCuaAction']);
+
+export function createCuaAgentChatTools(cua: CuaAgentOrchestrator): DynamicStructuredTool[] {
+  return [
+    tool(async (_args, config) => {
+      const conversationId = config?.configurable?.thread_id;
+      if (typeof conversationId !== 'string') throw new Error('CUA_SCOPE_CHANGED');
+      return JSON.stringify(await cua.observe(conversationId));
+    }, { name: 'observeEditorWindow', description: 'Observe only this OpenScene editor window. Returns a frame and CSS coordinate scope; use exactly those IDs for a proposed action. No OS-wide control.', schema: z.object({}).strict() }),
+    tool(async () => { throw new Error('CUA_APPROVAL_MISMATCH: Only the main graph approval dispatch can execute an action.'); }, {
+      name: 'executeCuaAction', description: 'Propose one click, bounded drag or allowed key in the observed OpenScene editor. Requires a fresh exact per-call human approval; always never authorizes later actions. After execution inspect the returned frame and requery the project timeline. No implicit recapture or coordinate conversion.', schema: CUA_ACTION_TOOL_SCHEMA
+    })
+  ];
 }
 
 /**

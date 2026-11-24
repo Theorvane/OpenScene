@@ -14,7 +14,38 @@ export interface AgentToolCallProposal {
   readonly toolCallId: string;
   readonly toolName: string;
   readonly args: Record<string, unknown>;
+  /** Display evidence only; never an execution permit or an approval authority. */
+  readonly cuaApproval?: AgentCuaApprovalSummary | undefined;
 }
+
+/**
+ * A projection of the exact observed action awaiting approval. Coordinates are
+ * displayed in the coordinate system named here; the driver owns conversion
+ * and validation. Changing this evidence requires a new proposal and approval.
+ */
+export interface AgentCuaApprovalSummary {
+  readonly actionKind: 'click' | 'key' | 'drag';
+  readonly actionLabel: string;
+  readonly frameId: string;
+  readonly scopeRevision: string | number;
+  readonly coordinateSpace?: 'css' | 'bitmap' | undefined;
+  readonly coords?: { readonly x: number; readonly y: number } | undefined;
+  readonly dragTo?: { readonly x: number; readonly y: number } | undefined;
+}
+
+/** Stable presentation codes; the main process remains the source of errors. */
+export type AgentCuaErrorCode =
+  | 'CUA_FRAME_STALE'
+  | 'CUA_FRAME_EXPIRED'
+  | 'CUA_SCOPE_CHANGED'
+  | 'CUA_APPROVAL_EXPIRED'
+  | 'CUA_APPROVAL_MISMATCH'
+  | 'CUA_ACTION_REPLAYED'
+  | 'CUA_BUDGET_EXCEEDED'
+  | 'CUA_CANCELLED'
+  | 'CUA_BUSY'
+  | 'CUA_TARGET_GONE'
+  | 'CUA_CLEANUP_FAILED';
 
 export type AgentChatStatus = 'idle' | 'thinking' | 'awaiting-approval' | 'error';
 
@@ -34,6 +65,7 @@ export interface AgentChatTurnState {
   readonly pendingApproval: AgentToolCallProposal | null;
   readonly status: AgentChatStatus;
   readonly error?: string | undefined;
+  readonly errorCode?: AgentCuaErrorCode | undefined;
   readonly contextUsage?: AgentChatContextUsage | undefined;
 }
 
@@ -74,6 +106,11 @@ export interface AgentChatCompactInput {
 }
 
 export interface AgentChatResetInput {
+  readonly conversationId: string;
+}
+
+/** Cancel the named conversation; main must settle input release before returning. */
+export interface AgentChatCancelInput {
   readonly conversationId: string;
 }
 

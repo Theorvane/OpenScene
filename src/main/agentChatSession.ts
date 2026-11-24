@@ -5,6 +5,7 @@ import type { MemorySaver } from '@langchain/langgraph-checkpoint';
 import type { BaseMessage } from '@langchain/core/messages';
 import type {
   AgentChatApprovalInput,
+  AgentChatCancelInput,
   AgentChatDisplayMessage,
   AgentChatResetInput,
   AgentChatSendInput,
@@ -16,6 +17,7 @@ import { getDomainModel } from '../shared/aiDomainModels';
 import { buildContextUsage, type TurnTokenUsage } from '../shared/agentChatUsage';
 import type { OpenAiAuthMode, ReasoningEffort } from '../shared/openAiAuth';
 import { isAiLike, isHumanMessage, isSystemMessage, isToolMessage, type AgentChatGraphBundle } from './agentChatGraph';
+import { CuaApprovalError } from './cuaAgentOrchestration';
 
 interface ConversationConfig {
   readonly modelId: string;
@@ -31,14 +33,23 @@ export class AgentChatSessionManager {
   private readonly checkpointer: MemorySaver;
   private readonly createModel: AgentChatGraphBundle['createModel'];
   private readonly conversationConfigs = new Map<string, ConversationConfig>();
+  private readonly activeTurns = new Map<string, { controller: AbortController; settled: Promise<void> }>();
+  private readonly cancellations = new Map<string, Promise<AgentChatTurnState>>();
+  private readonly cleanupLocked = new Set<string>();
 
-  constructor(bundle: AgentChatGraphBundle) {
+  constructor(bundle: AgentChatGraphBundle, private readonly lifecycle: {
+    readonly cancelCua?: (conversationId: string) => Promise<void>;
+  } = {}) {
     this.graph = bundle.graph;
     this.checkpointer = bundle.checkpointer;
     this.createModel = bundle.createModel;
   }
 
   async sendMessage(input: AgentChatSendInput): Promise<AgentChatTurnState> {
+    return this.runExclusive(input.conversationId, () => this.sendMessageUnchecked(input));
+  }
+
+  private async sendMessageUnchecked(input: AgentChatSendInput): Promise<AgentChatTurnState> {
     this.conversationConfigs.set(input.conversationId, {
       modelId: input.modelId,
       openAiAuthMode: input.openAiAuthMode,
@@ -87,6 +98,10 @@ export class AgentChatSessionManager {
   }
 
   async respondToApproval(input: AgentChatApprovalInput): Promise<AgentChatTurnState> {
+    return this.runExclusive(input.conversationId, () => this.respondToApprovalUnchecked(input));
+  }
+
+  private async respondToApprovalUnchecked(input: AgentChatApprovalInput): Promise<AgentChatTurnState> {
     const config = this.runnableConfig(input.conversationId);
 
     try {
@@ -121,6 +136,10 @@ export class AgentChatSessionManager {
    * summary replaces the old history, the recent tail stays verbatim.
    */
   async compactConversation(input: AgentChatCompactInput): Promise<AgentChatTurnState> {
+    return this.runExclusive(input.conversationId, () => this.compactConversationUnchecked(input));
+  }
+
+  private async compactConversationUnchecked(input: AgentChatCompactInput): Promise<AgentChatTurnState> {
     const config = this.runnableConfig(input.conversationId);
     const stored = this.conversationConfigs.get(input.conversationId);
     if (stored === undefined) {
@@ -173,14 +192,61 @@ export class AgentChatSessionManager {
   }
 
   async resetConversation(input: AgentChatResetInput): Promise<AgentChatTurnState> {
+    const cancelled = await this.cancelConversation(input);
+    if (cancelled.errorCode === 'CUA_CLEANUP_FAILED') return cancelled;
     this.conversationConfigs.delete(input.conversationId);
     await this.checkpointer.deleteThread(input.conversationId);
     return { conversationId: input.conversationId, messages: [], pendingApproval: null, status: 'idle' };
   }
 
-  private runnableConfig(conversationId: string): { configurable: Record<string, string | undefined> } {
+  /** Driver callbacks use this synchronous method; it never re-enters cancel. */
+  abortConversation(conversationId: string): void {
+    this.activeTurns.get(conversationId)?.controller.abort();
+  }
+
+  cancelConversation(input: AgentChatCancelInput): Promise<AgentChatTurnState> {
+    const existing = this.cancellations.get(input.conversationId);
+    if (existing) return existing;
+    this.abortConversation(input.conversationId);
+    // Install the promise before invoking the driver, whose callback may abort
+    // this conversation synchronously. Never remove a running checkpoint.
+    const cancellation = Promise.resolve().then(async () => {
+      try {
+        await this.lifecycle.cancelCua?.(input.conversationId);
+      } catch (error) {
+        this.cleanupLocked.add(input.conversationId);
+        await this.activeTurns.get(input.conversationId)?.settled;
+        return { ...await this.errorState(input.conversationId, error), errorCode: 'CUA_CLEANUP_FAILED' as const };
+      }
+      await this.activeTurns.get(input.conversationId)?.settled;
+      const previous = await this.errorState(input.conversationId, new Error('CUA_CANCELLED'));
+      await this.checkpointer.deleteThread(input.conversationId);
+      return { ...previous, status: 'idle' as const, error: undefined, errorCode: undefined };
+    }).finally(() => { this.cancellations.delete(input.conversationId); });
+    this.cancellations.set(input.conversationId, cancellation);
+    return cancellation;
+  }
+
+  private async runExclusive(conversationId: string, run: () => Promise<AgentChatTurnState>): Promise<AgentChatTurnState> {
+    if (this.cleanupLocked.has(conversationId)) return {
+      ...await this.errorState(conversationId, new Error('CUA_CLEANUP_FAILED')), errorCode: 'CUA_CLEANUP_FAILED'
+    };
+    if (this.activeTurns.has(conversationId) || this.cancellations.has(conversationId)) {
+      return { ...await this.errorState(conversationId, new Error('CUA_BUSY')), errorCode: 'CUA_BUSY' };
+    }
+    const controller = new AbortController();
+    let settle!: () => void;
+    const settled = new Promise<void>((resolve) => { settle = resolve; });
+    this.activeTurns.set(conversationId, { controller, settled });
+    try { return await run(); }
+    finally { this.activeTurns.delete(conversationId); settle(); }
+  }
+
+  private runnableConfig(conversationId: string): { configurable: Record<string, string | undefined>; signal?: AbortSignal; recursionLimit: number } {
     const stored = this.conversationConfigs.get(conversationId);
     return {
+      recursionLimit: 48,
+      ...(this.activeTurns.get(conversationId) ? { signal: this.activeTurns.get(conversationId)!.controller.signal } : {}),
       configurable: {
         thread_id: conversationId,
         modelId: stored?.modelId,
@@ -243,7 +309,8 @@ export class AgentChatSessionManager {
       messages: toDisplayMessages(messages),
       pendingApproval: null,
       status: 'error',
-      error: err instanceof Error ? err.message : 'Agent chat failed unexpectedly.'
+      error: err instanceof Error ? err.message : 'Agent chat failed unexpectedly.',
+      ...(err instanceof CuaApprovalError ? { errorCode: err.code } : {})
     };
   }
 }
