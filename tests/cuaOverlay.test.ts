@@ -197,5 +197,18 @@ describe('CuaOverlay', () => {
 
     expect(css).toContain('.cua-overlay {\n  position: fixed;\n  inset: 0;\n  z-index: 9999;\n  pointer-events: none;');
     expect(css).toContain('.cua-stop-btn {\n  pointer-events: auto;\n  position: fixed;');
+
+    const [timelineCanvas, timelineEditor] = await Promise.all([
+      readFile(new URL('../src/renderer/src/editor/TimelineCanvas.tsx', import.meta.url), 'utf8'),
+      readFile(new URL('../src/renderer/src/editor/TimelineEditor.tsx', import.meta.url), 'utf8')
+    ]);
+    expect(timelineCanvas).toContain('data-testid="timeline-save-btn"');
+    expect(timelineCanvas).toContain('data-dirty={editor.hasUnsavedTimeline');
+    expect(timelineCanvas).toContain('data-saving={editor.isSavingTimeline');
+    expect(timelineCanvas).toContain('data-save-status={editor.timelineSaveStatus}');
+    expect(timelineEditor).toContain('data-testid="editor-save-btn"');
+    expect(timelineEditor).toContain('data-dirty={editor.hasUnsavedTimeline');
+    expect(timelineEditor).toContain('data-saving={editor.isSavingTimeline');
+    expect(timelineEditor).toContain('data-save-status={editor.timelineSaveStatus}');
   });
 });

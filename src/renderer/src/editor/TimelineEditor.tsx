@@ -335,7 +335,20 @@ export function TimelineEditor({ editor, onProjectSettings, onOpenSettings }: Ti
               <button type="button" onClick={resetLayout}>Reset layout</button>
             </div>
           </details>
-          <button className="oc-editor-host__save" type="button" onClick={() => { void editor.saveTimeline(); }} disabled={editor.project === null || !editor.hasUnsavedTimeline}>Save{editor.hasUnsavedTimeline ? ' *' : ''}</button>
+          <button
+            className="oc-editor-host__save"
+            data-testid="editor-save-btn"
+            data-dirty={editor.hasUnsavedTimeline ? 'true' : 'false'}
+            data-saving={editor.isSavingTimeline ? 'true' : 'false'}
+            data-save-status={editor.timelineSaveStatus}
+            data-save-error={editor.timelineSaveError ?? undefined}
+            aria-busy={editor.isSavingTimeline}
+            type="button"
+            onClick={() => { void editor.saveTimeline(); }}
+            disabled={editor.project === null || !editor.hasUnsavedTimeline || editor.isSavingTimeline}
+          >
+            {editor.isSavingTimeline ? 'Saving…' : `Save${editor.hasUnsavedTimeline ? ' *' : ''}`}
+          </button>
           {!floatingExportVisible && <ExportPanel editor={editor} />}
         </>}
       />}
