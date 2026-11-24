@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import type { BrowserWindow, KeyboardInputEvent, MouseInputEvent } from 'electron';
-import type { CuaSaveScope } from '../shared/cuaSave';
 import { CUA_KEYS, type CuaActionRequest, type CuaCancelAck, type CuaFrame, type CuaKey, type CuaPoint, type CuaPrepareAck, type CuaRect, type CuaState, type CuaSurfaceSnapshot } from '../shared/cua';
+
+export type CuaFrameScope = Pick<CuaFrame, 'sessionId' | 'runId' | 'windowId' | 'frameId' | 'layoutRevision' | 'contentRevision'>;
+export type CuaFrameMetadata = Omit<CuaFrame, 'pngDataUrl'>;
 
 const ELECTRON_KEY_CODES: Readonly<Partial<Record<CuaKey, string>>> = {
   ArrowLeft: 'Left', ArrowRight: 'Right', ArrowUp: 'Up', ArrowDown: 'Down'
@@ -78,6 +80,18 @@ export class CuaDriver {
     });
   }
   getState(): CuaState { return structuredClone(this.state); }
+  /** Main-only diagnostics; no input, capture or authority is granted. */
+  getHeldInputCount(): number {
+    return Number(this.heldMouse !== null) + Number(this.heldKey !== null);
+  }
+  getCurrentFrame(scope: CuaFrameScope): CuaFrameMetadata | null {
+    try {
+      this.assertObservationScope(scope);
+      if (this.getHeldInputCount() !== 0) return null;
+      const { pngDataUrl: _png, ...metadata } = this.frame!;
+      return structuredClone(metadata);
+    } catch { return null; }
+  }
   private markTargetGone(reason: string): void {
     this.publish({ targetGone: true });
     // A later close is a new lifecycle observation, not a replay of an old
@@ -86,7 +100,7 @@ export class CuaDriver {
     void this.cancel(reason);
   }
   /** Read-only main seam used to bind a separate approved Save capability. */
-  assertObservationScope(scope: CuaSaveScope): void {
+  assertObservationScope(scope: CuaFrameScope): void {
     this.live();
     const frame = this.frame, surface = this.surface;
     if (this.observing || this.state.phase !== 'ready' || !frame || !surface?.safeSurface || this.cleanupFailureLatched
