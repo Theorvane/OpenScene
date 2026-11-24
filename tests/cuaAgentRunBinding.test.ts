@@ -62,6 +62,7 @@ describe('CUA immutable run binding and dispatch', () => {
           const metadata = JSON.parse(String(observation!.content).split('\n').at(-1)!) as CuaFrame;
           return new AIMessage({ content: '', tool_calls: [{ id: 'action', name: 'executeCuaAction', args: { ...f.requestFor(metadata) } }] });
         }
+        if (step === 3) return new AIMessage({ content: '', tool_calls: [{ id: 'observe-after-action', name: 'observeEditorWindow', args: {} }] });
         return new AIMessage('Action observed; inspect project timeline next.');
       } })
     });
@@ -85,11 +86,26 @@ describe('CUA immutable run binding and dispatch', () => {
     const summary = f.orchestrator.prepareApproval('a', 'one', request);
     expect(f.orchestrator.prepareApproval('a', 'one', request)).toEqual(summary);
     expect(f.authority.getPendingApproval()?.runId).toBe(observed.frame.runId);
-    await f.orchestrator.executeApproved('a', 'one', request);
+    const executed = await f.orchestrator.executeApproved('a', 'one', request);
+    expect(executed).toMatchObject({ success: true, actionExecuted: true, observationRequired: true });
     expect(f.inputs()).toBe(1);
     expect(f.blocked()).toBe(true);
     await expect(f.orchestrator.executeApproved('a', 'one', request)).rejects.toThrow();
     expect(f.inputs()).toBe(1);
+  });
+
+  it('does not recapture or retry successful input when a later explicit observation fails', async () => {
+    const f = fixture();
+    const request = f.requestFor((await f.orchestrator.observe('a')).frame);
+    f.orchestrator.prepareApproval('a', 'one', request);
+    f.driver.observe = async () => { throw new Error('CUA_STALE_FRAME'); };
+    const executed = await f.orchestrator.executeApproved('a', 'one', request);
+    expect(executed).toMatchObject({ success: true, actionExecuted: true });
+    expect(f.inputs()).toBe(1);
+    await expect(f.orchestrator.observe('a')).rejects.toThrow('CUA_STALE_FRAME');
+    expect(f.inputs()).toBe(1);
+    expect(f.cancellations()).toBe(0);
+    expect(() => f.orchestrator.prepareApproval('a', 'new-action', request)).toThrow();
   });
 
   it('refuses a newly observed frame to inherit an old approval', async () => {

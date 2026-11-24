@@ -161,6 +161,13 @@ ChatOllama.prototype.invoke = async function(messages, options) {
       frameId: scenario.kind === 'stale' ? `${frame.frameId}-stale` : frame.frameId, layoutRevision: frame.layoutRevision, action
     } }] });
   }
+  if (scenario.stage === 3) {
+    const result = [...messages].reverse().find(message => message.name === 'executeCuaAction');
+    try {
+      if (JSON.parse(result?.content).actionExecuted) return new AIMessage({ content: '',
+        tool_calls: [{ id: `observe-after-action-${++callSequence}`, name: 'observeEditorWindow', args: {} }] });
+    } catch { /* A denied/failed input is never retried. */ }
+  }
   return new AIMessage(`Synthetic ${scenario.kind} scenario settled. Verify the saved timeline separately.`);
 };
 

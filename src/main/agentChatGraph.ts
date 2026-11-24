@@ -219,7 +219,7 @@ const SELF_WINDOW_CUA_POLICY = [
   'For self-window UI actions, first call observeEditorWindow alone and use the exact returned session/run/window/frame/layout scope and CSS coordinates.',
   'Then propose exactly one executeCuaAction alone in a later tool step; never combine CUA observation or input with any other tool call in the same step.',
   'Each exact action needs a new approval. Never use UI actions to approve tools, change settings, or access other windows.',
-  'Inspect the returned frame after execution. MCP getProjectTimeline reports saved state and may lag unsaved UI edits; clearly distinguish the two and never claim a save occurred without the existing save acknowledgement.',
+  'After successful input, call observeEditorWindow alone in a separate step. A later observation error does not mean the input failed and must never trigger a retry of that action. MCP getProjectTimeline reports saved state and may lag unsaved UI edits; clearly distinguish the two and never claim a save occurred without the existing save acknowledgement.',
   'Protected Save controls remain outside CUA scope; do not invent a shortcut or silently save.',
   'If evidence is stale, cancelled or denied, stop or explicitly observe again and request a new approval; never silently rebind approved coordinates.',
   'Prefer registered editing tools when they express the requested edit.'

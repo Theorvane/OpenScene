@@ -236,8 +236,11 @@ export class CuaAgentOrchestrator {
         throw new CuaApprovalError('CUA_CLEANUP_FAILED');
       }
       run.frame = null;
-      this.options.driver.setExecutionBlocked(true);
-      return { state, ...await this.observe(conversationId) };
+      // Input has settled successfully. A later observation can race a real
+      // committed-content report, so it is a separate tool step and cannot
+      // turn this successful action into an apparent failure/retry.
+      return { success: true, actionExecuted: true, observationRequired: true, state,
+        summary: 'The approved input executed and released successfully. Its original frame is consumed. Call observeEditorWindow alone for new evidence before another action; observation failure must not retry this input.' };
     } catch (error) {
       await this.cancelConversation(conversationId);
       throw error;
