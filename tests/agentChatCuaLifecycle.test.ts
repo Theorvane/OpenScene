@@ -20,6 +20,17 @@ function fixture(replies: AIMessage[], options: { cancelCua?: (id: string) => Pr
 const send = { conversationId: 'conversation', text: 'move clip', modelId: 'qwen2.5-coder' };
 
 describe('CUA graph approval and cancellation lifecycle', () => {
+  it('rejects another send while approval is pending without replacing its project scope', async () => {
+    const { session, inputs } = fixture([call('one'), new AIMessage('Done')]);
+    await session.sendMessage({ ...send, activeProject: { projectId: 'original', name: 'Original', assetCount: 0, trackCount: 2 } });
+    const blocked = await session.sendMessage({ ...send, text: 'new request', activeProject: { projectId: 'other', name: 'Other', assetCount: 0, trackCount: 2 } });
+    expect(blocked.pendingApproval?.toolCallId).toBe('one');
+    expect(blocked.error).toContain('current approval');
+    expect(session.getActiveProject(send.conversationId)?.projectId).toBe('original');
+    await session.respondToApproval({ conversationId: send.conversationId, toolCallId: 'one', decision: 'approve' });
+    expect(inputs()).toBe(1);
+  });
+
   it.each([
     ['write', 'cuaAction'], ['cuaAction', 'write'],
     ['observeEditorWindow', 'cuaAction'], ['observeEditorWindow', 'read'],

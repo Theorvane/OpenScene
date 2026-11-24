@@ -11,7 +11,8 @@ import {
 } from '@langchain/core/messages';
 import type { DynamicStructuredTool } from '@langchain/core/tools';
 import type { CuaAgentOrchestrator } from './cuaAgentOrchestration';
-import { CUA_ACTION_TOOL_SCHEMA } from './agentChatTools';
+import { CUA_ACTION_TOOL_SCHEMA, CUA_SAVE_TOOL_SCHEMA } from './agentChatTools';
+import type { CuaAgentSaveOrchestrator } from './cuaAgentSaveOrchestration';
 import { Annotation, END, MemorySaver, START, StateGraph, interrupt } from '@langchain/langgraph';
 import { FFMPEG_EDITING_WORKFLOW } from '../shared/ffmpegEditingWorkflow';
 import { AGENT_SCOPE_POLICY } from '../shared/agentScope';
@@ -212,6 +213,7 @@ export interface BuildAgentChatGraphOptions {
   /** Exact-action approval; an "always" answer covers this call only. */
   readonly perCallApprovalToolNames?: ReadonlySet<string>;
   readonly cua?: CuaAgentOrchestrator;
+  readonly cuaSave?: CuaAgentSaveOrchestrator;
   readonly createModel: AgentChatModelFactory;
 }
 
@@ -229,7 +231,8 @@ export function buildAgentChatGraph(options: BuildAgentChatGraphOptions) {
   const toolsByName = new Map(options.tools.map((tool) => [tool.name, tool]));
   const perCallApprovalToolNames = new Set([
     ...options.perCallApprovalToolNames ?? [],
-    ...options.cua ? ['executeCuaAction'] : []
+    ...options.cua ? ['executeCuaAction'] : [],
+    ...options.cuaSave ? ['saveCuaEditorProject'] : []
   ]);
 
   const builder = new StateGraph(AgentChatState)
@@ -249,7 +252,8 @@ export function buildAgentChatGraph(options: BuildAgentChatGraphOptions) {
       const messages = hasSystemPrompt
         ? state.messages
         : [new SystemMessage(buildAgentSystemPrompt(getEditAssetContext(configurable.editAssetContext), getEditProjectContext(configurable.editProjectContext))
-          + (options.cua ? ` ${SELF_WINDOW_CUA_POLICY}` : '')), ...state.messages];
+          + (options.cua ? ` ${SELF_WINDOW_CUA_POLICY}` : '')
+          + (options.cuaSave ? ' To explicitly save live UI changes, first observe the new content, then call saveCuaEditorProject alone with the exact observed scope and active projectId. Main pins the canonical snapshot and asks a separate per-call approval. Only a terminal persisted/already-clean receipt with diskMatches=true verifies the saved state; keep current dirty UI and UI acknowledgement status distinct. Do not retry a confirmed Save because of later cancel or UI observation failure.' : '')), ...state.messages];
 
       const response = await model.invoke(messages, config.signal ? { signal: config.signal } : undefined);
       if ((response.tool_calls?.length ?? 0) > 16) throw new Error('CUA_BUDGET_EXCEEDED: At most 16 tool calls per model step.');
@@ -263,7 +267,7 @@ export function buildAgentChatGraph(options: BuildAgentChatGraphOptions) {
 
       const decisions: Record<string, AgentToolApprovalDecision> = {};
       if (last.tool_calls.length > 1 && last.tool_calls.some((call) =>
-        perCallApprovalToolNames.has(call.name) || call.name === 'executeCuaAction' || call.name === 'observeEditorWindow')) {
+        perCallApprovalToolNames.has(call.name) || call.name === 'executeCuaAction' || call.name === 'observeEditorWindow' || call.name === 'saveCuaEditorProject')) {
         // Reject the complete step before any proposal, approval or tool side
         // effect. Even an earlier MCP call must not change the observed scene.
         return { rejectedCuaBatchCallIds: last.tool_calls.flatMap((call) => call.id ? [call.id] : []) };
@@ -291,6 +295,11 @@ export function buildAgentChatGraph(options: BuildAgentChatGraphOptions) {
           if (typeof conversationId !== 'string') throw new Error('CUA_SCOPE_CHANGED');
           const request = CUA_ACTION_TOOL_SCHEMA.parse(call.args);
           proposal = { ...proposal, cuaApproval: options.cua.prepareApproval(conversationId, call.id, request) };
+        }
+        if (options.cuaSave && call.name === 'saveCuaEditorProject') {
+          const conversationId = config.configurable?.thread_id;
+          if (typeof conversationId !== 'string') throw new Error('CUA_SCOPE_CHANGED');
+          proposal = { ...proposal, cuaApproval: await options.cuaSave.prepareApproval(conversationId, call.id, CUA_SAVE_TOOL_SCHEMA.parse(call.args)) };
         }
         decisions[call.id] = interrupt<AgentToolCallProposal, AgentToolApprovalDecision>(proposal);
       }
@@ -338,6 +347,7 @@ export function buildAgentChatGraph(options: BuildAgentChatGraphOptions) {
           if (options.cua && call.name === 'executeCuaAction') {
             options.cua.deny(String(config.configurable?.thread_id), call.id);
           }
+          if (options.cuaSave && call.name === 'saveCuaEditorProject') options.cuaSave.deny(String(config.configurable?.thread_id), call.id);
           // A denial with feedback reads as a correction, so the model can act
           // on the reason instead of only learning that it was refused.
           const feedback = state.toolFeedback[call.id];
@@ -358,7 +368,9 @@ export function buildAgentChatGraph(options: BuildAgentChatGraphOptions) {
           config.signal?.throwIfAborted();
           const output: unknown = options.cua && call.name === 'executeCuaAction'
             ? await options.cua.executeApproved(String(config.configurable?.thread_id), call.id, CUA_ACTION_TOOL_SCHEMA.parse(call.args))
-            : await tool.invoke(call.args ?? {}, config);
+            : options.cuaSave && call.name === 'saveCuaEditorProject'
+              ? await options.cuaSave.executeApproved(String(config.configurable?.thread_id), call.id, CUA_SAVE_TOOL_SCHEMA.parse(call.args))
+              : await tool.invoke(call.args ?? {}, config);
           const cuaEvidence = cuaVisualEvidence(output);
           if (cuaEvidence) {
             results.push(new ToolMessage({ content: cuaEvidence.summary, tool_call_id: call.id, name: call.name }));

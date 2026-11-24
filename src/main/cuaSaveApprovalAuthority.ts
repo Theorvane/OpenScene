@@ -102,6 +102,12 @@ export class CuaSaveApprovalAuthority {
     for (const [token, permit] of this.permits) if (permit.proposal.scope.runId === runId) this.permits.delete(token);
   }
 
+  /** Terminal non-publication/clean outcomes cannot leave an issued grant live. */
+  discardProposal(proposalId: string): void {
+    if (this.pending?.proposal.proposalId === proposalId) this.pending = null;
+    for (const [token, permit] of this.permits) if (permit.proposal.proposalId === proposalId) this.permits.delete(token);
+  }
+
   getPendingApproval(): Readonly<CuaSaveProposal['scope'] & { conversationId: string; toolCallId: string }> | null {
     return this.pending ? Object.freeze({ ...this.pending.proposal.scope,
       conversationId: this.pending.conversationId, toolCallId: this.pending.toolCallId }) : null;

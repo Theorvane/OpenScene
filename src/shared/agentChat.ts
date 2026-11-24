@@ -1,5 +1,6 @@
 import type { EditAgentContextAsset, EditAgentProjectContext } from './editAgentContext';
 import type { OpenAiAuthMode, ReasoningEffort } from './openAiAuth';
+import type { CuaSaveResult } from './cuaSave';
 
 export type AgentChatMessageRole = 'user' | 'assistant' | 'tool';
 
@@ -66,7 +67,10 @@ export type AgentCuaErrorCode =
   | 'CUA_CANCELLED'
   | 'CUA_BUSY'
   | 'CUA_TARGET_GONE'
-  | 'CUA_CLEANUP_FAILED';
+  | 'CUA_CLEANUP_FAILED'
+  | 'CUA_SAVE_OUTCOME_UNKNOWN'
+  | 'CUA_SAVE_NOT_VERIFIED'
+  | 'CUA_SAVE_NOT_WRITTEN';
 
 export type AgentChatStatus = 'idle' | 'thinking' | 'awaiting-approval' | 'error';
 
@@ -87,6 +91,8 @@ export interface AgentChatTurnState {
   readonly status: AgentChatStatus;
   readonly error?: string | undefined;
   readonly errorCode?: AgentCuaErrorCode | undefined;
+  /** Main-confirmed Save receipt; independent of later cancellation or UI acknowledgement. */
+  readonly cuaSaveResult?: CuaSaveResult | undefined;
   readonly contextUsage?: AgentChatContextUsage | undefined;
 }
 
