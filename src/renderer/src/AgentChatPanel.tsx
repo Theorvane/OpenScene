@@ -9,6 +9,9 @@ import { AgentModelPicker } from './AgentModelPicker';
 import { Button } from './ui';
 
 const CUA_ERROR_GUIDANCE: Readonly<Record<AgentCuaErrorCode, string>> = {
+  CUA_SAVE_OUTCOME_UNKNOWN: 'The Save publication outcome is unknown. Inspect the saved project before deciding whether to retry.',
+  CUA_SAVE_NOT_VERIFIED: 'Save returned a persisted receipt, but the current disk snapshot could not be verified. UI acknowledgement does not verify the saved file.',
+  CUA_SAVE_NOT_WRITTEN: 'The explicitly approved snapshot was not saved.',
   CUA_FRAME_STALE: 'The editor layout changed after observation. Ask the agent to re-observe the current frame before retrying.',
   CUA_FRAME_EXPIRED: 'The observed frame expired. Ask the agent to capture a fresh frame before retrying.',
   CUA_SCOPE_CHANGED: 'The active editor window or scope changed. Re-observe the current workspace before approving again.',
