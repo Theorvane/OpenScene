@@ -365,6 +365,7 @@ async function installIpcHandlers(): Promise<void> {
   });
 
   ipcMain.handle(IPC_CHANNELS.setProviderCredential, async (_event, provider: any, apiKey: string) => {
+    if (typeof provider !== 'string') return fail('INVALID_INPUT', 'Invalid credential provider.');
     if (provider === 'typesafe-jev') return fail('PERMISSION_DENIED', 'Use the dedicated Jev credential operation.');
     try {
       await credentialStore.setCredential(provider, apiKey);
