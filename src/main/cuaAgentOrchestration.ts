@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { CuaActionRequest, CuaFrame, CuaState } from '../shared/cua';
 import type { AgentCuaApprovalSummary, AgentCuaErrorCode } from '../shared/agentChat';
 import type { CuaSaveScope } from '../shared/cuaSave';
+import { CuaApprovalGate } from './cuaApprovalGate';
 
 export class CuaApprovalError extends Error {
   constructor(readonly code: AgentCuaErrorCode) { super(code); }
@@ -37,6 +38,7 @@ function digest(request: CuaActionRequest): string {
  * trusted wiring, not by the model; the driver independently checks frame age.
  */
 export class CuaApprovalAuthority {
+  readonly approvalGate = new CuaApprovalGate();
   private pending: Proposal | null = null;
   private readonly permits = new Map<string, Permit>();
   private readonly seenCalls = new Set<string>();
@@ -63,10 +65,12 @@ export class CuaApprovalAuthority {
     if ((this.actionsByRun.get(request.runId) ?? 0) >= this.options.maxActionsPerRun) {
       throw new CuaApprovalError('CUA_BUDGET_EXCEEDED');
     }
-    this.seenCalls.add(callKey);
     // Approval evidence cannot be mutated while the human reads it.
     const snapshot = structuredClone(request);
-    this.pending = { conversationId, toolCallId, request: snapshot, digest: digest(snapshot) };
+    const requestDigest = digest(snapshot);
+    if (!this.approvalGate.acquire(this, request.runId)) throw new CuaApprovalError('CUA_BUSY');
+    this.seenCalls.add(callKey);
+    this.pending = { conversationId, toolCallId, request: snapshot, digest: requestDigest };
   }
 
   issueApproved(conversationId: string, toolCallId: string, request: CuaActionRequest): unknown {
@@ -87,6 +91,7 @@ export class CuaApprovalAuthority {
       throw new CuaApprovalError('CUA_APPROVAL_MISMATCH');
     }
     this.pending = null;
+    this.approvalGate.release(this);
   }
 
   getPendingApproval(): Readonly<{
@@ -116,13 +121,17 @@ export class CuaApprovalAuthority {
   /** Synchronous, atomic and one-use, including attempts with wrong evidence. */
   consume(request: CuaActionRequest, token: unknown): void {
     try { this.check(request, token); }
-    finally { if (typeof token === 'string') this.permits.delete(token); }
+    finally {
+      if (typeof token === 'string') this.permits.delete(token);
+      if (!this.pending && !this.permits.size) this.approvalGate.release(this);
+    }
     this.actionsByRun.set(request.runId, (this.actionsByRun.get(request.runId) ?? 0) + 1);
   }
 
   /** Called synchronously on every cancellation source before releasing input. */
   revokeRun(runId: string): void {
     this.revokedRuns.add(runId);
+    this.approvalGate.revokeRun(runId);
     if (this.pending?.request.runId === runId) this.pending = null;
     for (const [token, permit] of this.permits) {
       if (permit.request.runId === runId) this.permits.delete(token);
@@ -134,6 +143,7 @@ export class CuaApprovalAuthority {
     this.cleanupFailed = true;
     this.pending = null;
     this.permits.clear();
+    this.approvalGate.release(this);
   }
 
   assertRunAllowed(runId: string): void { this.checkRun(runId); }

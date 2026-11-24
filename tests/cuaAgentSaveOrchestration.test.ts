@@ -6,6 +6,7 @@ import type { CuaSaveProposal, CuaSaveResult, CuaSaveScope } from '../src/shared
 import { createCuaSaveAgentChatTools } from '../src/main/agentChatTools';
 import { buildAgentChatGraph } from '../src/main/agentChatGraph';
 import { AgentChatSessionManager } from '../src/main/agentChatSession';
+import { CuaApprovalAuthority } from '../src/main/cuaAgentOrchestration';
 
 const scope: CuaSaveScope = { projectId: 'project', sessionId: 'session', runId: 'run', windowId: 1,
   frameId: 'frame', layoutRevision: 1, contentRevision: 2 };
@@ -37,7 +38,8 @@ function fixture() {
     cancelRun: () => { cancellations++; },
     settleWrites: async () => { await waitForPublication; }
   };
-  const orchestrator = new CuaAgentSaveOrchestrator(authority, { bridge, assertScope: (conversationId, value) => {
+  const inputAuthority = new CuaApprovalAuthority({ permitTtlMs: 1000, maxActionsPerRun: 3, now: () => 0 });
+  const orchestrator = new CuaAgentSaveOrchestrator(authority, { bridge, inputAuthority, assertScope: (conversationId, value) => {
     if (conversationId !== 'a' || JSON.stringify(value) !== JSON.stringify(scope)) throw new Error('CUA_SCOPE_CHANGED');
   } });
   return { orchestrator, authority, publications: () => publications, preparations: () => preparations,

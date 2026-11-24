@@ -1,7 +1,7 @@
 import type { AgentCuaSaveApprovalSummary } from '../shared/agentChat';
 import type { CuaSaveProposal, CuaSaveResult, CuaSaveScope } from '../shared/cuaSave';
 import type { CuaSaveBridge } from './cuaSaveBridge';
-import { CuaApprovalError } from './cuaAgentOrchestration';
+import { CuaApprovalError, type CuaApprovalAuthority } from './cuaAgentOrchestration';
 import { CuaSaveApprovalAuthority } from './cuaSaveApprovalAuthority';
 
 interface Entry {
@@ -28,7 +28,8 @@ export class CuaAgentSaveOrchestrator {
   constructor(readonly authority: CuaSaveApprovalAuthority, private readonly options: {
     readonly bridge: Pick<CuaSaveBridge, 'prepareSaveSnapshot' | 'saveApproved' | 'cancelRun' | 'settleWrites'>;
     readonly assertScope: (conversationId: string, scope: CuaSaveScope) => void;
-  }) {}
+    readonly inputAuthority: CuaApprovalAuthority;
+  }) { authority.shareInputApprovalGate(options.inputAuthority); }
 
   async prepareApproval(conversationId: string, toolCallId: string, scope: CuaSaveScope): Promise<AgentCuaSaveApprovalSummary> {
     this.options.assertScope(conversationId, scope);
