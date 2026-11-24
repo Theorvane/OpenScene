@@ -1,0 +1,199 @@
+import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdtemp, readFile, readdir, writeFile, stat } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { expect, it } from 'vitest';
+import { ShortsService } from '../src/main/shortsService';
+import { ProjectStore } from '../src/main/projectStore';
+import { AssetLibraryStore } from '../src/main/assetLibraryStore';
+import { ExportIpcService } from '../src/main/exportIpcService';
+import { ExportJobStore } from '../src/main/exportJobStore';
+import { TranscriptionService } from '../src/main/transcriptionService';
+import { measureExportedFile } from '../src/main/exportMeasurement';
+import { startFfmpegExportProcess } from '../src/main/ffmpegExportProcess';
+// @ts-ignore Standalone infrastructure verifier supplied by PR553.
+import { verify, verifySrt, run } from '../scripts/shorts-media.mjs';
+
+const ffmpeg = process.env.VIDEO_TOOL_FFMPEG_PATH!;
+const fixtureRoot = process.env.OPENSCENE_SHORTS_FIXTURES!;
+const cues = [
+  { id: 'a', text: 'OpenScene fixture A', startMs: 1000, endMs: 2500 },
+  { id: 'b', text: 'OpenScene fixture B', startMs: 5000, endMs: 7000 }
+];
+const value = (response: any): any => { if (!response.ok) throw new Error(JSON.stringify(response.error)); return response.value; };
+const sleep = () => new Promise(r => setTimeout(r, 10));
+async function until(read: () => Promise<any>, predicate: (v: any) => boolean, timeout = 60000) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) { const result = await read(); if (predicate(result)) return result; await sleep(); }
+  throw new Error('Observation deadline exceeded');
+}
+const checksum = async (path: string) => createHash('sha256').update(await readFile(path)).digest('hex');
+
+it('measures actual ShortsService + ExportIpcService output, partial failure and cleanup', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'openscene-550-product-run-'));
+  console.log('EVIDENCE_ROOT', root);
+  await writeFile(process.env.OPENSCENE_SHORTS_EVIDENCE_POINTER!, root);
+  const projects = new ProjectStore(join(root, 'projects'));
+  const assets = new AssetLibraryStore(join(root, 'projects'), projects);
+  const jobs = new ExportJobStore();
+  const exportsRoot = join(root, 'exports');
+  const children = new Set<number>();
+  const launched: number[] = [];
+  const discoverFfmpeg = async () => ({ kind: 'configured' as const, executablePath: ffmpeg });
+  const exports = new ExportIpcService({ projects, assets, jobs, exportsRoot, discoverFfmpeg,
+    startProcess: input => startFfmpegExportProcess({ ...input, spawnProcess: (binary, args, options) => {
+      const child = spawn(binary, [...args], options);
+      if (child.pid) { children.add(child.pid); launched.push(child.pid); }
+      child.once('close', () => { if (child.pid) children.delete(child.pid); });
+      return child;
+    } })
+  });
+  const transcription = new TranscriptionService({ getAsset: (p, a) => projects.getAsset(p, a), openAsset: (p, a) => assets.openPlaybackSource(p, a),
+    resolveRuntime: async () => ({ status: { ready: false, checksumVerified: false, reason: 'No model configured in deterministic media integration test.' } }) });
+  const service = new ShortsService({ projects, assets, exports, transcription, jobsDirectory: join(root, 'shorts-jobs'), pollMs: 10,
+    providerFor: () => async () => ({ candidates: cues.map(c => ({ firstEvidenceId: c.id, lastEvidenceId: c.id, reason: c.text,
+      evidenceIds: [c.id], context: { completeThought: true, notes: 'Declared synthetic fixture evidence, not model inference.' } })) }),
+    measureSource: async (p, a) => {
+      const source = await assets.openPlaybackSource(p, a); if (!source) throw new Error('Missing source');
+      try { const m = await measureExportedFile({ ffmpegPath: ffmpeg, filePath: source.filePath }); if (!m) throw new Error('No measurement');
+        return { durationMs: m.durationMs, width: m.widthPx, height: m.heightPx }; } finally { await source.file.close(); }
+    }
+  });
+  const settle = (id: string) => until(async () => value(await service.get({ jobId: id })), j => j.cleanupComplete);
+  const evidence: any[] = [{ runtimeSha: process.env.OPENSCENE_SHORTS_TESTED_SHA, ffmpegVersion: run(ffmpeg, ['-version']).split('\n')[0] }];
+  const outputPaths: string[] = [];
+  const rotatedSource = join(fixtureRoot, 'rotated90.mp4');
+  if (!existsSync(rotatedSource)) run(ffmpeg, ['-v', 'error', '-nostdin', '-display_rotation', '90', '-i', join(fixtureRoot, 'tone.mp4'), '-c', 'copy', '-n', rotatedSource]);
+  async function prepare(audio: string, transcript = true, create = true) {
+    const project = await projects.create({ name: `Fixture ${audio}` });
+    const sourcePath = audio === 'rotated' ? rotatedSource : join(fixtureRoot, `${audio}.mp4`);
+    const imported = await assets.import({ projectId: project.id, sourcePath, displayName: `${audio}.mp4`, kind: 'video', mimeType: 'video/mp4' });
+    const asset = await assets.updateMetadata({ projectId: project.id, assetId: imported.id, durationMs: 12000, width: 640, height: 360 });
+    if (transcript) await projects.saveAiProjectDocument(project.id, { ...project.ai, transcriptionDraft: { id: 'fixture-draft', sourceAssetId: asset.id,
+      cues, language: 'en', status: 'approved', engine: 'whisper.cpp', modelName: 'declared-fixture-not-inference', createdAt: new Date().toISOString() } });
+    const before = await projects.open(project.id);
+    const sourceHash = await checksum(sourcePath);
+    const selected = await settle(value(await service.start({ projectId: project.id, assetId: asset.id, modelId: 'fixture', minDurationMs: 1000, maxDurationMs: 12000, requestedCount: 2 })).id);
+    if (!transcript || !create) return { selected, project, before, sourcePath, sourceHash, asset };
+    expect(selected.stage).toBe('review');
+    expect(selected.selection.candidates).toHaveLength(2);
+    value(await service.materialize({ jobId: selected.id, candidateIds: selected.selection.candidates.map((c: any) => c.id) }));
+    const created = await settle(selected.id);
+    expect(created.stage).toBe('completed');
+    expect(await projects.open(project.id)).toEqual(before);
+    expect(await checksum(sourcePath)).toBe(sourceHash);
+    return { selected, created, project, before, sourcePath, sourceHash, asset };
+  }
+  try {
+    for (const audio of ['tone', 'silent', 'absent', 'rotated']) {
+      const s = await prepare(audio);
+      const recipe = s.selected.recipes[0];
+      expect(recipe.sourceDimensions).toEqual(audio === 'rotated' ? { width: 360, height: 640 } : { width: 640, height: 360 });
+      const saved = await projects.open(s.created.items[0].resultProjectId);
+      const clip = saved!.timeline.tracks.flatMap(t => t.clips)[0]!;
+      expect(clip.effects.scale).toBeCloseTo(audio === 'rotated' ? 2 : 1080 / 640);
+      if (audio === 'tone' && process.env.OPENSCENE_SHORTS_UNSUPPORTED_FFMPEG) {
+        const basic = new ExportIpcService({ projects, assets, jobs: new ExportJobStore(), exportsRoot: join(root, 'basic-exports'),
+          discoverFfmpeg: async () => ({ kind: 'configured', executablePath: process.env.OPENSCENE_SHORTS_UNSUPPORTED_FFMPEG! }) });
+        const rejected = await basic.startExportJob({ projectId: s.created.items[0].resultProjectId, width: 1080, height: 1920, frameRate: 30 });
+        expect(rejected).toMatchObject({ ok: false, error: { message: expect.stringContaining('drawtext') } });
+        evidence.push({ basicFfmpegCaptionRefusal: rejected });
+      }
+      const runJob = value(await service.export({ jobId: s.created.id, resultProjectIds: s.created.items.map((i: any) => i.resultProjectId) }));
+      const done = await settle(runJob.id);
+      expect(done.stage).toBe('completed');
+      expect(done.id).not.toBe(s.created.id);
+      for (let n = 0; n < done.items.length; n++) {
+        const item = done.items[n]; const job = jobs.get(item.exportJobId)!;
+        expect(job.state.kind).toBe('completed');
+        const path = join(exportsRoot, (job.state as any).fileName); outputPaths.push(path);
+        evidence.push(verify(path, 'product', (cues[n]!.endMs - cues[n]!.startMs) / 1000, audio === 'rotated' ? 'tone' : audio));
+        expect(exports.isSettled(item.exportJobId)).toBe(true);
+      }
+      if (audio === 'tone') {
+        const projectId = done.items[0].resultProjectId;
+        const subtitleJob = value(await exports.startExportJob({ projectId, width: 1080, height: 1920, frameRate: 30, subtitleDelivery: { burnAutomaticCaptions: true, sidecarFormat: 'srt' } }));
+        await until(async () => exports.isSettled(subtitleJob.id), Boolean);
+        const finished: any = jobs.get(subtitleJob.id);
+        expect(finished.state.kind).toBe('completed');
+        evidence.push(verifySrt(join(exportsRoot, finished.state.subtitleFileName), 1, 2.5));
+        const plain = value(await exports.startExportJob({ projectId, width: 1080, height: 1920, frameRate: 30, subtitleDelivery: { burnAutomaticCaptions: false, sidecarFormat: 'none' } }));
+        await until(async () => exports.isSettled(plain.id), Boolean);
+        const plainState: any = jobs.get(plain.id)!.state;
+        expect(plainState.kind).toBe('completed');
+        const decode = (file: string) => run(ffmpeg, ['-v', 'error', '-nostdin', '-ss', '0.5', '-i', file, '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], true);
+        const burnedPath = join(exportsRoot, finished.state.fileName);
+        const plainPath = join(exportsRoot, plainState.fileName);
+        const burned = decode(burnedPath), unburned = decode(plainPath);
+        expect(burned.equals(unburned)).toBe(false);
+        // Both picture edges reach the portrait width for this 640x360 fixture.
+        for (const x of [0, 1079]) expect([...unburned.subarray((900 * 1080 + x) * 3, (900 * 1080 + x) * 3 + 3)].some(c => c > 30)).toBe(true);
+        evidence.push({ burnedPath, plainPath, pairedFrameDifference: true, scope: 'Rendering support only; text/timing separately checked by SRT' });
+      }
+      expect(await projects.open(s.project.id)).toEqual(s.before);
+    }
+    // Missing transcript uses the real service configuration path, never invented cues.
+    const missing = await prepare('silent', false);
+    expect(missing.selected).toMatchObject({ stage: 'failed', errorCode: 'transcription_not_configured', cleanupComplete: true });
+
+    const changed = await prepare('tone', true, false);
+    const changedSource = (await assets.openPlaybackSource(changed.project.id, changed.asset.id))!;
+    const changedPath = changedSource.filePath; await changedSource.file.close();
+    await writeFile(changedPath, Buffer.alloc((await stat(changedPath)).size));
+    const beforeChangedCount = (await projects.list()).length;
+    value(await service.materialize({ jobId: changed.selected.id, candidateIds: changed.selected.selection.candidates.map((c: any) => c.id) }));
+    const refused = await settle(changed.selected.id);
+    expect(refused.items.every((i: any) => i.status === 'failed')).toBe(true);
+    expect((await projects.list()).length).toBe(beforeChangedCount);
+    evidence.push({ reviewedSourceMutationRefused: refused });
+
+    const partial = await prepare('tone');
+    const badId = partial.created.items[1].resultProjectId;
+    const badProject = (await projects.open(badId))!;
+    const badSource = await assets.openPlaybackSource(badId, badProject.assets[0]!.id);
+    const badPath = badSource!.filePath; await badSource!.file.close();
+    await writeFile(badPath, Buffer.alloc((await stat(badPath)).size)); // Real isolated corrupt media; source and sibling stay intact.
+    const mixed = await settle(value(await service.export({ jobId: partial.created.id, resultProjectIds: partial.created.items.map((i: any) => i.resultProjectId) })).id);
+    expect(mixed.stage).toBe('partial');
+    expect(mixed.items.map((i: any) => i.status)).toEqual(['completed', 'failed']);
+    expect(await checksum(partial.sourcePath)).toBe(partial.sourceHash);
+    const immutable = await Promise.all(outputPaths.map(checksum));
+
+    const cancel = await prepare('tone');
+    const parallel = await prepare('silent');
+    const cancelledRun = value(await service.export({ jobId: cancel.created.id, resultProjectIds: cancel.created.items.map((i: any) => i.resultProjectId) }));
+    await until(async () => children.size, n => n > 0);
+    const ownedAtCancel = [...children];
+    const independentRun = value(await service.export({ jobId: parallel.created.id, resultProjectIds: [parallel.created.items[0].resultProjectId] }));
+    expect(value(await service.cancel({ jobId: cancelledRun.id }))).toEqual({ accepted: true });
+    const immediate = value(await service.get({ jobId: cancelledRun.id }));
+    expect(immediate.stage).toBe('cancelling');
+    expect(immediate.cleanupComplete).toBe(false);
+    const ended = await settle(cancelledRun.id);
+    expect(ended.stage).toBe('cancelled');
+    const independentDone = await settle(independentRun.id);
+    expect(independentDone.stage).toBe('completed');
+    expect(children.size).toBe(0);
+    for (const pid of ownedAtCancel) expect(() => process.kill(pid, 0)).toThrow();
+    for (const item of ended.items) {
+      if (item.exportJobId) {
+        expect(exports.isSettled(item.exportJobId)).toBe(true);
+        expect((await readdir(exportsRoot)).filter(name => name.startsWith(item.exportJobId))).toEqual([]);
+      }
+    }
+    expect((await readdir(exportsRoot)).filter(name => name.startsWith('.stage-'))).toEqual([]);
+    expect(await Promise.all(outputPaths.map(checksum))).toEqual(immutable);
+    for (const item of cancel.created.items) expect(await projects.open(item.resultProjectId)).not.toBeNull();
+    const durable = JSON.parse(await readFile(join(root, 'shorts-jobs', `${ended.id}.json`), 'utf8'));
+    expect(durable).toEqual(ended);
+    const retry = await settle(value(await service.export({ jobId: ended.id, resultProjectIds: [cancel.created.items[0].resultProjectId] })).id);
+    expect(retry.stage).toBe('completed');
+    expect(retry.parentJobId).toBe(ended.id);
+    expect(value(await service.get({ jobId: ended.id }))).toEqual(ended);
+    expect(await Promise.all(outputPaths.map(checksum))).toEqual(immutable);
+    evidence.push({ partial: mixed, cancellation: ended, independentDone, ownedAtCancel, launched, remainingChildren: [...children] });
+    await writeFile(join(root, 'integration-evidence.json'), JSON.stringify(evidence, null, 2));
+  } finally { await service.shutdown(); }
+}, 180000);
