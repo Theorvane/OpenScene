@@ -130,6 +130,8 @@ export class CuaApprovalAuthority {
     this.permits.clear();
   }
 
+  assertRunAllowed(runId: string): void { this.checkRun(runId); }
+
   private checkRun(runId: string): void {
     if (this.cleanupFailed) throw new CuaApprovalError('CUA_CLEANUP_FAILED');
     if (this.revokedRuns.has(runId)) throw new CuaApprovalError('CUA_CANCELLED');
@@ -176,6 +178,7 @@ export class CuaAgentOrchestrator {
       this.runs.set(run.runId, run);
     }
     if (run.pending) throw new CuaApprovalError('CUA_BUSY');
+    this.authority.assertRunAllowed(run.runId);
     if (run.observation) throw new CuaApprovalError('CUA_BUSY');
     run.observation = this.options.driver.observe({ sessionId: this.sessionId, runId: run.runId });
     let frame: CuaFrame;

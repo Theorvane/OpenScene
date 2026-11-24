@@ -64,6 +64,7 @@ export function registerAgentChatIpcHandlers(
   });
 
   ipcMain.handle(IPC_CHANNELS.agentChatCompact, async (_event, request) => {
+    if (options.isTrustedSender && !options.isTrustedSender(_event)) return fail('INVALID_INPUT', 'Untrusted agent chat sender');
     try {
       const turn = await sessions.compactConversation(request);
       await recordTurn(turn);
@@ -74,6 +75,7 @@ export function registerAgentChatIpcHandlers(
   });
 
   ipcMain.handle(IPC_CHANNELS.agentChatReset, async (_event, request) => {
+    if (options.isTrustedSender && !options.isTrustedSender(_event)) return fail('INVALID_INPUT', 'Untrusted agent chat sender');
     try {
       return ok(await sessions.resetConversation(request));
     } catch (err) {
@@ -91,6 +93,7 @@ export function registerAgentChatIpcHandlers(
   });
 
   ipcMain.handle(IPC_CHANNELS.agentChatHistoryDelete, async (_event, request) => {
+    if (options.isTrustedSender && !options.isTrustedSender(_event)) return fail('INVALID_INPUT', 'Untrusted agent chat sender');
     if (history === null) return ok(false);
     const input = request as Partial<AgentChatHistoryGetInput> | undefined;
     if (typeof input?.projectId !== 'string' || typeof input.conversationId !== 'string') {

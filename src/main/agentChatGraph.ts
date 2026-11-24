@@ -213,6 +213,10 @@ export interface BuildAgentChatGraphOptions {
 
 export function buildAgentChatGraph(options: BuildAgentChatGraphOptions) {
   const toolsByName = new Map(options.tools.map((tool) => [tool.name, tool]));
+  const perCallApprovalToolNames = new Set([
+    ...options.perCallApprovalToolNames ?? [],
+    ...options.cua ? ['executeCuaAction'] : []
+  ]);
 
   const builder = new StateGraph(AgentChatState)
     .addNode('agent', async (state, config) => {
@@ -230,7 +234,8 @@ export function buildAgentChatGraph(options: BuildAgentChatGraphOptions) {
       const hasSystemPrompt = state.messages.length > 0 && isSystemMessage(state.messages[0]!);
       const messages = hasSystemPrompt
         ? state.messages
-        : [new SystemMessage(buildAgentSystemPrompt(getEditAssetContext(configurable.editAssetContext), getEditProjectContext(configurable.editProjectContext))), ...state.messages];
+        : [new SystemMessage(buildAgentSystemPrompt(getEditAssetContext(configurable.editAssetContext), getEditProjectContext(configurable.editProjectContext))
+          + (options.cua ? ' For self-window UI actions, first observeEditorWindow and use the exact returned session/run/window/frame/layout scope and CSS coordinates. Propose only one executeCuaAction at a time; each exact action needs a new approval. Never use UI actions to approve tools, change settings, or access other windows. After execution inspect the returned frame and getProjectTimeline to verify the saved result. If evidence is stale, cancelled or denied, stop or explicitly observe again and request a new approval; never silently rebind approved coordinates. Prefer registered editing tools when they express the requested edit.' : '')), ...state.messages];
 
       const response = await model.invoke(messages, config.signal ? { signal: config.signal } : undefined);
       if ((response.tool_calls?.length ?? 0) > 16) throw new Error('CUA_BUDGET_EXCEEDED: At most 16 tool calls per model step.');
@@ -248,13 +253,13 @@ export function buildAgentChatGraph(options: BuildAgentChatGraphOptions) {
       }
       for (const call of last.tool_calls) {
         if (!call.id || (!options.mutatingToolNames.has(call.name)
-          && !options.perCallApprovalToolNames?.has(call.name)) || state.toolDecisions[call.id]) {
+          && !perCallApprovalToolNames.has(call.name)) || state.toolDecisions[call.id]) {
           continue;
         }
         // A spend tool re-asks even after "always": that answer was given about
         // one charge, and cannot stand in for consent to every later one.
         const spends = (options.spendToolNames?.has(call.name) ?? false)
-          || (options.perCallApprovalToolNames?.has(call.name) ?? false);
+          || perCallApprovalToolNames.has(call.name);
         if (!spends && state.alwaysAllowedTools.includes(call.name)) {
           decisions[call.id] = 'approve';
           continue;
@@ -279,7 +284,7 @@ export function buildAgentChatGraph(options: BuildAgentChatGraphOptions) {
         // Recording a spend tool here would make the next charge silent even
         // though this pass correctly stopped to ask about this one.
         .filter((name) => !(options.spendToolNames?.has(name) ?? false)
-          && !(options.perCallApprovalToolNames?.has(name) ?? false));
+          && !perCallApprovalToolNames.has(name));
       return { toolDecisions: decisions, alwaysAllowedTools };
     })
     .addNode('executeTools', async (state, config) => {
@@ -295,7 +300,7 @@ export function buildAgentChatGraph(options: BuildAgentChatGraphOptions) {
       const model = typeof modelId === 'string' ? getLlmModel(modelId) : undefined;
       for (const call of last.tool_calls) {
         if (!call.id) continue;
-        const perCall = options.perCallApprovalToolNames?.has(call.name) ?? false;
+        const perCall = perCallApprovalToolNames.has(call.name);
         if (perCall && (state.executedPerCallIds.includes(call.id) || executedPerCallIds.includes(call.id))) {
           results.push(new ToolMessage({ content: 'CUA_ACTION_REPLAYED: This action call has already settled. Observe again and propose a new action.', tool_call_id: call.id, name: call.name }));
           continue;
