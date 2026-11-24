@@ -5,6 +5,7 @@ import type { CuaSaveScope } from '../shared/cuaSave';
 import { CUA_KEYS, type CuaActionRequest, type CuaCancelAck, type CuaFrame, type CuaPoint, type CuaPrepareAck, type CuaRect, type CuaState, type CuaSurfaceSnapshot } from '../shared/cua';
 
 export interface CuaDriverDependencies {
+  readonly isObservationInFlight?: (scope: { sessionId: string; runId: string }) => boolean;
   readonly getDeviceScaleFactor?: () => number;
   readonly getPendingApproval?: () => Readonly<{ sessionId: string; runId: string; windowId: number; frameId: string; layoutRevision: number }> | null;
   readonly consumePermit: (request: CuaActionRequest, permit: unknown) => void;
@@ -142,12 +143,33 @@ export class CuaDriver {
   async observe(context: { sessionId: string; runId: string }): Promise<CuaFrame> {
     this.live();
     if (this.observing || this.state.phase === 'acting' || this.state.phase === 'preparing' || this.state.phase === 'stopping' || this.cleanupFailureLatched) throw new Error('CUA_BUSY');
-    if (!context.sessionId || !context.runId || !this.surface?.safeSurface?.interactive) throw new Error('CUA_UNSAFE_SURFACE');
+    if (!context.sessionId || !context.runId || !this.surface?.safeSurface) throw new Error('CUA_UNSAFE_SURFACE');
     this.observing = true;
     this.frame = null;
     try {
     const snapshot = structuredClone(this.surface);
     const revision = this.generation;
+    const safe = snapshot.safeSurface!;
+    const expected = JSON.stringify({ kind: safe.kind, rect: safe.rect, viewport: snapshot.viewport });
+    const safeDocument: unknown = await this.window.webContents.executeJavaScript(`(() => {
+      const expected = ${expected};
+      const visible = e => { const r=e.getBoundingClientRect(),s=getComputedStyle(e); return r.width>0 && r.height>0 && s.display!=='none' && s.visibility!=='hidden' && !e.closest('[hidden],[aria-hidden="true"]'); };
+      if (Math.abs(innerWidth-expected.viewport.width)>0.5 || Math.abs(innerHeight-expected.viewport.height)>0.5) return false;
+      if ([...document.querySelectorAll('[role="dialog"][aria-modal="true"],dialog[open],[role="menu"],[data-cua-protected="settings"]')].some(visible)) return false;
+      const e=[...document.querySelectorAll('[data-cua-safe-surface]')].find(e=>e.getAttribute('data-cua-safe-surface')===expected.kind && visible(e));
+      if (!e) return false;
+      const r=e.getBoundingClientRect(),p=expected.rect;
+      return p.x>=r.x-0.5 && p.y>=r.y-0.5 && p.x+p.width<=r.right+0.5 && p.y+p.height<=r.bottom+0.5;
+    })()`);
+    if (safeDocument !== true) throw new Error('CUA_UNSAFE_DOCUMENT');
+    // The await above lets the trusted orchestrator install its active
+    // observation promise. A renderer reason alone cannot authorize an inert read.
+    if (!safe.interactive) {
+      const pending = this.dependencies.getPendingApproval?.();
+      const causeMatches = snapshot.blockReason === 'agent-busy' || (snapshot.blockReason === 'pending-approval'
+        && pending?.sessionId === context.sessionId && pending.runId === context.runId && pending.windowId === this.window.id);
+      if (!snapshot.executionBlocked || !causeMatches || !this.dependencies.isObservationInFlight?.(context)) throw new Error('CUA_UNSAFE_SURFACE');
+    }
     const panel: unknown = await this.window.webContents.executeJavaScript(`(() => {
       const panels = [...document.querySelectorAll('[data-cua-protected="agent-panel"]')].filter(e => e.getBoundingClientRect().width > 0);
       if (panels.length !== 1) return null;

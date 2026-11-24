@@ -228,6 +228,7 @@ function createWindow(): void {
     }
   });
   const cuaDriver = new CuaDriver(mainWindow, {
+    isObservationInFlight: scope => cuaAgent.isObservationInFlight(scope),
     getDeviceScaleFactor: () => screen.getDisplayMatching(mainWindow.getBounds()).scaleFactor,
     getPendingApproval: () => cuaAuthority.getPendingApproval(),
     consumePermit: (request, permit) => cuaAuthority.consume(request, permit),

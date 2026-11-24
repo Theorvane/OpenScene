@@ -17,9 +17,10 @@ function fixture(autoAck = true, autoPrepare = true) {
   const window = Object.assign(new EventEmitter(), { id: 7, webContents: contents, isDestroyed: vi.fn(() => false), isFocused: vi.fn(() => true) });
   const consumePermit = vi.fn(); const checkPermit = vi.fn(); const onCancel = vi.fn();
   const getPendingApproval = vi.fn<NonNullable<CuaDriverDependencies['getPendingApproval']>>(() => null);
+  const isObservationInFlight = vi.fn(() => false);
   let resolveActing!: () => void;
   const acting = new Promise<void>(resolve => { resolveActing = resolve; });
-  const driver = new CuaDriver(window as unknown as BrowserWindow, { consumePermit, checkPermit, onCancel, getPendingApproval, onState: state => {
+  const driver = new CuaDriver(window as unknown as BrowserWindow, { consumePermit, checkPermit, onCancel, getPendingApproval, isObservationInFlight, onState: state => {
     if (state.phase === 'acting') resolveActing();
     if (autoPrepare && state.phase === 'preparing' && state.prepareToken && state.runId) driver.acknowledgePrepare({ runId: state.runId, prepareToken: state.prepareToken });
     if (autoAck && state.phase === 'stopping' && state.cancelToken && state.runId) driver.acknowledgeCancel({ runId: state.runId, cancelToken: state.cancelToken });
@@ -30,7 +31,7 @@ function fixture(autoAck = true, autoPrepare = true) {
     const frame = await driver.observe({ sessionId: 's', runId: 'r' });
     return { contentRevision: 0, sessionId: 's', runId: 'r', windowId: 7, frameId: frame.frameId, layoutRevision: 1, action: { kind: 'click', point: { x: 20, y: 20 } } };
   };
-  return { driver, window, contents, consumePermit, checkPermit, onCancel, getPendingApproval, surface, observe, acting };
+  return { driver, window, contents, consumePermit, checkPermit, onCancel, getPendingApproval, isObservationInFlight, surface, observe, acting };
 }
 describe('self-window CUA safety', () => {
   it('uses actual bitmap ratio and rejects invalid pixels', () => {
@@ -168,7 +169,7 @@ describe('self-window CUA safety', () => {
     const capture = f.observe();
     await expect(f.observe()).rejects.toThrow('BUSY');
     await expect(f.driver.execute(r, 'p')).rejects.toThrow('BUSY');
-    resolve(null); await capture;
+    resolve(true); await capture;
     await expect(f.driver.execute(r, 'p')).rejects.toThrow('STALE');
     expect(f.consumePermit).not.toHaveBeenCalled();
   });
@@ -246,5 +247,15 @@ describe('self-window CUA safety', () => {
     f.driver.reportSurface({ ...f.surface, contentRevision: 2 });
     expect(f.onCancel).toHaveBeenCalledOnce();
     expect(f.driver.getState().phase).toBe('stopped');
+  });
+  it('allows a fixed-DOM-verified inert readonly observation only with a matching main busy cause', async () => {
+    const f = fixture();
+    f.driver.reportSurface({ ...f.surface, executionBlocked: true, blockReason: 'agent-busy', safeSurface: { ...f.surface.safeSurface!, interactive: false } });
+    await expect(f.observe()).rejects.toThrow('UNSAFE_SURFACE');
+    f.isObservationInFlight.mockReturnValue(true);
+    expect((await f.driver.observe({ sessionId: 's', runId: 'r' })).contentRevision).toBe(0);
+    expect(f.contents.sendInputEvent).not.toHaveBeenCalled();
+    f.driver.reportSurface({ ...f.surface, executionBlocked: true, blockReason: 'blocking-overlay', safeSurface: { ...f.surface.safeSurface!, interactive: false } });
+    await expect(f.observe()).rejects.toThrow('UNSAFE_SURFACE');
   });
 });
