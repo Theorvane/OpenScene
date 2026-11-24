@@ -24,7 +24,7 @@ export function registerJevConfigIpc({ ipcMain, getOwnWindow, store }: {
         }
         return { ok: false, error: { code: 'INVALID_INPUT', message: 'Invalid Jev configuration request.' } };
       } catch {
-        return { ok: false, error: { code: 'UNKNOWN_ERROR', message: 'Jev configuration operation failed.' } };
+        return { ok: false, error: { code: 'UNKNOWN_ERROR', message: 'Jev configuration operation failed. Refresh configuration before retrying.' } };
       }
     });
   };

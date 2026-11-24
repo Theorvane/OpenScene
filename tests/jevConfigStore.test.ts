@@ -103,6 +103,27 @@ describe('persisted Jev configuration', () => {
     expect(await readdir(directory)).toEqual(['jev-judgment-config.json']);
   });
 
+  it('reconciles ambiguous rename outcomes before rejecting and allows later writes', async () => {
+    await store.set(DEFAULT_JEV_CONFIG);
+    const rename = vi.mocked(fs.rename).getMockImplementation()!;
+    vi.mocked(fs.rename).mockImplementationOnce(async (...args) => {
+      await rename(...args);
+      throw new Error('synthetic-ambiguous-rename');
+    });
+    await expect(store.set(enabled)).rejects.toThrow('synthetic-ambiguous-rename');
+    expect(store.getSnapshot().enabled).toBe(true);
+    expect((await new JevConfigStore(directory).load()).enabled).toBe(true);
+    vi.mocked(fs.rename).mockImplementationOnce(async (...args) => {
+      await rename(...args);
+      throw new Error('synthetic-ambiguous-rename');
+    });
+    await expect(store.set(DEFAULT_JEV_CONFIG)).rejects.toThrow('synthetic-ambiguous-rename');
+    expect(store.getSnapshot().enabled).toBe(false);
+    expect((await new JevConfigStore(directory).load()).enabled).toBe(false);
+    await store.set(enabled);
+    expect(store.getSnapshot().enabled).toBe(true);
+  });
+
   it.skipIf(process.platform === 'win32')('uses owner-only file permissions', async () => {
     await store.set(enabled);
     expect((await stat(join(directory, 'jev-judgment-config.json'))).mode & 0o777).toBe(0o600);

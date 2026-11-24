@@ -50,7 +50,7 @@ describe('Jev config IPC', () => {
     const h = harness();
     h.store.set.mockRejectedValueOnce(new Error('synthetic-private-path'));
     expect(await h.invoke('set', [DEFAULT_JEV_CONFIG])).toEqual({
-      ok: false, error: { code: 'UNKNOWN_ERROR', message: 'Jev configuration operation failed.' }
+      ok: false, error: { code: 'UNKNOWN_ERROR', message: 'Jev configuration operation failed. Refresh configuration before retrying.' }
     });
   });
 });

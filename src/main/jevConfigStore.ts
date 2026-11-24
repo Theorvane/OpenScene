@@ -23,16 +23,18 @@ export class JevConfigStore {
 
   /** Queue alongside writes so an older load cannot overwrite a newer save. */
   load(): Promise<Readonly<JevJudgmentConfig>> {
-    return this.enqueue(async () => {
-      let next = DEFAULT_JEV_CONFIG;
-      try {
-        next = parseJevConfig(JSON.parse(await readFile(this.path, 'utf8'))) ?? DEFAULT_JEV_CONFIG;
-      } catch {
-        // Missing, unreadable and corrupt config all disable advisory calls.
-      }
-      this.snapshot = next;
-      return next;
-    });
+    return this.enqueue(() => this.refreshFromDisk());
+  }
+
+  private async refreshFromDisk(): Promise<Readonly<JevJudgmentConfig>> {
+    let next = DEFAULT_JEV_CONFIG;
+    try {
+      next = parseJevConfig(JSON.parse(await readFile(this.path, 'utf8'))) ?? DEFAULT_JEV_CONFIG;
+    } catch {
+      // Missing, unreadable and corrupt config all disable advisory calls.
+    }
+    this.snapshot = next;
+    return next;
   }
 
   set(value: unknown): Promise<Readonly<JevJudgmentConfig>> {
@@ -53,9 +55,16 @@ export class JevConfigStore {
         await rename(temporaryPath, this.path);
       } catch (error) {
         try {
-          await file?.close();
+          try {
+            await file?.close();
+          } finally {
+            if (created) await rm(temporaryPath, { force: true });
+          }
         } finally {
-          if (created) await rm(temporaryPath, { force: true });
+          // A rejected rename can have an unknown outcome. Reconcile with the
+          // authoritative file before the next queued operation, but still
+          // reject this request: an error never promises that nothing changed.
+          await this.refreshFromDisk();
         }
         throw error;
       }
