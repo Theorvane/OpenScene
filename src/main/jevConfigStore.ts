@@ -23,16 +23,28 @@ export class JevConfigStore {
 
   /** Queue alongside writes so an older load cannot overwrite a newer save. */
   load(): Promise<Readonly<JevJudgmentConfig>> {
-    return this.enqueue(async () => {
-      let next = DEFAULT_JEV_CONFIG;
-      try {
-        next = parseJevConfig(JSON.parse(await readFile(this.path, 'utf8'))) ?? DEFAULT_JEV_CONFIG;
-      } catch {
-        // Missing, unreadable and corrupt config all disable advisory calls.
-      }
-      this.snapshot = next;
-      return next;
-    });
+    return this.enqueue(() => this.refreshFromDisk());
+  }
+
+  /** User refresh is authoritative: unreadable/corrupt data is not success. */
+  reload(): Promise<Readonly<JevJudgmentConfig>> {
+    return this.enqueue(() => this.refreshFromDisk(true));
+  }
+
+  private async refreshFromDisk(requireConfirmed = false): Promise<Readonly<JevJudgmentConfig>> {
+    let next = DEFAULT_JEV_CONFIG;
+    try {
+      const parsed = parseJevConfig(JSON.parse(await readFile(this.path, 'utf8')));
+      if (!parsed) throw new Error('Invalid persisted Jev configuration.');
+      next = parsed;
+    } catch (error) {
+      // Missing, unreadable and corrupt config all disable advisory calls.
+      this.snapshot = DEFAULT_JEV_CONFIG;
+      const absent = error instanceof Error && 'code' in error && error.code === 'ENOENT';
+      if (requireConfirmed && !absent) throw new Error('Jev configuration could not be confirmed.');
+    }
+    this.snapshot = next;
+    return next;
   }
 
   set(value: unknown): Promise<Readonly<JevJudgmentConfig>> {
@@ -53,9 +65,16 @@ export class JevConfigStore {
         await rename(temporaryPath, this.path);
       } catch (error) {
         try {
-          await file?.close();
+          try {
+            await file?.close();
+          } finally {
+            if (created) await rm(temporaryPath, { force: true });
+          }
         } finally {
-          if (created) await rm(temporaryPath, { force: true });
+          // A rejected rename can have an unknown outcome. Reconcile with the
+          // authoritative file before the next queued operation, but still
+          // reject this request: an error never promises that nothing changed.
+          await this.refreshFromDisk();
         }
         throw error;
       }

@@ -9,7 +9,7 @@ import { createJevRuntime } from '../src/main/jevRuntime';
 
 vi.mock('node:fs/promises', async (original) => {
   const actual = await original<typeof import('node:fs/promises')>();
-  return { ...actual, rename: vi.fn(actual.rename), open: vi.fn(actual.open) };
+  return { ...actual, rename: vi.fn(actual.rename), open: vi.fn(actual.open), readFile: vi.fn(actual.readFile) };
 });
 
 describe('persisted Jev configuration', () => {
@@ -50,7 +50,18 @@ describe('persisted Jev configuration', () => {
       await store.set(enabled);
       await writeFile(join(directory, 'jev-judgment-config.json'), content);
       expect((await store.load()).enabled).toBe(false);
+      await expect(store.reload()).rejects.toThrow('Jev configuration could not be confirmed.');
+      expect(store.getSnapshot().enabled).toBe(false);
     }
+  });
+
+  it('authoritatively refreshes disk changes and confirms missing-file defaults', async () => {
+    expect((await store.reload()).enabled).toBe(false);
+    await store.set(enabled);
+    await writeFile(join(directory, 'jev-judgment-config.json'), JSON.stringify(DEFAULT_JEV_CONFIG));
+    expect(store.getSnapshot().enabled).toBe(true);
+    expect((await store.reload()).enabled).toBe(false);
+    expect(store.getSnapshot().enabled).toBe(false);
   });
 
   it('publishes only after rename and queues competing load/set calls in invocation order', async () => {
@@ -101,6 +112,44 @@ describe('persisted Jev configuration', () => {
     expect(store.getSnapshot().enabled).toBe(false);
     expect((await new JevConfigStore(directory).load()).enabled).toBe(false);
     expect(await readdir(directory)).toEqual(['jev-judgment-config.json']);
+  });
+
+  it('reconciles ambiguous rename outcomes before rejecting and allows later writes', async () => {
+    await store.set(DEFAULT_JEV_CONFIG);
+    const rename = vi.mocked(fs.rename).getMockImplementation()!;
+    vi.mocked(fs.rename).mockImplementationOnce(async (...args) => {
+      await rename(...args);
+      throw new Error('synthetic-ambiguous-rename');
+    });
+    await expect(store.set(enabled)).rejects.toThrow('synthetic-ambiguous-rename');
+    expect(store.getSnapshot().enabled).toBe(true);
+    expect((await new JevConfigStore(directory).load()).enabled).toBe(true);
+    vi.mocked(fs.rename).mockImplementationOnce(async (...args) => {
+      await rename(...args);
+      throw new Error('synthetic-ambiguous-rename');
+    });
+    await expect(store.set(DEFAULT_JEV_CONFIG)).rejects.toThrow('synthetic-ambiguous-rename');
+    expect(store.getSnapshot().enabled).toBe(false);
+    expect((await new JevConfigStore(directory).load()).enabled).toBe(false);
+    await store.set(enabled);
+    expect(store.getSnapshot().enabled).toBe(true);
+  });
+
+  it('keeps runtime off and refresh unconfirmed while disk cannot be read after an ambiguous write', async () => {
+    await store.set(DEFAULT_JEV_CONFIG);
+    const rename = vi.mocked(fs.rename).getMockImplementation()!;
+    vi.mocked(fs.rename).mockImplementationOnce(async (...args) => {
+      await rename(...args);
+      throw new Error('synthetic-ambiguous-rename');
+    });
+    vi.mocked(fs.readFile).mockRejectedValueOnce(new Error('synthetic-unreadable'));
+    await expect(store.set(enabled)).rejects.toThrow('synthetic-ambiguous-rename');
+    expect(store.getSnapshot().enabled).toBe(false);
+    vi.mocked(fs.readFile).mockRejectedValueOnce(new Error('synthetic-unreadable'));
+    await expect(store.reload()).rejects.toThrow('Jev configuration could not be confirmed.');
+    expect(store.getSnapshot().enabled).toBe(false);
+    // The disk did change: only a successful authoritative refresh confirms it.
+    expect((await store.reload()).enabled).toBe(true);
   });
 
   it.skipIf(process.platform === 'win32')('uses owner-only file permissions', async () => {

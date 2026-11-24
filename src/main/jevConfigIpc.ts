@@ -6,7 +6,7 @@ import type { JevConfigStore } from './jevConfigStore';
 export function registerJevConfigIpc({ ipcMain, getOwnWindow, store }: {
   ipcMain: Pick<IpcMain, 'handle'>;
   getOwnWindow: () => BrowserWindow | null;
-  store: Pick<JevConfigStore, 'getSnapshot' | 'set'>;
+  store: Pick<JevConfigStore, 'reload' | 'set'>;
 }): void {
   const register = (channel: string, set: boolean) => {
     ipcMain.handle(channel, async (event: IpcMainInvokeEvent, ...args: unknown[]): Promise<ApiResponse<JevJudgmentConfig>> => {
@@ -20,11 +20,11 @@ export function registerJevConfigIpc({ ipcMain, getOwnWindow, store }: {
           const config = args.length === 1 ? parseJevConfig(args[0]) : null;
           if (config) return { ok: true, value: await store.set(config) };
         } else if (args.length === 0) {
-          return { ok: true, value: store.getSnapshot() };
+          return { ok: true, value: await store.reload() };
         }
         return { ok: false, error: { code: 'INVALID_INPUT', message: 'Invalid Jev configuration request.' } };
       } catch {
-        return { ok: false, error: { code: 'UNKNOWN_ERROR', message: 'Jev configuration operation failed.' } };
+        return { ok: false, error: { code: 'UNKNOWN_ERROR', message: 'Jev configuration operation failed. Refresh configuration before retrying.' } };
       }
     });
   };
