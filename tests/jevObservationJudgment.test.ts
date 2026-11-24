@@ -76,6 +76,14 @@ describe('Jev explicit observation advisory', () => {
     const f = fixture(); f.getApiKey.mockImplementation(async () => { f.setContext({ heldInputCount: 1 }); return 'fake'; });
     expect(await f.call()).toBeNull(); expect(f.fetch).not.toHaveBeenCalled();
   });
+  it('does not send after the user disables the setting during key retrieval', async () => {
+    const f = fixture(); f.getApiKey.mockImplementation(async () => { f.setConfig({ enabled: false }); return 'fake'; });
+    expect(await f.call()).toBeNull(); expect(f.fetch).not.toHaveBeenCalled();
+  });
+  it('discards a response after the threshold changes in flight', async () => {
+    const f = fixture(); f.fetch.mockImplementation(async () => { f.setConfig({ minSelectedProbability: 0.98 }); return Response.json(answer()); });
+    expect(await f.call()).toBeNull();
+  });
   it('drops stale network responses', async () => {
     const f = fixture(); f.fetch.mockImplementation(async () => { f.setContext({ currentFrame: { ...frame, contentRevision: 2 } }); return Response.json(answer()); });
     expect(await f.call()).toBeNull();
