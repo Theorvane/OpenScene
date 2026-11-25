@@ -650,4 +650,196 @@ describe('CuaActionSettlementCoordinator (renderer post-input action attribution
     // Permanently consumed after one use:
     expect(cleanCoord.takeReadySettlement(2, 'fp-2')).toBeNull();
   });
+
+  it('defers stray untagged flushSnapshot at stage=released until takeReadySettlement consumes clean commit, while never deferring tainted/mismatched/prepared/post-ACK states', async () => {
+    const { CuaActionSettlementCoordinator } = await loadSettlementModule();
+
+    // 1. Clean attributed drag commit reaching stage='released' before useLayoutEffect runs:
+    const coord = new CuaActionSettlementCoordinator();
+    coord.syncFromCuaState(makeState({ phase: 'preparing', postInput: makePostInput({ actionId: 'act-raf', stage: 'prepared' }) }), 1, 'fp-1');
+    // Never defer during pre-input prepared stage:
+    expect(coord.shouldDeferAttributedContentReport(2, 'fp-2')).toBe(false);
+
+    coord.syncFromCuaState(makeState({ phase: 'acting', postInput: makePostInput({ actionId: 'act-raf', stage: 'armed' }) }), 1, 'fp-1');
+    coord.runWithAttribution('drag', () => {
+      coord.notifyTimelineMutationScheduled('fp-2');
+    });
+    coord.syncFromCuaState(makeState({ phase: 'acting', postInput: makePostInput({ actionId: 'act-raf', stage: 'released' }) }), 2, 'fp-2');
+
+    // Stray MutationObserver / rAF flushSnapshot() arrives AFTER stage='released' and BEFORE useLayoutEffect:
+    expect(coord.shouldDeferAttributedContentReport(2, 'fp-2')).toBe(true);
+
+    // useLayoutEffect consumes the clean single-step commit with exact settlement tag:
+    expect(coord.takeReadySettlement(2, 'fp-2')).toMatchObject({
+      outcome: 'committed',
+      baseContentRevision: 1,
+      tag: { actionId: 'act-raf', settlementToken: 'tok-1' }
+    });
+
+    // Immediately after consumption, defer returns false so post-ACK external rev 2 -> 3 flushes untagged:
+    expect(coord.shouldDeferAttributedContentReport(2, 'fp-2')).toBe(false);
+    expect(coord.shouldDeferAttributedContentReport(3, 'fp-3')).toBe(false);
+
+    // 2. Tainted tracker at stage='released' MUST return false:
+    const taintedCoord = new CuaActionSettlementCoordinator();
+    taintedCoord.syncFromCuaState(makeState({ phase: 'acting', postInput: makePostInput({ actionId: 'act-taint', stage: 'armed' }) }), 1, 'fp-1');
+    taintedCoord.runWithAttribution('drag', () => {
+      taintedCoord.notifyTimelineMutationScheduled('fp-2');
+    });
+    taintedCoord.notifyTimelineMutationScheduled('fp-ext'); // out-of-scope taint
+    taintedCoord.syncFromCuaState(makeState({ phase: 'acting', postInput: makePostInput({ actionId: 'act-taint', stage: 'released' }) }), 2, 'fp-2');
+    expect(taintedCoord.shouldDeferAttributedContentReport(2, 'fp-2')).toBe(false);
+    expect(taintedCoord.takeReadySettlement(2, 'fp-2')).toBeNull();
+
+    // 3. Multi-step rev=3 at stage='released' MUST taint and return false:
+    const revJumpCoord = new CuaActionSettlementCoordinator();
+    revJumpCoord.syncFromCuaState(makeState({ phase: 'acting', postInput: makePostInput({ actionId: 'act-jump', stage: 'armed' }) }), 1, 'fp-1');
+    revJumpCoord.runWithAttribution('drag', () => {
+      revJumpCoord.notifyTimelineMutationScheduled('fp-2');
+    });
+    revJumpCoord.syncFromCuaState(makeState({ phase: 'acting', postInput: makePostInput({ actionId: 'act-jump', stage: 'released' }) }), 3, 'fp-3');
+    expect(revJumpCoord.shouldDeferAttributedContentReport(3, 'fp-3')).toBe(false);
+    expect(revJumpCoord.getTracker()?.tainted).toBe(true);
+    expect(revJumpCoord.takeReadySettlement(3, 'fp-3')).toBeNull();
+
+    // 4. Same-commit mixed fingerprint rev=2 at stage='released' MUST taint and return false:
+    const mixedFpCoord = new CuaActionSettlementCoordinator();
+    mixedFpCoord.syncFromCuaState(makeState({ phase: 'acting', postInput: makePostInput({ actionId: 'act-mix', stage: 'armed' }) }), 1, 'fp-1');
+    mixedFpCoord.runWithAttribution('drag', () => {
+      mixedFpCoord.notifyTimelineMutationScheduled('fp-2');
+    });
+    mixedFpCoord.syncFromCuaState(makeState({ phase: 'acting', postInput: makePostInput({ actionId: 'act-mix', stage: 'released' }) }), 2, 'fp-2-plus-external');
+    expect(mixedFpCoord.shouldDeferAttributedContentReport(2, 'fp-2-plus-external')).toBe(false);
+    expect(mixedFpCoord.getTracker()?.tainted).toBe(true);
+    expect(mixedFpCoord.takeReadySettlement(2, 'fp-2-plus-external')).toBeNull();
+  });
+
+  it('handles Chromium Input-router vs Mojo-IPC race: drag mouseUp commits crev=2 while phase=acting and stage=prepared, defers untagged leak with 0 pre-input ACKs, then settles cleanly when stage=released arrives', async () => {
+    const { CuaActionSettlementCoordinator } = await loadSettlementModule();
+
+    // 1. Unit proof: phase==='preparing' NEVER defers, phase==='acting' + stage==='prepared' + attributed commit defers with 0 pre-input ACKs.
+    const coord = new CuaActionSettlementCoordinator();
+    coord.syncFromCuaState(makeState({ phase: 'preparing', postInput: makePostInput({ actionId: 'act-race', stage: 'prepared' }) }), 1, 'fp-1');
+    expect(coord.shouldDeferAttributedContentReport(2, 'fp-2')).toBe(false);
+
+    // Main transitions to phase==='acting' while postInput.stage is still 'prepared' during 60 mouseMove steps.
+    coord.syncFromCuaState(makeState({ phase: 'acting', postInput: makePostInput({ actionId: 'act-race', stage: 'prepared' }) }), 1, 'fp-1');
+    // Unattributed external mutation while acting+prepared STILL returns false (never defers!).
+    expect(coord.shouldDeferAttributedContentReport(2, 'fp-2')).toBe(false);
+
+    // Real drag pointerup overtakes Mojo 'armed' IPC and commits rev 1 -> 2 (fp-2) while stage is still 'prepared':
+    coord.runWithAttribution('drag', () => {
+      coord.notifyTimelineMutationScheduled('fp-2');
+    });
+    expect(coord.shouldDeferAttributedContentReport(2, 'fp-2')).toBe(true);
+    expect(coord.takeReadySettlement(2, 'fp-2')).toBeNull(); // STRICTLY 0 pre-input ACKs!
+
+    // Mojo IPC catches up with stage==='released' -> immediately settles cleanly!
+    coord.syncFromCuaState(makeState({ phase: 'acting', postInput: makePostInput({ actionId: 'act-race', stage: 'released' }) }), 2, 'fp-2');
+    expect(coord.takeReadySettlement(2, 'fp-2')).toMatchObject({
+      outcome: 'committed',
+      baseContentRevision: 1,
+      tag: { actionId: 'act-race', settlementToken: 'tok-1' }
+    });
+    expect(coord.shouldDeferAttributedContentReport(3, 'fp-3')).toBe(false);
+
+    // 2. External out-of-scope mutation during acting+prepared immediately taints -> defer returns false!
+    const extCoord = new CuaActionSettlementCoordinator();
+    extCoord.syncFromCuaState(makeState({ phase: 'acting', postInput: makePostInput({ actionId: 'act-ext-prep', stage: 'prepared' }) }), 1, 'fp-1');
+    extCoord.notifyTimelineMutationScheduled('fp-ext');
+    expect(extCoord.getTracker()?.tainted).toBe(true);
+    extCoord.runWithAttribution('drag', () => {
+      extCoord.notifyTimelineMutationScheduled('fp-2');
+    });
+    expect(extCoord.shouldDeferAttributedContentReport(2, 'fp-2')).toBe(false);
+    expect(extCoord.takeReadySettlement(2, 'fp-2')).toBeNull();
+
+    // 3. End-to-end real CuaDriver test with Input mouseUp arriving BEFORE Mojo stage='armed'/'released' IPC:
+    const f = createDriverFixture();
+    const driverCoord = new CuaActionSettlementCoordinator();
+    const fp1 = '["p1",{"clip":0},[]]';
+    const fp2 = '["p1",{"clip":115},[]]';
+    let currentRev = 1;
+    let currentFp = fp1;
+    let untaggedReportsDuringActing = 0;
+
+    const flush = (): void => {
+      const ready = driverCoord.takeReadySettlement(currentRev, currentFp);
+      if (ready !== null) {
+        const nextSurface: CuaSurfaceSnapshot = { ...f.surface, contentRevision: currentRev };
+        const accepted = f.driver.reportSurface(nextSurface, ready.tag);
+        expect(accepted).toBe(true);
+        const acked = f.driver.acknowledgeActionSettlement({
+          ...ready.tag,
+          layoutRevision: nextSurface.layoutRevision,
+          contentRevision: nextSurface.contentRevision,
+          outcome: ready.outcome
+        });
+        expect(acked).toBe(true);
+        return;
+      }
+      if (!driverCoord.shouldDeferAttributedContentReport(currentRev, currentFp)) {
+        untaggedReportsDuringActing += 1;
+        f.driver.reportSurface({ ...f.surface, contentRevision: currentRev });
+      }
+    };
+
+    f.setOnStateHook((nextState) => {
+      if (nextState.phase === 'preparing' && nextState.prepareToken !== null && nextState.runId !== null) {
+        driverCoord.syncFromCuaState(nextState, currentRev, currentFp);
+        queueMicrotask(() => {
+          f.driver.acknowledgePrepare({ runId: nextState.runId!, prepareToken: nextState.prepareToken! });
+        });
+        return;
+      }
+      if (nextState.phase === 'acting' && nextState.postInput?.stage === 'prepared') {
+        driverCoord.syncFromCuaState(nextState, currentRev, currentFp);
+        return;
+      }
+      // Delay Mojo IPC delivery of 'armed' and 'released' by 5ms so sendInputEvent(mouseUp) beats it!
+      if (nextState.postInput?.stage === 'armed' || nextState.postInput?.stage === 'released') {
+        const delayedState = structuredClone(nextState);
+        setTimeout(() => {
+          driverCoord.syncFromCuaState(delayedState, currentRev, currentFp);
+          if (delayedState.postInput?.stage === 'released') {
+            flush();
+          }
+        }, 5);
+      }
+    });
+
+    f.sendInputEvent.mockImplementation((event: { type?: string }) => {
+      if (event.type === 'mouseUp') {
+        // Input router delivers mouseUp BEFORE delayed Mojo 'armed'/'released' arrives:
+        driverCoord.runWithAttribution('drag', () => {
+          driverCoord.notifyTimelineMutationScheduled(fp2);
+        });
+        currentRev = 2;
+        currentFp = fp2;
+        // React commits crev=2 while tracker.stage is still 'prepared' -> flush() MUST defer!
+        flush();
+      }
+    });
+
+    const initialFrame = await f.driver.observe({ sessionId: 'sess-1', runId: 'run-1' });
+    const endState = await f.driver.execute(
+      {
+        sessionId: 'sess-1',
+        runId: 'run-1',
+        windowId: 7,
+        frameId: initialFrame.frameId,
+        layoutRevision: initialFrame.layoutRevision,
+        contentRevision: initialFrame.contentRevision,
+        action: { kind: 'drag', from: { x: 200, y: 600 }, to: { x: 265, y: 600 }, durationMs: 100 }
+      },
+      'approved-permit'
+    );
+
+    expect(untaggedReportsDuringActing).toBe(0);
+    expect(endState.phase).toBe('ready');
+    expect(endState.lastDispatchReceipt?.rendererSettlement).toBe('acknowledged');
+    expect(endState.lastDispatchReceipt?.observationReady).toBe(true);
+    expect(f.onCancel).not.toHaveBeenCalled();
+    expect((await f.driver.observe({ sessionId: 'sess-1', runId: 'run-1' })).contentRevision).toBe(2);
+  });
 });

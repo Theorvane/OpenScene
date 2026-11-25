@@ -9,6 +9,7 @@ import type {
 export interface ActiveCuaSettlementTracker {
   readonly tag: CuaActionSettlementTag;
   readonly actionKind: CuaAction['kind'];
+  phase: CuaState['phase'];
   stage: CuaPostInputState['stage'];
   readonly baseContentRevision: number;
   readonly baseContentFingerprint: string | null;
@@ -165,8 +166,13 @@ export class CuaActionSettlementCoordinator {
     const nextTag = toTag(state.postInput);
     const current = this.tracker;
     if (current !== null && tagsMatch(current.tag, nextTag)) {
-      if (STAGE_ORDER[state.postInput.stage] > STAGE_ORDER[current.stage]) {
+      const phaseChanged = current.phase !== state.phase;
+      current.phase = state.phase;
+      const stageAdvanced = STAGE_ORDER[state.postInput.stage] > STAGE_ORDER[current.stage];
+      if (stageAdvanced) {
         current.stage = state.postInput.stage;
+      }
+      if (phaseChanged || stageAdvanced) {
         this.notify();
       }
       return;
@@ -177,6 +183,7 @@ export class CuaActionSettlementCoordinator {
     this.tracker = {
       tag: nextTag,
       actionKind: state.postInput.actionKind,
+      phase: state.phase,
       stage: state.postInput.stage,
       baseContentRevision: currentContentRevision,
       baseContentFingerprint: currentContentFingerprint,
@@ -404,13 +411,22 @@ export class CuaActionSettlementCoordinator {
   }
 
   /**
-   * Returns true ONLY when a clean, untainted attributed commit has already
-   * committed its exact single-step `contentRevision` and `contentFingerprint`
-   * BEFORE main's `postInput.stage === 'released'` IPC message arrives.
+   * Returns true ONLY when a clean, untainted, unconsumed attributed commit
+   * during `phase === 'acting'` (`prepared` | `armed` | `released`) has already
+   * committed its exact single-step `contentRevision` (`base + 1`) and
+   * `contentFingerprint` (`expectedContentFingerprint`) and is awaiting
+   * `useLayoutEffect`'s `takeReadySettlement` consumption.
    *
-   * Any tainted, unattributed, multi-step (`rev > base + 1`), or
-   * fingerprint-mismatched change returns `false` so it flushes UNTAGGED
-   * immediately and `CuaDriver` cancels with `content-changed`.
+   * Allowing `prepared` strictly when `phase === 'acting'` AND a real DOM
+   * handler already attributed the commit bridges the Chromium Input-router vs
+   * Mojo-IPC ordering race where drag `mouseUp` arrives before `stage='armed'`
+   * IPC, while `takeReadySettlement` remains strictly gated on `stage === 'released'`
+   * (zero pre-input tagged reports or ACKs).
+   *
+   * Any `phase !== 'acting'` (e.g. `preparing`), consumed, tainted, unattributed,
+   * multi-step (`rev !== base + 1`), or fingerprint-mismatched change returns
+   * `false` immediately so it flushes UNTAGGED and `CuaDriver` cancels with
+   * `content-changed`.
    */
   shouldDeferAttributedContentReport(
     currentContentRevision: number,
@@ -418,7 +434,7 @@ export class CuaActionSettlementCoordinator {
   ): boolean {
     const tracker = this.tracker;
     if (tracker === null || tracker.consumed || tracker.tainted || tracker.attribution === null) return false;
-    if (tracker.stage === 'released') return false;
+    if (tracker.phase !== 'acting') return false;
     if (!tracker.attribution.expectCommit) return false;
     return this.verifyCausalMatchOrTaint(tracker, currentContentRevision, currentContentFingerprint) === 'match';
   }
