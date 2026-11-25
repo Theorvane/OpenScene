@@ -1,6 +1,8 @@
 import type { CuaPhase, CuaRect, CuaState, CuaSurfaceSnapshot } from '../../../shared/cua';
 
 export const INITIAL_CUA_STATE: CuaState = {
+  postInput: null,
+  lastDispatchReceipt: null,
   prepareToken: null,
   cancelToken: null,
   targetGone: false,

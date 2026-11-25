@@ -43,6 +43,7 @@ import { connectVideoClips } from '../../../shared/videoCanvas';
 import { applyCanvasBlock } from '../../../shared/videoCanvasBlocks';
 import { EMPTY_CANVAS_GRAPH, parseVideoCanvasGraph, type VideoCanvasGraph } from '../../../shared/videoCanvasGraph';
 import { applyEditorOperations } from '../../../shared/editorOperations';
+import { notifyCuaTimelineMutationScheduled } from '../cua/cuaActionSettlement';
 import { errorMessage, type StatusMessage } from '../appTypes';
 import { hasActiveTimelineDrag } from '../cua/cuaDragGuard';
 import {
@@ -300,10 +301,12 @@ export function useTimelineEditor() {
       });
       return null;
     }
+    const changed = JSON.stringify(timeline) !== JSON.stringify(project.timeline);
     setProject({ ...project, timeline });
     setTimelineHistory((current) => current === null ? createTimelineHistory(timeline) : pushTimelineHistory(current, timeline));
     playback.clampToTimeline(timeline);
     setHasUnsavedTimeline(true);
+    if (changed) notifyCuaTimelineMutationScheduled();
     setTimelineSaveError(null);
     setStatusMessage({ tone: 'neutral', text: successText });
     return timeline;
@@ -674,10 +677,13 @@ export function useTimelineEditor() {
     if (timelineHistory === null || cuaSaveFreezeTokenRef.current !== null) return;
     const next = undoTimelineHistory(timelineHistory);
     if (next === null) return;
+    const currentTimeline = projectRef.current?.timeline;
+    const changed = currentTimeline !== undefined && JSON.stringify(next.present) !== JSON.stringify(currentTimeline);
     setTimelineHistory(next);
     setProject((current) => current === null ? current : { ...current, timeline: next.present });
     playback.clampToTimeline(next.present);
     setHasUnsavedTimeline(true);
+    if (changed) notifyCuaTimelineMutationScheduled();
     setStatusMessage({ tone: 'neutral', text: 'Undid timeline edit.' });
   }, [playback, timelineHistory]);
 
@@ -685,10 +691,13 @@ export function useTimelineEditor() {
     if (timelineHistory === null || cuaSaveFreezeTokenRef.current !== null) return;
     const next = redoTimelineHistory(timelineHistory);
     if (next === null) return;
+    const currentTimeline = projectRef.current?.timeline;
+    const changed = currentTimeline !== undefined && JSON.stringify(next.present) !== JSON.stringify(currentTimeline);
     setTimelineHistory(next);
     setProject((current) => current === null ? current : { ...current, timeline: next.present });
     playback.clampToTimeline(next.present);
     setHasUnsavedTimeline(true);
+    if (changed) notifyCuaTimelineMutationScheduled();
     setStatusMessage({ tone: 'neutral', text: 'Redid timeline edit.' });
   }, [playback, timelineHistory]);
 
