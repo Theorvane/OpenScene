@@ -735,6 +735,11 @@ describe('approval button mouse safe-surface focus preservation', () => {
     expect(panelSource).toContain('onMouseDown={(event) => { preserveSafeSurfaceFocusOnPrimaryMouseDown(event); }}');
     expect(panelSource).toContain('data-testid="agent-cua-key-focus-hint"');
     expect(panelSource).toContain('data-testid="agent-cua-unsafe-key-guidance"');
+    expect(panelSource).toContain('clicking outside this approval cancels it');
+    expect(panelSource).toContain('Do not reuse this approval.');
+    expect(panelSource).toContain('id="agent-cua-key-focus-hint"');
+    expect(panelSource).toContain("aria-describedby={pendingApproval.cuaApproval?.actionKind === 'key' && !hasSafeSurfaceFocus ? 'agent-cua-key-focus-hint' : undefined}");
+    expect(panelSource).not.toContain('then approve again');
     // Approval UI must never auto-focus or programmatically steal/fabricate safe-surface focus.
     expect(panelSource).not.toContain('autoFocus');
     expect(panelSource).not.toContain('.focus(');

@@ -252,14 +252,15 @@ export function AgentChatPanel({ width, onCollapse }: AgentChatPanelProps): Reac
                 />
               </label>
               {pendingApproval.cuaApproval?.actionKind === 'key' && !hasSafeSurfaceFocus && (
-                <p className="agent-chat-approval__hint" data-testid="agent-cua-key-focus-hint">
-                  Click inside the timeline/editor surface first so keyboard focus is in the safe workspace before approving a key action.
+                <p id="agent-cua-key-focus-hint" className="agent-chat-approval__hint" data-testid="agent-cua-key-focus-hint">
+                  Keyboard focus is outside the safe workspace. Stop this request before selecting the timeline; clicking outside this approval cancels it. Start a new request with a separately approved pointer action before the key action.
                 </p>
               )}
               <div className="agent-chat-approval__actions">
                 <Button
                   variant="primary"
                   disabled={isBusy}
+                  aria-describedby={pendingApproval.cuaApproval?.actionKind === 'key' && !hasSafeSurfaceFocus ? 'agent-cua-key-focus-hint' : undefined}
                   onMouseDown={(event) => { preserveSafeSurfaceFocusOnPrimaryMouseDown(event); }}
                   onClick={() => { setDenialFeedback(''); void respondToApproval('approve'); }}
                 >
@@ -319,7 +320,7 @@ export function AgentChatPanel({ width, onCollapse }: AgentChatPanelProps): Reac
               )}
               {(error?.includes('CUA_UNSAFE_KEY') === true || cua?.state.error === 'CUA_UNSAFE_KEY') && (
                 <p className="agent-chat-error__guidance" data-testid="agent-cua-unsafe-key-guidance">
-                  Keyboard action was blocked because the timeline/editor surface did not have focus. Click the timeline first, then approve again.
+                  Keyboard action was blocked because the timeline/editor surface did not have focus. Stop this request and start a new one with a separately approved pointer action before the key action. Do not reuse this approval.
                 </p>
               )}
               {error && <p>{error}</p>}
