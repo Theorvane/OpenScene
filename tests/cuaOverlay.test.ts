@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { createElement, type ComponentType } from 'react';
+import { createElement, type ReactElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
@@ -36,13 +36,13 @@ async function loadUseCuaOverlayModule(): Promise<UseCuaOverlayModule> {
 }
 
 interface CuaOverlayModule {
-  readonly CuaOverlay: ComponentType<{
+  readonly CuaOverlay: (props: {
     readonly state: CuaState;
     readonly stopPending: boolean;
     readonly stopError: string | null;
     readonly agentBusy?: boolean;
     readonly onStop: () => void;
-  }>;
+  }) => ReactElement;
   readonly getCuaCleanupStatusText: (state: CuaState, stopPending: boolean) => string | null;
   readonly getCuaCursorMode: (state: CuaState, stopPending: boolean) => string;
 }
@@ -174,7 +174,56 @@ describe('CuaOverlay', () => {
     expect(panelSource).toContain('data-testid="agent-cua-save-result"');
     expect(panelSource).toContain('data-testid="agent-cua-approval-save-digest"');
     expect(appShellSource).toContain('if (isBusy || pendingApproval !== null) void cancelConversation();');
+    expect(appShellSource).toContain('agentBusy={isBusy || pendingApproval !== null}');
     expect(appShellSource).toContain('void cua.triggerStop();');
+  });
+
+  it('keeps cua-stop-btn enabled during pendingApproval even if mouseDown transitions CUA phase to stopping/stopped before click', async () => {
+    const { CuaOverlay } = await loadCuaOverlayModule();
+
+    // While pendingApproval is open (AppShell passes agentBusy={isBusy || pendingApproval !== null}),
+    // main-process CuaDriver before-mouse-event can push phase ready -> stopping -> stopped on mouseDown
+    // before mouseUp/click fires. cua-stop-btn MUST stay enabled so onStop() -> agent-chat:cancel fires.
+    for (const phase of ['ready', 'stopping', 'stopped'] as const) {
+      let stopCalls = 0;
+      const element = CuaOverlay({
+        state: makeState({ phase, cleanupComplete: phase !== 'stopping', error: phase === 'ready' ? null : 'user-input' }),
+        stopPending: false,
+        stopError: null,
+        agentBusy: true,
+        onStop: () => {
+          stopCalls += 1;
+        }
+      });
+      const html = renderToStaticMarkup(element);
+      expect(html).toContain('data-testid="cua-stop-btn"');
+      expect(html).toContain('data-cua-protected="stop-button"');
+      expect(html).not.toContain('disabled=""');
+      expect(html).toContain('Stop (Esc)');
+
+      const children = (element.props as { children: unknown[] }).children;
+      const stopButton = children.find(
+        (child): child is { props: { disabled?: boolean; onClick?: () => void; 'data-testid'?: string } } =>
+          Boolean(child && typeof child === 'object' && 'props' in child && (child as { props?: { 'data-testid'?: string } }).props?.['data-testid'] === 'cua-stop-btn')
+      );
+      expect(stopButton).toBeDefined();
+      expect(stopButton!.props.disabled).toBe(false);
+      stopButton!.props.onClick?.();
+      expect(stopCalls).toBe(1);
+    }
+
+    // Once agentBusy / pendingApproval has settled (agentBusy=false), stopped and stopping disable the button normally.
+    const settledStoppedHtml = renderToStaticMarkup(
+      createElement(CuaOverlay, {
+        state: makeState({ phase: 'stopped', cleanupComplete: true, error: 'user-input' }),
+        stopPending: false,
+        stopError: null,
+        agentBusy: false,
+        onStop: () => undefined
+      })
+    );
+    expect(settledStoppedHtml).toContain('disabled=""');
+    expect(settledStoppedHtml).toContain('Stopped');
   });
 
   it('maintains stopping progress until main pushes stopped with cleanupComplete: true', async () => {
