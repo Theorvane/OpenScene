@@ -40,6 +40,7 @@ export interface WorkspaceShellProps {
   readonly onSelectProject: (projectId: string) => void;
   readonly onNewVideo: () => void;
   readonly candidates?: readonly WorkspaceCandidateItem[];
+  readonly showCandidateNavigation?: boolean;
   readonly activeCandidateId?: string | null;
   readonly onSelectCandidate?: (candidateId: string) => void;
   readonly safety: WorkspaceSafetyState;
@@ -54,6 +55,8 @@ export interface WorkspaceShellProps {
   readonly onDuplicateProject?: () => void;
   readonly onRevealExports?: () => void;
   readonly children: ReactNode;
+  /** Keep a live editor mounted when only its presentation changes. */
+  readonly persistentContent?: boolean;
 }
 
 function BrandMark(): ReactElement {
@@ -146,7 +149,9 @@ export function WorkspaceShell({
   onStop,
   onUndo,
   projects,
+  persistentContent = false,
   safety,
+  showCandidateNavigation = true,
   settingsDrawerContent
 }: WorkspaceShellProps): ReactElement {
   const [assetsOpen, setAssetsOpen] = useState(false);
@@ -186,7 +191,7 @@ export function WorkspaceShell({
         className="os-ws-shell"
         data-workspace-mode={mode}
       >
-        <header className="os-ws-header">
+        <header className="os-ws-header" data-cua-protected="chrome-menu" data-cua-protected-id="workspace-header">
           <div className="os-ws-header__left">
             <span className="os-ws-brand">
               <BrandMark />
@@ -318,7 +323,7 @@ export function WorkspaceShell({
         </div>
 
         <div className="os-ws-body">
-          <aside className="os-ws-sidebar" aria-label="프로젝트 및 후보 탐색">
+          <aside className="os-ws-sidebar" aria-label="프로젝트 및 후보 탐색" data-cua-protected="chrome-menu" data-cua-protected-id="workspace-sidebar">
             <ScrollArea className="os-ws-sidebar__scroll">
               <div className="os-ws-sidebar__inner">
                 <section className="os-ws-sidebar__section">
@@ -355,7 +360,7 @@ export function WorkspaceShell({
                   )}
                 </section>
 
-                <section className="os-ws-sidebar__section">
+                {showCandidateNavigation && <section className="os-ws-sidebar__section">
                   <div className="os-ws-sidebar__section-header">
                     <span className="os-ws-sidebar__heading">쇼츠 후보</span>
                     <span className="os-ws-sidebar__meta">{candidates.length}</span>
@@ -380,7 +385,7 @@ export function WorkspaceShell({
                       </button>
                     ))
                   )}
-                </section>
+                </section>}
               </div>
             </ScrollArea>
 
@@ -410,7 +415,12 @@ export function WorkspaceShell({
 
           <main className="os-ws-main">
             {mode === 'intake' && children}
-            {(['natural', 'precision', 'node'] as const).map((tabMode) => (
+            {persistentContent && mode !== 'intake' && (
+              <TabsContent value={mode} forceMount className="os-ws-tabpanel" data-testid={`mode-tabpanel-${mode}`}>
+                {children}
+              </TabsContent>
+            )}
+            {(['natural', 'precision', 'node'] as const).filter((tabMode) => !persistentContent || mode !== tabMode).map((tabMode) => (
               <TabsContent
                 key={tabMode}
                 value={tabMode}
@@ -419,7 +429,7 @@ export function WorkspaceShell({
                 className="os-ws-tabpanel"
                 data-testid={`mode-tabpanel-${tabMode}`}
               >
-                {mode === tabMode ? children : null}
+                {!persistentContent && mode === tabMode ? children : null}
               </TabsContent>
             ))}
           </main>

@@ -21,6 +21,7 @@ export interface WorkspaceIntakeViewProps {
   readonly onFilesDropped?: (files: readonly File[]) => void;
   readonly onStart: () => void;
   readonly onOpenRecentProject: (projectId: string) => void;
+  readonly pickerOnly?: boolean;
 }
 
 function UploadIcon(): ReactElement {
@@ -43,7 +44,8 @@ export function WorkspaceIntakeView({
   prompt,
   recentProjects,
   selectedFileName = null,
-  starting = false
+  starting = false,
+  pickerOnly = false
 }: WorkspaceIntakeViewProps): ReactElement {
   const [dragActive, setDragActive] = useState(false);
 
@@ -107,13 +109,14 @@ export function WorkspaceIntakeView({
                 선택됨: {selectedFileName}
               </span>
             ) : (
-              '영상을 여기에 끌어다 놓거나 클릭해서 선택'
+              pickerOnly ? '클릭해서 로컬 미디어 선택' : '영상을 여기에 끌어다 놓거나 클릭해서 선택'
             )}
           </span>
           <span className="os-ws-dropzone__hint">MP4, MOV, MKV, WAV 로컬 파일 지원</span>
         </button>
 
         <div className="os-ws-intake__composer">
+          {pickerOnly && <p className="os-ws-intake__subtitle">요청은 오른쪽 대화에 보관됩니다. 편집 시작 후 검토하고 보내세요.</p>}
           <Textarea
             value={prompt}
             onChange={(event) => onPromptChange(event.target.value)}

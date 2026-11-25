@@ -70,10 +70,10 @@ export function NodeWorkflowImpactPanel({
         </div>
 
         {impactSummary !== null && (
-          <aside className="os-ws-node__impact" aria-label="수동 편집 영향 미리보기" data-testid="node-impact-panel">
+          <aside className="os-ws-node__impact" aria-label="타임라인 변경 영향 미리보기" data-testid="node-impact-panel" data-cua-protected="approval-ui">
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--os-space-1)' }}>
               <h2 style={{ margin: 0, fontSize: 'var(--os-font-size-h2)', fontWeight: 600 }} className="os-ui-keep-all">
-                수동 편집 영향 미리보기
+                타임라인 변경 영향 미리보기
               </h2>
               <p style={{ margin: 0, fontSize: 'var(--os-font-size-sm)', color: 'var(--os-ui-fg-muted)' }} className="os-ui-keep-all">
                 워크플로 “{impactSummary.workflowName}”을(를) 타임라인에 다시 적용하기 전에 변경 범위를 확인하세요.
@@ -99,7 +99,7 @@ export function NodeWorkflowImpactPanel({
               ))}
             </ul>
 
-            <label className="os-ws-checkbox-row">
+            {onTogglePreserveManualCaptions !== undefined && <label className="os-ws-checkbox-row">
               <input
                 type="checkbox"
                 checked={impactSummary.preserveManualCaptions}
@@ -107,7 +107,7 @@ export function NodeWorkflowImpactPanel({
                 onChange={(event) => onTogglePreserveManualCaptions?.(event.target.checked)}
               />
               <span>수동 수정 자막 유지</span>
-            </label>
+            </label>}
 
             <div className="os-ui-banner os-ui-banner--info" data-testid="node-undo-guarantee">
               <span>
@@ -130,6 +130,7 @@ export function NodeWorkflowImpactPanel({
                 variant="primary"
                 size="sm"
                 loading={applying}
+                disabled={onConfirmApply === undefined}
                 onClick={onConfirmApply}
                 data-testid="node-impact-confirm-btn"
               >

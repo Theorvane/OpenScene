@@ -37,7 +37,9 @@ import { useEditorShortcutPreference } from './useEditorShortcutPreference';
 import type { TimelineEditorController } from './useTimelineEditor';
 import { useTimelineShortcuts } from './useTimelineShortcuts';
 import { useAgentChat } from '../AgentChatContext';
-import { useCuaActing } from '../cua/useCuaOverlay';
+import { useCuaActing, useCuaOverlay } from '../cua/useCuaOverlay';
+import { WorkspaceShell, WorkspaceIntakeView, NaturalStudioView } from '../../components/workspace';
+import '../../styles/workspace-shell.css';
 import { useTheme } from '../ThemeProvider';
 import { THEME_PRESETS, type ThemePresetId } from '../theme';
 import type { TabDefinition } from '../ui';
@@ -55,6 +57,8 @@ type TimelineEditorProps = {
   readonly editor: TimelineEditorController;
   readonly onProjectSettings?: () => void;
   readonly onOpenSettings?: () => void;
+  readonly onProjects?: () => void;
+  readonly onSelectProject?: (projectId: string) => void;
 };
 
 const INSPECTOR_TAB_LABELS: Readonly<Record<InspectorTabId, string>> = {
@@ -105,15 +109,8 @@ function getDefaultInspectorTabId({ selectedAssetId, selectedClipId }: Inspector
   return 'selection';
 }
 
-export function TimelineEditor({ editor, onProjectSettings, onOpenSettings }: TimelineEditorProps): ReactElement {
-  const [editorView, setEditorView] = useState<EditorViewMode>(() => {
-    try {
-      const stored = localStorage.getItem('openvideo-editor-view');
-      return stored === 'canvas' || stored === 'shorts' ? stored : 'timeline';
-    } catch {
-      return 'timeline';
-    }
-  });
+export function TimelineEditor({ editor, onProjectSettings, onOpenSettings, onProjects, onSelectProject }: TimelineEditorProps): ReactElement {
+  const [editorView, setEditorView] = useState<EditorViewMode>('shorts');
   const [shortsReturnContext, setShortsReturnContext] = useState<ShortsOpenEditorRequest | null>(null);
   const [restoredShortsTarget, setRestoredShortsTarget] = useState<{
     readonly jobId: string;
@@ -143,7 +140,11 @@ export function TimelineEditor({ editor, onProjectSettings, onOpenSettings }: Ti
       document.removeEventListener('keydown', closeWithEscape);
     };
   }, []);
-  const { isBusy: isAgentBusy } = useAgentChat();
+  const chat = useAgentChat();
+  const { isBusy: isAgentBusy, pendingApproval } = chat;
+  const [intakeComplete, setIntakeComplete] = useState(false);
+  useEffect(() => { setIntakeComplete((editor.project?.assets.length ?? 0) > 0); }, [editor.project?.id]);
+  const cua = useCuaOverlay();
   const isCuaActing = useCuaActing();
   const { mode: themeMode, preset, setPreset, toggleTheme } = useTheme();
   const [leftDockTabId, setLeftDockTabId] = useState<EditorLeftDockTabId>('project');
@@ -151,7 +152,6 @@ export function TimelineEditor({ editor, onProjectSettings, onOpenSettings }: Ti
   const { layoutPreference, updateLayoutPreference } = useEditorLayoutPreference();
   const { shortcutPreferences } = useEditorShortcutPreference();
   const selectEditorView = (view: EditorViewMode): void => {
-    editor.setIsPlaying(false);
     setEditorView(view);
     try {
       localStorage.setItem('openvideo-editor-view', view);
@@ -223,6 +223,7 @@ export function TimelineEditor({ editor, onProjectSettings, onOpenSettings }: Ti
     '--editor-program-percent': `${layoutPreference.programPercent}fr`,
     '--editor-timeline-percent': `${100 - layoutPreference.programPercent}fr`
   };
+  const workspaceProjects = editor.projects.map((project) => ({ id: project.id, name: project.name, updatedAtLabel: project.updatedAt }));
 
   const inspectorPanel = <InspectorPanel activeTabId={inspectorTabId} editor={editor} tabs={inspectorTabs} onActiveTabChange={setInspectorTabId} />;
   const dockedInspectorVisible = layoutPreference.inspectorVisible && layoutPreference.inspectorPlacement !== 'floating';
@@ -264,7 +265,7 @@ export function TimelineEditor({ editor, onProjectSettings, onOpenSettings }: Ti
 
   useTimelineShortcuts({
     canSplit: editor.selectedClip !== null,
-    isLocked: isAgentBusy,
+    isLocked: isAgentBusy || fullStageMode,
     cuaActing: isCuaActing,
     clearSelection: editor.clearSelection,
     deleteSelectedClip: editor.deleteSelectedClip,
@@ -300,6 +301,25 @@ export function TimelineEditor({ editor, onProjectSettings, onOpenSettings }: Ti
   });
 
   return (
+    <WorkspaceShell
+      persistentContent
+      mode={canvasMode ? 'node' : shortsMode ? 'natural' : 'precision'}
+      onModeChange={(mode) => selectEditorView(mode === 'node' ? 'canvas' : mode === 'natural' ? 'shorts' : 'timeline')}
+      projects={workspaceProjects}
+      showCandidateNavigation={false}
+      activeProjectId={editor.project?.id ?? null}
+      onSelectProject={(id) => onSelectProject?.(id)}
+      onNewVideo={() => onProjects?.()}
+      onOpenAssets={() => { selectEditorView('timeline'); setLeftDockTabId('media'); updateLayoutPreference((current) => ({ ...current, leftDockVisible: true })); }}
+      onOpenSettings={() => onOpenSettings?.()}
+      canUndo={editor.canUndoTimeline && !isAgentBusy && !editor.isBusy}
+      onUndo={editor.undoTimeline}
+      {...(editor.project === null || isAgentBusy || editor.isBusy ? {} : { onSave: () => { void editor.saveTimeline(); } })}
+      onStop={() => { void cua?.triggerStop(); }}
+      safety={{ sourcePreserved: editor.project !== null, dirty: editor.hasUnsavedTimeline, saving: editor.isSavingTimeline,
+        pendingApprovalCount: pendingApproval === null ? 0 : 1,
+        cuaStatus: cua?.state.phase === 'acting' || cua?.state.phase === 'ready' || cua?.state.phase === 'stopping' || cua?.state.phase === 'cleanup-failed' ? cua.state.phase : 'idle' }}
+    >
     <EditorWorkspace
       mode="host"
       className={workspaceClassName}
@@ -314,11 +334,6 @@ export function TimelineEditor({ editor, onProjectSettings, onOpenSettings }: Ti
         onThemeModeToggle={toggleTheme}
         onThemePresetChange={(next) => setPreset(next as ThemePresetId)}
         actions={<>
-          <div className="editor-view-switch" role="group" aria-label="Editor mode">
-            <button type="button" data-testid="editor-mode-timeline" aria-pressed={!fullStageMode} onClick={() => selectEditorView('timeline')}>Timeline</button>
-            <button type="button" data-testid="editor-mode-canvas" aria-pressed={canvasMode} onClick={() => selectEditorView('canvas')}>Canvas</button>
-            <button type="button" data-testid="editor-mode-shorts" aria-pressed={shortsMode} onClick={() => selectEditorView('shorts')}>Shorts</button>
-          </div>
           <details className="workbench-menu">
             <summary>Project</summary>
             <div className="workbench-menu__popover">
@@ -347,15 +362,15 @@ export function TimelineEditor({ editor, onProjectSettings, onOpenSettings }: Ti
             onClick={() => { void editor.saveTimeline(); }}
             disabled={editor.project === null || !editor.hasUnsavedTimeline || editor.isSavingTimeline}
           >
-            {editor.isSavingTimeline ? 'Saving…' : `Save${editor.hasUnsavedTimeline ? ' *' : ''}`}
+            {editor.isSavingTimeline ? '저장 중…' : `저장${editor.hasUnsavedTimeline ? ' *' : ''}`}
           </button>
           {!floatingExportVisible && <ExportPanel editor={editor} />}
         </>}
       />}
-      left={fullStageMode ? null : <TimelineEditorLeftDock
+      left={<TimelineEditorLeftDock
         activeTabId={leftDockTabId}
         editor={editor}
-        leftDockVisible={layoutPreference.leftDockVisible}
+        leftDockVisible={!fullStageMode && layoutPreference.leftDockVisible}
         projectPanelFloating={layoutPreference.floatingPanels.project.floating}
         onActiveTabChange={setLeftDockTabId}
       />}
@@ -397,8 +412,14 @@ export function TimelineEditor({ editor, onProjectSettings, onOpenSettings }: Ti
           {editor.project !== null && <VideoConnectionCanvas key={editor.project.id} editor={editor}
             locked={(isAgentBusy && !isCuaActing) || editor.isBusy} onPreview={() => selectEditorView('timeline')} />}
         </div>
-        <div className="editor-view" hidden={!shortsMode} data-cua-safe-surface={shortsMode && editor.project !== null ? 'shorts-review' : undefined}>
-          {shortsMode && editor.project !== null && (
+        <div className="editor-view" hidden={!shortsMode}>
+          <NaturalStudioView liveReviewSlot={editor.project !== null && (!intakeComplete ? (
+            <WorkspaceIntakeView pickerOnly prompt={chat.input} onPromptChange={chat.setInput} presets={[]}
+              recentProjects={workspaceProjects} selectedFileName={editor.project.assets[0]?.displayName ?? null}
+              starting={editor.isBusy} errorMessage={editor.statusMessage.tone === 'danger' ? editor.statusMessage.text : null}
+              onPickMedia={() => { void editor.importAssets(); }} onStart={() => setIntakeComplete(true)}
+              onOpenRecentProject={(id) => onSelectProject?.(id)} />
+          ) : (
             <ShortsReviewWorkspace
               editor={editor}
               initialJobId={restoredShortsTarget?.jobId ?? null}
@@ -407,7 +428,7 @@ export function TimelineEditor({ editor, onProjectSettings, onOpenSettings }: Ti
               onOpenSettings={onOpenSettings}
               onOpenMaterializedProject={openMaterializedShortInEditor}
             />
-          )}
+          ))} />
         </div>
         <div className="editor-view" hidden={fullStageMode}>
             {floatingProgramVisible ? <div className="empty-slate">Program Monitor is floating above the workspace.</div> : <ProgramMonitor editor={editor} />}
@@ -434,7 +455,8 @@ export function TimelineEditor({ editor, onProjectSettings, onOpenSettings }: Ti
         {floatingExportVisible && renderFloatingPanel({ child: <ExportPanel editor={editor} />, floatingPanel: layoutPreference.floatingPanels.export, panelId: 'export' })}
       </div>}
 
-      timeline={fullStageMode ? null : <TimelineCanvas id="editor-timeline-panel" editor={editor} />}
+      timeline={<div hidden={fullStageMode} className="live-workspace-timeline"><TimelineCanvas id="editor-timeline-panel" editor={editor} /></div>}
     />
+    </WorkspaceShell>
   );
 }

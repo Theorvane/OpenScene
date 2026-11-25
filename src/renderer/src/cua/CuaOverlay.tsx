@@ -59,12 +59,12 @@ export function CuaOverlay({ state, stopPending, stopError, agentBusy = false, o
   const stopButtonDisabled = !isActive || !canClickStop || stopButtonBusy;
   const showHudBanner = state.phase !== 'idle' || stopPending;
   const stopButtonLabel = stopButtonBusy
-    ? 'Stopping…'
+    ? '중지 중…'
     : isCleanupFailed && !agentBusy
-      ? 'Locked'
+      ? '잠김'
       : state.phase === 'stopped' && state.cleanupComplete && !agentBusy
-        ? 'Stopped'
-        : 'Stop (Esc)';
+        ? '중지됨'
+        : '중지 (Esc)';
   const cleanupStatus = getCuaCleanupStatusText(state, stopPending);
   const effectiveError = stopError ?? state.error;
 

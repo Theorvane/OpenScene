@@ -204,7 +204,7 @@ describe('CuaOverlay', () => {
       expect(html).toContain('data-testid="cua-stop-btn"');
       expect(html).toContain('data-cua-protected="stop-button"');
       expect(html).not.toContain('disabled=""');
-      expect(html).toContain('Stop (Esc)');
+      expect(html).toContain('중지 (Esc)');
 
       const children = (element.props as { children: unknown[] }).children;
       const stopButton = children.find(
@@ -228,7 +228,7 @@ describe('CuaOverlay', () => {
       })
     );
     expect(settledStoppedHtml).toContain('disabled=""');
-    expect(settledStoppedHtml).toContain('Stopped');
+    expect(settledStoppedHtml).toContain('중지됨');
   });
 
   it('maintains stopping progress until main pushes stopped with cleanupComplete: true', async () => {
@@ -261,7 +261,7 @@ describe('CuaOverlay', () => {
       })
     );
     expect(pendingHtml).toContain('Stopping CUA');
-    expect(pendingHtml).toContain('Stopping…');
+    expect(pendingHtml).toContain('중지 중…');
     expect(pendingHtml).toContain('aria-busy="true"');
     expect(getCuaCleanupStatusText(stoppedIncomplete, false)).toContain('finishing input cleanup');
     expect(getCuaCleanupStatusText(stoppedComplete, false)).toContain('all synthetic inputs released');
@@ -745,8 +745,8 @@ describe('approval button mouse safe-surface focus preservation', () => {
     expect(panelSource).not.toContain('.focus(');
     // Keyboard activation (Tab + Enter/Space) remains intact: approval buttons are native <Button> without negative tabIndex.
     const approvalBlock = panelSource.slice(panelSource.indexOf('className="agent-chat-approval__actions"'), panelSource.indexOf('{status === \'thinking\'}'));
-    expect(approvalBlock).toContain('Run once');
-    expect(approvalBlock).toContain('Deny');
+    expect(approvalBlock).toContain('한 번 승인');
+    expect(approvalBlock).toContain('거절');
     expect(approvalBlock).not.toContain('tabIndex={-1}');
   });
 });
