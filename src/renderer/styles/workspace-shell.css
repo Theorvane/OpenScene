@@ -17,7 +17,6 @@
 /* -------------------------------------------------------------------------- */
 
 .os-ws-shell {
-  container: workspace / inline-size;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
@@ -448,7 +447,7 @@
   .os-ws-node__viewport { flex: 0 0 360px; }
   .os-ws-node__body > .os-ws-node__impact { width: 100%; flex: 0 0 auto; }
 }
-@container workspace (max-width: 680px) {
+@media (max-width: 960px) {
   .os-ws-header__left { display: none; }
   .os-ws-header { justify-content: space-between; }
   .os-ws-header__right { flex: 0 0 auto; }
@@ -456,6 +455,54 @@
   .os-ws-sidebar__section-header { flex-wrap: wrap; }
   .os-ws-safety-strip { flex-wrap: wrap; height: auto; min-height: 28px; }
   .os-ws-safety-strip__group { flex-wrap: wrap; gap: 4px; }
+}
+
+/* Bridge existing editor/chat components onto the approved neutral palette. */
+.app-shell--workspace {
+  --background: var(--os-ui-bg);
+  --foreground: var(--os-ui-fg);
+  --card: var(--os-ui-surface);
+  --card-foreground: var(--os-ui-fg);
+  --popover: var(--os-ui-surface-elevated);
+  --popover-foreground: var(--os-ui-fg);
+  --primary: var(--os-ui-cta-bg);
+  --primary-foreground: var(--os-ui-cta-fg);
+  --secondary: var(--os-ui-active);
+  --secondary-foreground: var(--os-ui-fg);
+  --muted: var(--os-ui-hover);
+  --muted-foreground: var(--os-ui-fg-muted);
+  --accent: var(--os-ui-active);
+  --accent-foreground: var(--os-ui-fg);
+  --border: var(--os-ui-border);
+  --border-strong: var(--os-ui-border-strong);
+  --input: var(--os-ui-surface);
+  --ring: var(--os-ui-focus-ring);
+  --text-strong: var(--os-ui-fg);
+  --text-weak: var(--os-ui-fg-muted);
+  --text-weaker: var(--os-ui-fg-faint);
+  --color-text: var(--os-ui-fg);
+  --color-muted: var(--os-ui-fg-muted);
+  --color-faint: var(--os-ui-fg-faint);
+  --color-primary: var(--os-ui-cta-bg);
+  --color-panel: var(--os-ui-surface);
+  --color-panel-strong: var(--os-ui-surface-elevated);
+  --color-line: var(--os-ui-border);
+  --color-line-strong: var(--os-ui-border-strong);
+  --surface-control: var(--os-ui-surface);
+  --surface-control-hover: var(--os-ui-hover);
+  --surface-control-selected: var(--os-ui-active);
+  --surface-hover: var(--os-ui-hover);
+  --surface-active: var(--os-ui-active);
+  --surface-inset: var(--os-ui-canvas);
+  --surface-inset-strong: var(--os-ui-bg);
+  --surface-raised: var(--os-ui-surface-elevated);
+  --surface-raised-soft: var(--os-ui-surface);
+  --line-subtle: var(--os-ui-border);
+  --line-control: var(--os-ui-border-strong);
+  --line-selected: var(--os-ui-focus-ring);
+  --focus-ring: var(--os-ui-focus-ring);
+  --font-body: var(--os-font-sans);
+  --font-display: var(--os-font-sans);
 }
 
 @media (max-width: 1100px) {

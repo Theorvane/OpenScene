@@ -68,6 +68,18 @@ function makeState(overrides: Partial<CuaState> = {}): CuaState {
 }
 
 describe('CuaOverlay', () => {
+  it('keeps startup navigation with no session quiet while retaining fixed Stop and real terminal/cleanup receipts', async () => {
+    const { CuaOverlay } = await loadCuaOverlayModule();
+    const startup = makeState({ phase: 'stopped', error: 'navigation', sessionId: null, runId: null, lastDispatchReceipt: null, cleanupComplete: true });
+    const render = (state: CuaState, stopPending = false) => renderToStaticMarkup(createElement(CuaOverlay, { state, stopPending, stopError: null, onStop: () => {} }));
+    const quiet = render(startup);
+    expect(quiet).toContain('data-testid="cua-stop-btn"');
+    expect(quiet).toContain('cua-stop-btn--idle');
+    expect(quiet).not.toContain('data-testid="cua-hud"');
+    expect(render({ ...startup, runId: 'real-run', sessionId: 'real-session' })).toContain('data-testid="cua-hud"');
+    expect(render({ ...startup, phase: 'cleanup-failed', cleanupComplete: false })).toContain('data-testid="cua-cleanup-failed-warning"');
+    expect(render(startup, true)).toContain('data-testid="cua-hud"');
+  });
   it('keeps the fixed-footprint stop button mounted but hidden/inert-disabled when phase is idle', async () => {
     const { CuaOverlay } = await loadCuaOverlayModule();
     const html = renderToStaticMarkup(
