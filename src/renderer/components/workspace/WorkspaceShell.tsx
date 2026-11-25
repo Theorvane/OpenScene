@@ -47,6 +47,7 @@ export interface WorkspaceShellProps {
   readonly canUndo?: boolean;
   readonly onUndo?: () => void;
   readonly onSave?: () => void;
+  readonly saveScopeLabel?: string;
   readonly onStop: () => void;
   readonly onOpenAssets?: () => void;
   readonly onOpenSettings?: () => void;
@@ -151,6 +152,7 @@ export function WorkspaceShell({
   projects,
   persistentContent = false,
   safety,
+  saveScopeLabel,
   showCandidateNavigation = true,
   settingsDrawerContent
 }: WorkspaceShellProps): ReactElement {
@@ -305,7 +307,7 @@ export function WorkspaceShell({
 
             <span className="os-ws-safety-item">
               <span className={safety.dirty ? 'os-ws-dot os-ws-dot--warn' : 'os-ws-dot os-ws-dot--ok'} aria-hidden="true" />
-              <span>{safety.saving === true ? '저장 중' : safety.dirty ? '저장되지 않은 변경 있음' : '모든 변경 저장됨'}</span>
+              <span>{safety.saving === true ? '저장 중' : safety.dirty ? `${saveScopeLabel === undefined ? '' : `${saveScopeLabel} · `}저장되지 않은 변경 있음` : saveScopeLabel === undefined ? '모든 변경 저장됨' : `${saveScopeLabel} 저장됨`}</span>
             </span>
 
             {safety.pendingApprovalCount > 0 && (

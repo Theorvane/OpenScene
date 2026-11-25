@@ -358,6 +358,7 @@ export function AgentChatPanel({ width, onCollapse }: AgentChatPanelProps): Reac
               value={input}
               onChange={(event) => setInput(event.target.value)}
               onKeyDown={(event) => {
+                if (event.nativeEvent.isComposing || event.keyCode === 229 || event.key === 'Process') return;
                 if (event.key === 'Enter' && !event.shiftKey) {
                   event.preventDefault();
                   if (!isBusy && modelReady && pendingApproval === null && input.trim().length > 0) {

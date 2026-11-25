@@ -307,6 +307,7 @@ export function TimelineEditor({ editor, onProjectSettings, onOpenSettings, onPr
       onModeChange={(mode) => selectEditorView(mode === 'node' ? 'canvas' : mode === 'natural' ? 'shorts' : 'timeline')}
       projects={workspaceProjects}
       showCandidateNavigation={false}
+      saveScopeLabel="현재 프로젝트 타임라인"
       activeProjectId={editor.project?.id ?? null}
       onSelectProject={(id) => onSelectProject?.(id)}
       onNewVideo={() => onProjects?.()}

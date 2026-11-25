@@ -66,10 +66,26 @@ type ShortsReviewWorkspaceProps = {
 const SHORTS_POLL_INTERVAL_MS = 400;
 
 export function ShortsReviewWorkspace(props: ShortsReviewWorkspaceProps): ReactElement {
-  // Keep drafts/jobs alive across views of this project, but never reuse the
-  // async controller or result caches for a different source project. Old
-  // requests keep the old instance's mountedRef=false, including A→B→A.
-  return <ProjectShortsReviewWorkspace key={props.editor.project?.id ?? 'no-project'} {...props} />;
+  const [retained, setRetained] = useState<ReadonlyMap<string, ShortsReviewWorkspaceProps>>(() => new Map());
+  const draftState = useRef(new Map<string, { dirty: boolean; busy: boolean }>());
+  const projectId = props.editor.project?.id ?? null;
+  const knownIds = new Set(props.editor.projects.map((project) => project.id));
+  const next = new Map([...retained].filter(([id]) => knownIds.has(id)));
+  if (projectId !== null) { next.delete(projectId); next.set(projectId, props); }
+  // Keep at most four idle clean controllers in addition to the active one.
+  // Unsaved/in-flight work is never evicted; it is bounded by the actual local
+  // project inventory and is disposed only after save/idle or explicit deletion.
+  const idle = [...next.keys()].filter((id) => id !== projectId && !draftState.current.get(id)?.dirty && !draftState.current.get(id)?.busy);
+  for (const id of idle.slice(0, Math.max(0, idle.length - 4))) next.delete(id);
+  useEffect(() => {
+    setRetained(next);
+    for (const id of draftState.current.keys()) if (!next.has(id)) draftState.current.delete(id);
+  }, [props]);
+  return <>
+    {[...next].map(([id, sourceProps]) => <ProjectShortsReviewWorkspace key={id} {...sourceProps}
+      active={id === projectId} onDraftStateChange={(state) => { draftState.current.set(id, state); }} />)}
+    {projectId === null && <ProjectShortsReviewWorkspace {...props} active onDraftStateChange={() => {}} />}
+  </>;
 }
 
 function ProjectShortsReviewWorkspace({
@@ -78,8 +94,10 @@ function ProjectShortsReviewWorkspace({
   initialCandidateId = null,
   returnReloadToken = 0,
   onOpenSettings,
-  onOpenMaterializedProject
-}: ShortsReviewWorkspaceProps): ReactElement {
+  onOpenMaterializedProject,
+  active,
+  onDraftStateChange
+}: ShortsReviewWorkspaceProps & { readonly active: boolean; readonly onDraftStateChange: (state: { dirty: boolean; busy: boolean }) => void }): ReactElement | null {
   const project = editor.project;
   const projectId = project?.id ?? null;
 
@@ -120,6 +138,10 @@ function ProjectShortsReviewWorkspace({
   } | null>(null);
 
   const mountedRef = useRef(true);
+  const activeRef = useRef(active);
+  const activeEpochRef = useRef(0);
+  if (activeRef.current !== active) activeEpochRef.current += 1;
+  activeRef.current = active;
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -136,6 +158,9 @@ function ProjectShortsReviewWorkspace({
   const [dirtyResultIds, setDirtyResultIds] = useState<ReadonlySet<string>>(() => new Set());
   const [savingResultId, setSavingResultId] = useState<string | null>(null);
   const [resultStatusById, setResultStatusById] = useState<Readonly<Record<string, string>>>({});
+  useEffect(() => { onDraftStateChange({ dirty: dirtyResultIds.size > 0,
+    busy: isStartingRun || isMaterializing || isStartingExport || isCancellingReview || isCancellingExport || savingResultId !== null || loadingResultIds.size > 0 });
+  }, [dirtyResultIds, isStartingRun, isMaterializing, isStartingExport, isCancellingReview, isCancellingExport, savingResultId, loadingResultIds, onDraftStateChange]);
 
   const bumpResultRevision = useCallback((resultProjectId: string): number => {
     const next = (resultRevisionByIdRef.current[resultProjectId] ?? 0) + 1;
@@ -177,6 +202,7 @@ function ProjectShortsReviewWorkspace({
 
   // Restore saved shorts runs on project load without auto-resuming interrupted jobs.
   useEffect(() => {
+    if (!active) return;
     if (projectId === null) {
       setAllJobs([]);
       setActiveReviewJobId(null);
@@ -206,7 +232,7 @@ function ProjectShortsReviewWorkspace({
     return () => {
       cancelled = true;
     };
-  }, [initialJobId, projectId]);
+  }, [active, initialJobId, projectId]);
 
   useEffect(() => {
     if (initialJobId !== null) setActiveReviewJobId(initialJobId);
@@ -297,7 +323,7 @@ function ProjectShortsReviewWorkspace({
 
   // Poll active review/materialize job until settled & cleanupComplete.
   useEffect(() => {
-    if (!shouldPollShortsJob(activeReviewJob) || activeReviewJob === null) return;
+    if (!active || !shouldPollShortsJob(activeReviewJob) || activeReviewJob === null) return;
     const jobId = activeReviewJob.id;
     const prevStage = activeReviewJob.stage;
     const timer = window.setTimeout(() => {
@@ -313,12 +339,12 @@ function ProjectShortsReviewWorkspace({
       });
     }, SHORTS_POLL_INTERVAL_MS);
     return () => window.clearTimeout(timer);
-  }, [activeReviewJob, cancelAcceptedJobId, editor, upsertJob]);
+  }, [active, activeReviewJob, cancelAcceptedJobId, editor, upsertJob]);
 
   // Poll latest export run until settled & cleanupComplete.
   const latestExportRun = exportSummary.latestExportRun;
   useEffect(() => {
-    if (!shouldPollShortsJob(latestExportRun) || latestExportRun === null) return;
+    if (!active || !shouldPollShortsJob(latestExportRun) || latestExportRun === null) return;
     const jobId = latestExportRun.id;
     const timer = window.setTimeout(() => {
       void window.videoTool.shortsGet({ jobId }).then((response) => {
@@ -330,7 +356,7 @@ function ProjectShortsReviewWorkspace({
       });
     }, SHORTS_POLL_INTERVAL_MS);
     return () => window.clearTimeout(timer);
-  }, [cancelAcceptedJobId, latestExportRun, upsertJob]);
+  }, [active, cancelAcceptedJobId, latestExportRun, upsertJob]);
 
   // Poll individual ExportJobStore entries via existing getExportJob; handle JOB_NOT_FOUND gracefully.
   const pollableExportJobIds = useMemo(() => {
@@ -351,7 +377,7 @@ function ProjectShortsReviewWorkspace({
   }, [exportJobsById, exportSummary.items, unavailableExportJobIds]);
 
   useEffect(() => {
-    if (pollableExportJobIds.length === 0) return;
+    if (!active || pollableExportJobIds.length === 0) return;
     const timer = window.setTimeout(() => {
       void Promise.all(
         pollableExportJobIds.map(async (jobId) => {
@@ -372,7 +398,7 @@ function ProjectShortsReviewWorkspace({
       );
     }, SHORTS_POLL_INTERVAL_MS);
     return () => window.clearTimeout(timer);
-  }, [pollableExportJobIds]);
+  }, [active, pollableExportJobIds]);
 
   const loadResultProject = useCallback(async (resultProjectId: string, force = false): Promise<void> => {
     if (!force && resultProjectsRef.current[resultProjectId] !== undefined) return;
@@ -418,11 +444,11 @@ function ProjectShortsReviewWorkspace({
   }, [bumpResultRevision]);
 
   useEffect(() => {
-    if (activeResultProjectId === undefined) return;
+    if (!active || activeResultProjectId === undefined) return;
     const force = returnReloadToken > lastReloadTokenRef.current;
     if (force) lastReloadTokenRef.current = returnReloadToken;
     void loadResultProject(activeResultProjectId, force);
-  }, [activeResultProjectId, loadResultProject, returnReloadToken]);
+  }, [active, activeResultProjectId, loadResultProject, returnReloadToken]);
 
   const updateInlineTimeline = useCallback(
     (resultProjectId: string, updater: (timeline: TimelineDocument) => TimelineDocument | null): void => {
@@ -550,6 +576,7 @@ function ProjectShortsReviewWorkspace({
       if (response.value.accepted) {
         setCancelAcceptedJobId(jobId);
       }
+      if (!activeRef.current) return;
       const refreshed = await window.videoTool.shortsGet({ jobId });
       if (!mountedRef.current) return;
       if (refreshed.ok) upsertJob(refreshed.value);
@@ -582,6 +609,7 @@ function ProjectShortsReviewWorkspace({
   };
 
   const startBatchExportForIds = async (targetResultProjectIds: readonly string[]): Promise<void> => {
+    const requestEpoch = activeEpochRef.current;
     if (activeReviewJob === null || targetResultProjectIds.length === 0) return;
     setIsStartingExport(true);
     setExportActionNotice(null);
@@ -599,6 +627,7 @@ function ProjectShortsReviewWorkspace({
           }
         }
       }
+      if (!activeRef.current || activeEpochRef.current !== requestEpoch) return;
       const response = await window.videoTool.shortsExport({
         jobId: activeReviewJob.id,
         resultProjectIds: targetResultProjectIds
@@ -616,11 +645,13 @@ function ProjectShortsReviewWorkspace({
   };
 
   const handleOpenInTimelineEditor = async (): Promise<void> => {
+    const requestEpoch = activeEpochRef.current;
     if (activeReviewJob === null || activeCandidate === null || activeResultProjectId === undefined) return;
     if (dirtyResultIds.has(activeResultProjectId)) {
       const saved = await saveResultProject(activeResultProjectId);
       if (!mountedRef.current || !saved) return;
     }
+    if (!activeRef.current || activeEpochRef.current !== requestEpoch) return;
     await onOpenMaterializedProject({
       sourceProjectId: activeReviewJob.sourceProjectId,
       jobId: activeReviewJob.id,
@@ -694,6 +725,9 @@ function ProjectShortsReviewWorkspace({
     [activeResultProjectId, updateInlineTimeline]
   );
 
+  // Inactive source controllers retain drafts but render no controls/IDs and
+  // schedule no polls. Existing requests may settle only into their own cache.
+  if (!active) return null;
   return (
     <div
       className="shorts-workspace"

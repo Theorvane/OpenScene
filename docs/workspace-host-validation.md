@@ -42,12 +42,49 @@ playback presentation, shared Save/Undo/Stop routing, hidden precision geometry
 and keyboard locking away from precision. Shared apply-result tests compare a
 real trim operation with its impact summary. Existing CUA and Shorts tests remain.
 
+## Review corrections and QA incident
+
+Independent review found an A→B late Shorts response could populate B. An initial
+project-key remount fixed that response race but introduced a P1: it discarded
+unsaved inline result drafts. That intermediate fix is superseded by per-source
+controllers and caches. Only the active controller renders UI/IDs and polls;
+late responses stay in their own source cache, and delayed navigation/export
+continuations require the same active epoch. Deleted source controllers are
+disposed and cannot be resurrected by a late response. Clean idle retention is
+capped at four besides the active controller. Dirty/in-flight controllers are
+never implicitly evicted; their population is bounded by the actual enumerated
+local project inventory. Explicit save/reload and deletion provide cleanup.
+
+Actual mounted-controller regressions cover edited A→edited B→A, failed A save
+while B is active, eviction pressure, deletion/reopening, two deferred A/B starts
+and paused inactive polling. The main ordinary Save race found independently is
+inherited, tracked separately under item99, and is not changed by this PR.
+
+The first 6055dee layout run exposed a missing IME guard in the existing real
+AgentChatPanel. A synthetic composing Enter submitted one fixture agent request
+to the default local Ollama configuration (`http://localhost:11434`) and returned
+`fetch failed`. This violated the intended no-live-attempt QA constraint. The
+underlying HTTP/retry count was not instrumented, so one agent request does not
+establish one HTTP attempt. No successful model/media result, human selection,
+credential access or Jev invocation is claimed. Jev remained PID5854/NRestarts0.
+The old harness's static no-live flag and early completion-time zero-send check
+are not accepted as evidence. That run also stopped on actual 980px body overflow
+at 1280/150%; the workspace now removes that inherited desktop minimum.
+
+The real composer now ignores isComposing, key229 and Process while preserving
+ordinary Enter and Shift+Enter. The replacement QA records agent IPC at request
+start, installs throwing model/fetch/HTTP/socket boundaries before app import,
+verifies them with non-network negative probes, and cancels Chromium HTTP before
+dispatch. It asserts zero product invocation/network attempts and zero sends.
+Original failed artifacts remain; no successful rerun is claimed until recorded.
+
 ## Remaining validation and scope
 
 Linux VM203 mounted-renderer screenshots, resize/zoom, keyboard/IME, menu/modal
 and Stop checks are pending coordinated GUI ownership. Linux does not establish
 macOS focus/permissions, actual human selection or live-model quality. No live
-model/API calls are part of QA. Mobile has its existing editing screen; this
+model/API calls are authorized for QA; the incident above is an explicit failure,
+not a completed quality gate. Mobile has its existing editing screen; this
 Electron host and self-window CUA arrangement are desktop-specific. No mobile
 development-client screen exercise is claimed.
 
