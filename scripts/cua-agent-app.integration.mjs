@@ -399,6 +399,7 @@ try {
     assert.equal(evidence.agentRequests.length, 0, 'Independent ordinary fixture submits no agent prompt');
     const before = await savedPosition(), live = await liveClip(), legacyBefore = evidence.saveRequests.length;
     await click('[aria-label="Audio 1 lane. Drop assets or clips here."]');
+    await until('ordinary user pointer focus delivery', () => js('!!document.activeElement?.closest("[data-cua-safe-surface]")'));
     assert.equal(await js('!!document.activeElement?.closest("[data-cua-safe-surface]")'), true, 'Disclosed ordinary-user pointer established safe focus');
     input({ type: 'keyDown', keyCode: 'Up' });
     input({ type: 'keyUp', keyCode: 'Up' });
