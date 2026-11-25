@@ -6,6 +6,7 @@ import { useAgentChat } from './AgentChatContext';
 import { AgentChatMessageView } from './AgentChatMessageView';
 import { AgentChatSessionPicker } from './AgentChatSessionPicker';
 import { AgentModelPicker } from './AgentModelPicker';
+import { preserveSafeSurfaceFocusOnPrimaryMouseDown, useCuaOverlay } from './cua/useCuaOverlay';
 import { Button } from './ui';
 
 const CUA_ERROR_GUIDANCE: Readonly<Record<AgentCuaErrorCode, string>> = {
@@ -65,6 +66,8 @@ export function AgentChatPanel({ width, onCollapse }: AgentChatPanelProps): Reac
 
   const listEndRef = useRef<HTMLDivElement | null>(null);
   const [denialFeedback, setDenialFeedback] = useState('');
+  const cua = useCuaOverlay();
+  const hasSafeSurfaceFocus = cua?.snapshot.focusedInSafeSurface ?? false;
   const usageLabel = formatContextUsage(contextUsage);
   const usagePercent = contextUsagePercent(contextUsage);
   const pressure = contextPressure(contextUsage);
@@ -248,10 +251,16 @@ export function AgentChatPanel({ width, onCollapse }: AgentChatPanelProps): Reac
                   disabled={isBusy}
                 />
               </label>
+              {pendingApproval.cuaApproval?.actionKind === 'key' && !hasSafeSurfaceFocus && (
+                <p className="agent-chat-approval__hint" data-testid="agent-cua-key-focus-hint">
+                  Click inside the timeline/editor surface first so keyboard focus is in the safe workspace before approving a key action.
+                </p>
+              )}
               <div className="agent-chat-approval__actions">
                 <Button
                   variant="primary"
                   disabled={isBusy}
+                  onMouseDown={(event) => { preserveSafeSurfaceFocusOnPrimaryMouseDown(event); }}
                   onClick={() => { setDenialFeedback(''); void respondToApproval('approve'); }}
                 >
                   Run once
@@ -262,6 +271,7 @@ export function AgentChatPanel({ width, onCollapse }: AgentChatPanelProps): Reac
                   title={pendingApproval.cuaApproval !== undefined
                     ? 'CUA actions require single-use per-action approval'
                     : `Stop asking about ${pendingApproval.toolName} in this conversation`}
+                  onMouseDown={(event) => { preserveSafeSurfaceFocusOnPrimaryMouseDown(event); }}
                   onClick={() => { setDenialFeedback(''); void respondToApproval('always'); }}
                 >
                   Always allow
@@ -269,6 +279,7 @@ export function AgentChatPanel({ width, onCollapse }: AgentChatPanelProps): Reac
                 <Button
                   variant="stop"
                   disabled={isBusy}
+                  onMouseDown={(event) => { preserveSafeSurfaceFocusOnPrimaryMouseDown(event); }}
                   onClick={() => { const feedback = denialFeedback; setDenialFeedback(''); void respondToApproval('deny', feedback); }}
                 >
                   Deny
@@ -304,6 +315,11 @@ export function AgentChatPanel({ width, onCollapse }: AgentChatPanelProps): Reac
               {errorCode !== undefined && (
                 <p className="agent-chat-error__guidance">
                   <strong>{errorCode}:</strong> {CUA_ERROR_GUIDANCE[errorCode]}
+                </p>
+              )}
+              {(error?.includes('CUA_UNSAFE_KEY') === true || cua?.state.error === 'CUA_UNSAFE_KEY') && (
+                <p className="agent-chat-error__guidance" data-testid="agent-cua-unsafe-key-guidance">
+                  Keyboard action was blocked because the timeline/editor surface did not have focus. Click the timeline first, then approve again.
                 </p>
               )}
               {error && <p>{error}</p>}
