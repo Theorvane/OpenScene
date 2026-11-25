@@ -1,9 +1,19 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 
 const helperPath = '../scripts/cua-harness-readiness.mjs';
 const { waitForNativeMenuReady } = await import(helperPath);
 
 describe('native menu harness readiness', () => {
+  it('initializes persisted remaps before the already-mounted editor is used, without reloading any approval', () => {
+    const source = readFileSync(new URL('../scripts/cua-agent-app.integration.mjs', import.meta.url), 'utf8');
+    const reload = source.indexOf('target.webContents.reload()');
+    expect(source.indexOf("localStorage.setItem('window-loom-editor-shortcuts'")).toBeLessThan(reload);
+    expect(reload).toBeLessThan(source.indexOf("const clip = await mcp('addClipToTimeline'"));
+    expect(source).toContain('assert.equal(evidence.agentRequests.length, 0);');
+    expect(source).not.toContain('app.focus(');
+    expect(source).not.toContain('target.focus(');
+  });
   const run = (samples: object[]) => {
     let clock = 0;
     let index = 0;

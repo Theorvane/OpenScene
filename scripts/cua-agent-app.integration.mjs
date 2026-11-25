@@ -327,6 +327,19 @@ async function runScenarios() {
 try {
   await app.whenReady();
   await until('actual OpenScene renderer', async () => target && !target.webContents.isLoading() && await js('!!window.videoTool&&!!document.querySelector("#root")'));
+  if (process.env.CUA_AGENT_REMAP_SAVE_PROBE === '1' || process.env.CUA_AGENT_ORDINARY_SAVE_PROBE === '1') {
+    // App mounts the hidden editor on the home screen. Its preference hook reads
+    // once, so persisted fixture preferences require a fresh mount before ANY
+    // project interaction, observation, run or approval. Never reload a proposal.
+    assert.equal(evidence.agentRequests.length, 0);
+    await js(`localStorage.setItem('window-loom-editor-shortcuts', JSON.stringify({schemaVersion:1,overrides:{saveTimeline:'ArrowUp'}}))`);
+    const loaded = new Promise(resolveLoaded => target.webContents.once('did-finish-load', resolveLoaded));
+    target.webContents.reload();
+    await loaded;
+    await until('fresh renderer after persisted shortcut fixture', () => js('!!window.videoTool&&!!document.querySelector("#root")'));
+    evidence.shortcutFixture = { storageKey: 'window-loom-editor-shortcuts', action: 'saveTimeline', key: 'ArrowUp',
+      initialization: 'persist-then-reload-before-any-project-or-agent-interaction', agentRequestsBeforeReload: 0 };
+  }
   // No OS activation or programmatic focus, including initial setup.
   // Native window-manager focus or an actual user selection is required.
   evidence.userRole = { synthetic: true, actualHumanSelection: false, autoFocus: false };
@@ -341,12 +354,6 @@ try {
   const clip = await mcp('addClipToTimeline', { projectId, assetId, durationSeconds: 2 });
   evidence.fixtureClip = clip;
   evidence.fixtureTimeline = await mcp('getProjectTimeline', { projectId });
-  if (process.env.CUA_AGENT_REMAP_SAVE_PROBE === '1' || process.env.CUA_AGENT_ORDINARY_SAVE_PROBE === '1') {
-    // Isolated-profile preference fixture only; editor/timeline state is untouched.
-    // Set before the editor mounts and reads its persisted shortcut preferences.
-    await js(`localStorage.setItem('window-loom-editor-shortcuts', JSON.stringify({schemaVersion:1,overrides:{saveTimeline:'ArrowUp'}}))`);
-    evidence.shortcutFixture = { storageKey: 'window-loom-editor-shortcuts', action: 'saveTimeline', key: 'ArrowUp' };
-  }
   await click('.projects-home__project');
   await until('MCP-created timeline clip', () => pointFor('.timeline-clip'));
   if (!await pointFor('[aria-label="Edit Agent prompt"]')) await click('button', 'Assistant');
