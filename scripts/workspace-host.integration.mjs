@@ -70,7 +70,12 @@ async function capture(label) {
   await js('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
   writeFileSync(join(dir, `${label}.png`), (await target.webContents.capturePage()).toPNG());
   const layout = await js(`(() => {const rect=e=>{const r=e.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height,right:r.right,bottom:r.bottom}};const visible=e=>!e.closest('[hidden]')&&e.getBoundingClientRect().width>0&&e.getBoundingClientRect().height>0;return {viewport:{width:innerWidth,height:innerHeight},docWidth:document.documentElement.scrollWidth,bodyWidth:document.body.scrollWidth,mode:document.querySelector('[data-workspace-mode]')?.dataset.workspaceMode,project:document.querySelector('[data-testid=workspace-project-name]')?.textContent,dirty:document.querySelector('[data-testid=timeline-canvas]')?.dataset.dirty,safe:[...document.querySelectorAll('[data-cua-safe-surface]')].filter(visible).map(e=>({kind:e.dataset.cuaSafeSurface,rect:rect(e)})),tabs:[...document.querySelectorAll('[data-testid^=mode-tab-]')].map(e=>({id:e.dataset.testid,rect:rect(e)})),stop:[...document.querySelectorAll('[data-cua-stop]')].map(e=>({rect:rect(e),hit:(()=>{const r=e.getBoundingClientRect();const h=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return h===e||e.contains(h)})()})),shell:document.querySelector('.os-ws-shell')&&rect(document.querySelector('.os-ws-shell')),main:document.querySelector('.os-ws-main')&&rect(document.querySelector('.os-ws-main')),text:document.body.innerText.slice(0,18000)}})()`);
-  const record = { label, width: target.getContentSize()[0], height: target.getContentSize()[1], zoom: target.webContents.getZoomFactor(), layout, lastSnapshot: evidence.snapshots.at(-1) };
+  const controls = await js(`(() => {
+    const rects=selector=>[...document.querySelectorAll(selector)].filter(e=>!e.closest('[hidden]')&&e.getBoundingClientRect().width>0).map(e=>{const r=e.getBoundingClientRect();return {label:e.textContent?.trim(),x:r.x,y:r.y,right:r.right,bottom:r.bottom,width:r.width,height:r.height}});
+    const overlaps=rs=>rs.flatMap((r,i)=>rs.slice(i+1).filter(s=>r.x<s.right-1&&s.x<r.right-1&&r.y<s.bottom-1&&s.y<r.bottom-1).map(s=>({a:r,b:s})));
+    return {monitorOverlaps:overlaps(rects('.monitor-controls > div')),nodeOverlaps:overlaps(rects('.canvas-stage > .video-canvas__toolbar button, .canvas-stage > .video-canvas__toolbar select, .canvas-layout-tools button, .canvas-layout-tools select'))};
+  })()`);
+  const record = { label, width: target.getContentSize()[0], height: target.getContentSize()[1], zoom: target.webContents.getZoomFactor(), layout, controls, lastSnapshot: evidence.snapshots.at(-1) };
   evidence.captures.push(record); writeFileSync(join(dir, `${label}.json`), JSON.stringify(record, null, 2));
   return record;
 }
@@ -149,7 +154,16 @@ async function run() {
         assert.equal(record.layout.tabs.length, 3);
         assert.ok(record.layout.tabs.every(t=>t.rect.width>0&&t.rect.x>=0&&t.rect.right<=record.layout.viewport.width), 'all mode tabs visible');
         assert.ok(record.layout.stop.some(s=>s.hit), 'visible workspace Stop hit target');
+        assert.equal(record.controls.monitorOverlaps.length, 0, 'preview transport groups do not overlap');
+        assert.equal(record.controls.nodeOverlaps.length, 0, 'node controls do not overlap');
         if (tab === 'natural') assert.equal(record.layout.safe.length, 0);
+        if (tab === 'node' && width === 1280 && zoom === 1.5) {
+          const beforeRevision = evidence.snapshots.at(-1).layoutRevision;
+          await js('document.querySelector(".os-ws-node__body").scrollTop=100');
+          await until('compact node scroll invalidates old scope', async () => evidence.snapshots.at(-1)?.layoutRevision > beforeRevision && await js('document.querySelector(".os-ws-node__body").scrollTop>0'));
+          evidence.checks.push({ compactNodeScrollInvalidated: true, beforeRevision, afterRevision: evidence.snapshots.at(-1).layoutRevision });
+          await js('document.querySelector(".os-ws-node__body").scrollTop=0');
+        }
       }
     }
     await resize(1440,900,1); await mode('node');

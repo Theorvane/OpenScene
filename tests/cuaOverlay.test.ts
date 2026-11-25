@@ -472,6 +472,22 @@ function withMockDom<T>(
 }
 
 describe('clipRectToOverflowAncestors and collectDomSurfaceState protected rect clipping', () => {
+  it('increments scope revision when the compact node body scrolls inside unchanged canvas geometry', async () => {
+    const { collectDomSurfaceState } = await loadUseCuaOverlayModule();
+    const canvas = new MockHtmlElement({ attrs: { 'data-cua-safe-surface': 'canvas' }, rect: { x: 140, y: 120, width: 400, height: 400 } });
+    const nodeBody = new MockHtmlElement({ className: 'os-ws-node__body', rect: { x: 140, y: 150, width: 400, height: 370 }, parentElement: canvas });
+    Object.defineProperty(canvas, 'querySelectorAll', { value: (selector: string) => selector.includes('.os-ws-node__body') ? [nodeBody] : [] });
+    const measure = () => withMockDom({ viewport: { width: 900, height: 600 }, protectedElements: [], safeSurfaceElements: [canvas] },
+      () => collectDomSurfaceState({ contentRevision: 1, isAgentBusy: false, hasPendingApproval: false, cuaPhase: 'ready' }));
+    const tracker = new CuaSurfaceRevisionTracker();
+    const before = tracker.next(measure());
+    Object.defineProperty(nodeBody, 'scrollTop', { value: 100 });
+    const measuredAfter = measure();
+    const after = tracker.next(measuredAfter);
+    expect(after.snapshot.safeSurface).toEqual(before.snapshot.safeSurface);
+    expect(measuredAfter.scrollStates).toContainEqual({ id: 'os-ws-node__body', scrollLeft: 0, scrollTop: 100 });
+    expect(after.snapshot.layoutRevision).toBe(before.snapshot.layoutRevision + 1);
+  });
   it('clips overflowing approval-ui inside scrollable .agent-chat-log to stay strictly inside agent-panel without spurious layoutRevision bump', async () => {
     const { collectDomSurfaceState } = await loadUseCuaOverlayModule();
     const viewport = { width: 1220, height: 793 };
