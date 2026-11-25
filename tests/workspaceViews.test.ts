@@ -39,6 +39,7 @@ function getDocument(): {
   readonly body: DomEl;
   readonly activeElement: unknown;
   createElement: (tag: string) => DomEl;
+  getElementById: (id: string) => DomEl | null;
   querySelector: (selector: string) => DomEl | null;
   querySelectorAll: (selector: string) => ArrayLike<DomEl>;
 } {
@@ -227,6 +228,20 @@ describe('WorkspaceShell', () => {
     const container = mount(createElement(ShellHarness));
     expect(container.querySelector('[data-testid="active-mode-readout"]')?.textContent).toBe('intake');
 
+    // Every [role="tab"] aria-controls MUST resolve to a real DOM [role="tabpanel"] (even in intake mode)
+    const verifyAriaControlsResolved = (): void => {
+      const tabs = Array.from(container.querySelectorAll('[role="tab"]'));
+      expect(tabs).toHaveLength(3);
+      for (const tab of tabs) {
+        const controlsId = tab.getAttribute('aria-controls');
+        expect(controlsId).toBeTruthy();
+        const panel = doc.getElementById(controlsId as string);
+        expect(panel).not.toBeNull();
+        expect(panel?.getAttribute('role')).toBe('tabpanel');
+      }
+    };
+    verifyAriaControlsResolved();
+
     // CUA Stop button has fixed protected attributes and fires onStop
     const stopBtn = container.querySelector('[data-testid="workspace-cua-stop-btn"]') as DomEl;
     expect(stopBtn.getAttribute('data-cua-stop')).toBe('true');
@@ -265,6 +280,7 @@ describe('WorkspaceShell', () => {
     await flush();
     expect(container.querySelector('[data-testid="active-mode-readout"]')?.textContent).toBe('node');
     expect(nodeTab.getAttribute('data-state')).toBe('active');
+    verifyAriaControlsResolved();
 
     // Sidebar triggers & Undo/Save
     act(() => (container.querySelector('[data-testid="workspace-undo-btn"]') as DomEl).click());

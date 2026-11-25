@@ -553,6 +553,16 @@ app.whenReady().then(async () => {
       const partialPresentBefore = Boolean(document.querySelector('[data-testid="export-status-partial-error"]'));
       const rawErrorPreserved = Boolean(document.querySelector('[data-testid="export-raw-error"]')?.textContent?.includes('libx264 encoder timeout'));
 
+      // P2 Accessibility: verify every [role="tab"] aria-controls resolves to a real DOM [role="tabpanel"]
+      const tabs = Array.from(document.querySelectorAll('[role="tab"]'));
+      const allTabAriaControlsResolved =
+        tabs.length === 3 &&
+        tabs.every((tab) => {
+          const id = tab.getAttribute('aria-controls');
+          const panel = id ? document.getElementById(id) : null;
+          return Boolean(panel && panel.getAttribute('role') === 'tabpanel');
+        });
+
       // Defect #2: IME composition Enter in composer causes 0 submits; normal Enter submits once
       const composer = document.querySelector('[data-testid="natural-composer-input"]');
       const textareaSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
@@ -642,6 +652,7 @@ app.whenReady().then(async () => {
       return {
         partialPresentBefore,
         rawErrorPreserved,
+        allTabAriaControlsResolved,
         submitsAfterImeEnter,
         submitsAfterNormalEnter,
         cand2Selected,
@@ -777,6 +788,7 @@ async function run() {
       ['all 6 Phase 1A screenshots captured in /tmp/openscene-phase1a-qa/', allScreenshotsValid],
       ['all 9 viewport x zoom cells (1280/1440/1920 x 100%/125%/150%) have zero overflow, unclipped Stop button, unclipped sidebar & header controls', matrixResults.length === 9 && matrixResults.every((row) => !row.docOverflow && row.stopUnclipped && !row.anyHeaderButtonClipped && row.sidebarButtonUnclipped && row.projectNameTruncated)],
       ['partial_error displays preserved raw FFmpeg error', flowReport.partialPresentBefore && flowReport.rawErrorPreserved],
+      ['P2 A11y: all 3 [role="tab"] aria-controls resolve to real DOM [role="tabpanel"] elements', flowReport.allTabAriaControlsResolved === true],
       ['Defect #1: Space on focused candidate checkbox flips checked state cleanly', checkboxSpaceTest.checkboxCheckedBefore === true && checkboxSpaceTest.checkboxCheckedAfterSpace === false],
       ['Defect #2: IME composition Enter causes 0 submits; normal Enter submits once', flowReport.submitsAfterImeEnter === 0 && flowReport.submitsAfterNormalEnter === 1],
       ['candidate selection works via row keyboard Enter', flowReport.cand2Selected],

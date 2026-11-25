@@ -15,6 +15,7 @@ import {
   SheetHeader,
   SheetTitle,
   Tabs,
+  TabsContent,
   TabsList,
   TabsTrigger,
   Tooltip,
@@ -175,7 +176,16 @@ export function WorkspaceShell({
 
   return (
     <TooltipProvider delayDuration={200}>
-      <div className="os-ws-shell" data-workspace-mode={mode}>
+      <Tabs
+        value={activeTabValue}
+        onValueChange={(nextValue) => {
+          if (nextValue === 'natural' || nextValue === 'precision' || nextValue === 'node') {
+            onModeChange(nextValue);
+          }
+        }}
+        className="os-ws-shell"
+        data-workspace-mode={mode}
+      >
         <header className="os-ws-header">
           <div className="os-ws-header__left">
             <span className="os-ws-brand">
@@ -200,27 +210,17 @@ export function WorkspaceShell({
           </div>
 
           <div className="os-ws-header__center">
-            <Tabs
-              value={activeTabValue}
-              onValueChange={(nextValue) => {
-                if (nextValue === 'natural' || nextValue === 'precision' || nextValue === 'node') {
-                  onModeChange(nextValue);
-                }
-              }}
-              className="os-ws-mode-tabs"
-            >
-              <TabsList className="os-ws-mode-tabs__list" aria-label="작업 모드">
-                <TabsTrigger className="os-ws-mode-tabs__trigger" value="natural" data-testid="mode-tab-natural">
-                  자연어
-                </TabsTrigger>
-                <TabsTrigger className="os-ws-mode-tabs__trigger" value="precision" data-testid="mode-tab-precision">
-                  정밀
-                </TabsTrigger>
-                <TabsTrigger className="os-ws-mode-tabs__trigger" value="node" data-testid="mode-tab-node">
-                  노드
-                </TabsTrigger>
-              </TabsList>
-            </Tabs>
+            <TabsList className="os-ws-mode-tabs__list" aria-label="작업 모드">
+              <TabsTrigger className="os-ws-mode-tabs__trigger" value="natural" data-testid="mode-tab-natural">
+                자연어
+              </TabsTrigger>
+              <TabsTrigger className="os-ws-mode-tabs__trigger" value="precision" data-testid="mode-tab-precision">
+                정밀
+              </TabsTrigger>
+              <TabsTrigger className="os-ws-mode-tabs__trigger" value="node" data-testid="mode-tab-node">
+                노드
+              </TabsTrigger>
+            </TabsList>
           </div>
 
           <div className="os-ws-header__right">
@@ -408,7 +408,21 @@ export function WorkspaceShell({
             </div>
           </aside>
 
-          <main className="os-ws-main">{children}</main>
+          <main className="os-ws-main">
+            {mode === 'intake' && children}
+            {(['natural', 'precision', 'node'] as const).map((tabMode) => (
+              <TabsContent
+                key={tabMode}
+                value={tabMode}
+                forceMount
+                hidden={mode !== tabMode}
+                className="os-ws-tabpanel"
+                data-testid={`mode-tabpanel-${tabMode}`}
+              >
+                {mode === tabMode ? children : null}
+              </TabsContent>
+            ))}
+          </main>
         </div>
 
         {assetsDrawerContent !== undefined && (
@@ -434,7 +448,7 @@ export function WorkspaceShell({
             </SheetContent>
           </Sheet>
         )}
-      </div>
+      </Tabs>
     </TooltipProvider>
   );
 }
