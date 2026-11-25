@@ -122,7 +122,7 @@ async function nativeMenuReady(command, afterSequence = 0) {
       return { at: performance.now(), enabled: Menu.getApplicationMenu()?.getMenuItemById(`timeline:${command}`)?.enabled,
         report: report && report.sequence > afterSequence ? { ...report, enabled: report.payload?.commands?.[command]?.enabled } : null,
         focus: { window: target.isFocused(), contents: target.webContents.isFocused() },
-        dom: await js(`(() => {const e=document.querySelector('.timeline-clip');return {position:e?.dataset.timelineStartMs,dirty:document.querySelector('[data-testid=timeline-canvas]')?.dataset.dirty,undoDisabled:document.querySelector('[aria-label="Undo"]')?.disabled,redoDisabled:document.querySelector('[aria-label="Redo"]')?.disabled,activeTag:document.activeElement?.tagName};})()`) };
+        dom: await js(`(() => {const e=document.querySelector('.timeline-clip');return {position:e?.dataset.timelineStartMs,dirty:document.querySelector('[data-testid=timeline-canvas]')?.dataset.dirty,undoDisabled:document.querySelector('[data-testid="timeline-undo-btn"]')?.disabled,redoDisabled:document.querySelector('[data-testid="timeline-redo-btn"]')?.disabled,activeTag:document.activeElement?.tagName};})()`) };
     } });
     evidence.menuReadiness.push({ command, afterSequence, result });
   } catch (error) {
@@ -350,8 +350,10 @@ try {
   await click('.projects-home__project');
   await until('MCP-created timeline clip', () => pointFor('.timeline-clip'));
   if (!await pointFor('[aria-label="Edit Agent prompt"]')) await click('button', 'Assistant');
-  await click('[data-testid="agent-mode-self-window"]');
-  await until('explicit Window CUA mode after cancellation settlement', () => js('document.querySelector("[data-testid=agent-mode-self-window]")?.getAttribute("aria-pressed")==="true"'));
+  if (process.env.CUA_AGENT_ORDINARY_SAVE_PROBE !== '1') {
+    await click('[data-testid="agent-mode-self-window"]');
+    await until('explicit Window CUA mode after cancellation settlement', () => js('document.querySelector("[data-testid=agent-mode-self-window]")?.getAttribute("aria-pressed")==="true"'));
+  }
   if (process.env.CUA_AGENT_DIRTY_READ_PROBE === '1' || process.env.CUA_AGENT_REMAP_SAVE_PROBE === '1' || process.env.CUA_AGENT_ORDINARY_SAVE_PROBE === '1') {
     const before = await liveClip();
     const point = await pointFor('.timeline-clip');
