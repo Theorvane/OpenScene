@@ -65,7 +65,14 @@ type ShortsReviewWorkspaceProps = {
 
 const SHORTS_POLL_INTERVAL_MS = 400;
 
-export function ShortsReviewWorkspace({
+export function ShortsReviewWorkspace(props: ShortsReviewWorkspaceProps): ReactElement {
+  // Keep drafts/jobs alive across views of this project, but never reuse the
+  // async controller or result caches for a different source project. Old
+  // requests keep the old instance's mountedRef=false, including A→B→A.
+  return <ProjectShortsReviewWorkspace key={props.editor.project?.id ?? 'no-project'} {...props} />;
+}
+
+function ProjectShortsReviewWorkspace({
   editor,
   initialJobId = null,
   initialCandidateId = null,
