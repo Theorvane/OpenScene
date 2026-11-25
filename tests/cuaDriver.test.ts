@@ -3,9 +3,9 @@ import { performance } from 'node:perf_hooks';
 import type { BrowserWindow, MouseInputEvent } from 'electron';
 import { describe, expect, it, vi } from 'vitest';
 import { CuaDriver, type CuaDriverDependencies } from '../src/main/cuaDriver';
-import { cuaBitmapPointToViewport, type CuaActionRequest, type CuaSurfaceSnapshot } from '../src/shared/cua';
+import { cuaBitmapPointToViewport, type CuaActionRequest, type CuaState, type CuaSurfaceSnapshot } from '../src/shared/cua';
 
-function fixture(autoAck = true, autoPrepare = true) {
+function fixture(autoAck = true, autoPrepare = true, autoSettle = true, onStateTap?: (state: CuaState) => void) {
   const contents = Object.assign(new EventEmitter(), {
     isDestroyed: vi.fn(() => false), isFocused: vi.fn(() => true), getZoomFactor: vi.fn(() => 1),
     executeJavaScript: vi.fn<(script: string) => Promise<unknown>>(async () => true),
@@ -20,8 +20,17 @@ function fixture(autoAck = true, autoPrepare = true) {
   const isObservationInFlight = vi.fn(() => false);
   let resolveActing!: () => void;
   const acting = new Promise<void>(resolve => { resolveActing = resolve; });
+  let resolveReleased!: () => void;
+  const released = new Promise<void>(resolve => { resolveReleased = resolve; });
   const driver = new CuaDriver(window as unknown as BrowserWindow, { consumePermit, checkPermit, onCancel, getPendingApproval, isObservationInFlight, onState: state => {
+    onStateTap?.(state);
     if (state.phase === 'acting') resolveActing();
+    if (state.postInput?.stage === 'released') resolveReleased();
+    if (autoSettle && state.postInput?.stage === 'released') {
+      const tag = state.postInput;
+      driver.reportSurface(surface, tag);
+      driver.acknowledgeActionSettlement({ ...tag, layoutRevision: surface.layoutRevision, contentRevision: surface.contentRevision, outcome: 'noop' });
+    }
     if (autoPrepare && state.phase === 'preparing' && state.prepareToken && state.runId) driver.acknowledgePrepare({ runId: state.runId, prepareToken: state.prepareToken });
     if (autoAck && state.phase === 'stopping' && state.cancelToken && state.runId) driver.acknowledgeCancel({ runId: state.runId, cancelToken: state.cancelToken });
   } });
@@ -31,7 +40,7 @@ function fixture(autoAck = true, autoPrepare = true) {
     const frame = await driver.observe({ sessionId: 's', runId: 'r' });
     return { contentRevision: 0, sessionId: 's', runId: 'r', windowId: 7, frameId: frame.frameId, layoutRevision: 1, action: { kind: 'click', point: { x: 20, y: 20 } } };
   };
-  return { driver, window, contents, consumePermit, checkPermit, onCancel, getPendingApproval, isObservationInFlight, surface, observe, acting };
+  return { driver, window, contents, consumePermit, checkPermit, onCancel, getPendingApproval, isObservationInFlight, surface, observe, acting, released };
 }
 describe('self-window CUA safety', () => {
   it('returns cloned current frame metadata without capturing, DOM calls or renewing TTL', async () => {
@@ -117,6 +126,144 @@ describe('self-window CUA safety', () => {
     await f.driver.cancel();
     expect(f.consumePermit).not.toHaveBeenCalled();
   });
+  it('blocks capture after release until the exact committed surface and one-use ACK, then captures revision two once', async () => {
+    const f = fixture(true, true, false), request = await f.observe();
+    const execution = f.driver.execute(request, 'p'); await f.released;
+    const tag = f.driver.getState().postInput!;
+    expect(f.driver.getHeldInputCount()).toBe(0);
+    expect(f.driver.getState().lastDispatchReceipt).toMatchObject({ dispatch: 'full-dispatch', observationReady: false });
+    await expect(f.observe()).rejects.toThrow('BUSY');
+    expect(f.contents.capturePage).toHaveBeenCalledTimes(1);
+    const ack = { ...tag, layoutRevision: 1, contentRevision: 2, outcome: 'committed' as const };
+    expect(f.driver.acknowledgeActionSettlement(ack)).toBe(false);
+    expect(f.driver.reportSurface({ ...f.surface, contentRevision: 2 }, { ...tag, runId: 'other' })).toBe(false);
+    expect(f.driver.reportSurface({ ...f.surface, contentRevision: 2 }, tag)).toBe(true);
+    expect(f.driver.acknowledgeActionSettlement({ ...ack, generation: tag.generation + 1 })).toBe(false);
+    expect(f.driver.acknowledgeActionSettlement({ ...ack, contentRevision: 1 })).toBe(false);
+    expect(f.driver.acknowledgeActionSettlement({ ...ack, outcome: 'noop' })).toBe(false);
+    expect(f.driver.acknowledgeActionSettlement(ack)).toBe(true);
+    expect(f.driver.acknowledgeActionSettlement(ack)).toBe(false);
+    const state = await execution;
+    expect(state.lastDispatchReceipt).toMatchObject({ dispatch: 'full-dispatch', returnedEvents: 3, rendererSettlement: 'acknowledged', observationReady: true });
+    const before = f.contents.capturePage.mock.calls.length;
+    expect((await f.driver.observe({ sessionId: 's', runId: 'r' })).contentRevision).toBe(2);
+    expect(f.contents.capturePage).toHaveBeenCalledTimes(before + 1);
+    expect(f.consumePermit).toHaveBeenCalledOnce();
+  });
+  it('rejects pre-input reports and ACKs and preserves a no-dispatch cancellation receipt', async () => {
+    const f = fixture(true, false, false), request = await f.observe();
+    const execution = f.driver.execute(request, 'p');
+    const rejected = expect(execution).rejects.toThrow('CANCELLED');
+    const tag = f.driver.getState().postInput!;
+    expect(tag.stage).toBe('prepared');
+    expect(f.driver.reportSurface(f.surface, tag)).toBe(false);
+    expect(f.driver.acknowledgeActionSettlement({ ...tag, layoutRevision: 1, contentRevision: 0, outcome: 'noop' })).toBe(false);
+    const cancelled = await f.driver.cancel(); await rejected;
+    expect(cancelled.lastDispatchReceipt).toMatchObject({ dispatch: 'no-dispatch', attemptedEvents: 0, rendererSettlement: 'cancelled', observationReady: false });
+    expect(f.contents.sendInputEvent).not.toHaveBeenCalled();
+  });
+  it('retains full native dispatch on bounded ACK timeout without retrying input or capturing', async () => {
+    vi.useFakeTimers();
+    try {
+      const f = fixture(true, true, false), request = await f.observe();
+      const execution = f.driver.execute(request, 'p'); await f.released;
+      const tag = f.driver.getState().postInput!;
+      await vi.advanceTimersByTimeAsync(1001);
+      const state = await execution;
+      expect(state).toMatchObject({ phase: 'stopped', cleanupComplete: true, lastDispatchReceipt: {
+        dispatch: 'full-dispatch', attemptedEvents: 3, returnedEvents: 3, rendererSettlement: 'timed-out', observationReady: false,
+        release: { heldInputCount: 0 }
+      } });
+      expect(f.driver.acknowledgeActionSettlement({ ...tag, layoutRevision: 1, contentRevision: 0, outcome: 'noop' })).toBe(false);
+      expect(f.contents.sendInputEvent).toHaveBeenCalledTimes(3);
+      expect(f.contents.capturePage).toHaveBeenCalledTimes(1);
+    } finally { vi.useRealTimers(); }
+  });
+  it('fails closed on external content, resize or blur during settlement and rejects late ACKs', async () => {
+    for (const event of ['content', 'resize', 'blur']) {
+      const f = fixture(true, true, false), request = await f.observe();
+      const execution = f.driver.execute(request, 'p'); await f.released;
+      const tag = f.driver.getState().postInput!;
+      if (event === 'content') f.driver.reportSurface({ ...f.surface, contentRevision: 1 }); else f.window.emit(event);
+      const state = await execution;
+      expect(state.lastDispatchReceipt).toMatchObject({ dispatch: 'full-dispatch', rendererSettlement: 'cancelled', observationReady: false });
+      expect(f.driver.acknowledgeActionSettlement({ ...tag, layoutRevision: 1, contentRevision: 0, outcome: 'noop' })).toBe(false);
+      expect(f.contents.capturePage).toHaveBeenCalledTimes(1);
+      expect(f.contents.sendInputEvent).toHaveBeenCalledTimes(3);
+    }
+  });
+  it('records thrown native send attempts as uncertain before trusted cancellation, never as zero input', async () => {
+    const f = fixture(), request = await f.observe();
+    f.contents.sendInputEvent.mockImplementation(() => { throw new Error('/private/native-error'); });
+    const beforeAbort: unknown[] = [];
+    f.onCancel.mockImplementation(() => {
+      beforeAbort.push(f.driver.getState().lastDispatchReceipt);
+      void f.driver.cancel('recursive');
+    });
+    const state = await f.driver.execute(request, 'p');
+    expect(state.lastDispatchReceipt).toMatchObject({ dispatch: 'partial-dispatch', attemptedEvents: 1, returnedEvents: 0, dispatchUncertain: true, observationReady: false });
+    const receipt = f.driver.getLastDispatchReceipt({ sessionId: 's', runId: 'r' })!;
+    expect(JSON.stringify(receipt)).not.toContain('/private');
+    expect(f.driver.getLastDispatchReceipt({ sessionId: 's', runId: 'wrong' })).toBeNull();
+    expect(f.onCancel).toHaveBeenCalledOnce();
+    expect(beforeAbort).toHaveLength(1);
+    expect(beforeAbort[0]).toMatchObject({ attemptedEvents: 1, returnedEvents: 0, dispatchUncertain: true });
+  });
+  it('arms key settlement before keyDown but rejects synchronous pre-dispatch report/ACK', async () => {
+    const early: boolean[] = [];
+    const f = fixture(true, true, false, state => {
+      if (state.postInput?.stage !== 'armed' || early.length > 0) return;
+      const tag = state.postInput;
+      expect(state.lastDispatchReceipt?.attemptedEvents).toBe(0);
+      early.push(f.driver.reportSurface(f.surface, tag));
+      early.push(f.driver.acknowledgeActionSettlement({ ...tag, layoutRevision: 1, contentRevision: 0, outcome: 'noop' }));
+    });
+    const request = await f.observe();
+    const execution = f.driver.execute({ ...request, action: { kind: 'key', key: 'ArrowLeft', modifiers: [] } }, 'p');
+    await f.released;
+    const tag = f.driver.getState().postInput!;
+    expect(early).toEqual([false, false]);
+    expect(f.driver.reportSurface(f.surface, tag)).toBe(true);
+    expect(f.driver.acknowledgeActionSettlement({ ...tag, layoutRevision: 1, contentRevision: 0, outcome: 'noop' })).toBe(true);
+    expect((await execution).lastDispatchReceipt).toMatchObject({ dispatch: 'full-dispatch', expectedEvents: 2, rendererSettlement: 'acknowledged', observationReady: true });
+  });
+  it('accepts only one committed revision per token and preserves an acknowledged receipt on later cancel', async () => {
+    const f = fixture(true, true, false), request = await f.observe();
+    const execution = f.driver.execute(request, 'p'); await f.released;
+    const tag = f.driver.getState().postInput!;
+    expect(f.driver.reportSurface({ ...f.surface, contentRevision: 1 }, tag)).toBe(true);
+    expect(f.driver.reportSurface({ ...f.surface, contentRevision: 2 }, tag)).toBe(false);
+    expect((await execution).lastDispatchReceipt).toMatchObject({ dispatch: 'full-dispatch', rendererSettlement: 'cancelled', observationReady: false });
+    const g = fixture(), other = await g.observe();
+    const result = await g.driver.execute(other, 'p');
+    const cancelled = await g.driver.cancel('late-stop');
+    expect(cancelled.lastDispatchReceipt).toMatchObject({ actionId: result.lastDispatchReceipt!.actionId,
+      dispatch: 'full-dispatch', rendererSettlement: 'acknowledged', observationReady: false });
+  });
+  it('does not create a held key when trusted cancellation reenters the arming callback', async () => {
+    let cancelled = false;
+    const f = fixture(true, true, false, state => {
+      if (!cancelled && state.postInput?.stage === 'armed') { cancelled = true; void f.driver.cancel('arming-stop'); }
+    });
+    const request = await f.observe();
+    await expect(f.driver.execute({ ...request, action: { kind: 'key', key: 'ArrowLeft', modifiers: [] } }, 'p')).rejects.toThrow('CANCELLED');
+    expect(f.driver.getHeldInputCount()).toBe(0);
+    expect(f.driver.getState().lastDispatchReceipt).toMatchObject({ dispatch: 'no-dispatch', attemptedEvents: 0, observationReady: false });
+    expect(f.contents.sendInputEvent).not.toHaveBeenCalled();
+  });
+  it('waits for an in-stack physical release on recursive native cancellation instead of duplicating it', async () => {
+    const f = fixture(), request = await f.observe();
+    f.contents.sendInputEvent.mockImplementation(event => {
+      if (event.type === 'mouseUp') void f.driver.cancel('native-release-stop');
+      return true;
+    });
+    const state = await f.driver.execute(request, 'p');
+    expect(f.contents.sendInputEvent.mock.calls.filter(([event]) => event.type === 'mouseUp')).toHaveLength(1);
+    expect(state).toMatchObject({ phase: 'stopped', cleanupComplete: true, lastDispatchReceipt: {
+      dispatch: 'full-dispatch', attemptedEvents: 3, returnedEvents: 3, rendererSettlement: 'cancelled', observationReady: false,
+      release: { heldInputCount: 0 }
+    } });
+  });
   it('uses actual bitmap ratio and rejects invalid pixels', () => {
     const f = { bitmap: { width: 1600, height: 1200 }, viewport: { width: 800, height: 600 } };
     expect(cuaBitmapPointToViewport(f, { x: 200, y: 100 })).toEqual({ x: 100, y: 50 });
@@ -152,7 +299,7 @@ describe('self-window CUA safety', () => {
     const f = fixture(), r = await f.observe();
     const execution = f.driver.execute({ ...r, action: { kind: 'drag', from: { x: 20, y: 20 }, to: { x: 200, y: 20 }, durationMs: 3000 } }, 'p');
     await f.acting;
-    const rejected = expect(execution).rejects.toThrow('CANCELLED');
+    const rejected = expect(execution).resolves.toMatchObject({ lastDispatchReceipt: { dispatch: 'partial-dispatch', observationReady: false } });
     const cancelled = f.driver.cancel('user-stop');
     expect(f.driver.cancel()).toBe(cancelled);
     expect((await cancelled).cleanupComplete).toBe(true);
@@ -169,7 +316,7 @@ describe('self-window CUA safety', () => {
     await f.acting;
     expect(f.driver.getState().phase).toBe('acting');
     f.contents.emit('before-input-event', {}, { type: 'keyDown', key: 'Escape' });
-    await expect(execution).rejects.toThrow('CANCELLED');
+    await expect(execution).resolves.toMatchObject({ lastDispatchReceipt: { dispatch: 'partial-dispatch', observationReady: false } });
     expect(f.driver.getState().cleanupComplete).toBe(true);
     expect(f.onCancel).toHaveBeenCalledTimes(1);
   });
@@ -186,7 +333,7 @@ describe('self-window CUA safety', () => {
     expect(stopped.releaseFailures).toEqual(['left']);
     expect(f.driver.getHeldInputCount()).toBe(1);
     expect(f.driver.getCurrentFrame(r)).toBeNull();
-    await expect(execution).rejects.toThrow('CANCELLED');
+    await expect(execution).resolves.toMatchObject({ lastDispatchReceipt: { dispatch: 'partial-dispatch', observationReady: false } });
     await expect(f.observe()).rejects.toThrow('BUSY');
   });
   it('invalidates frames on resize and refuses unfocused capture', async () => {
@@ -201,7 +348,7 @@ describe('self-window CUA safety', () => {
     const f = fixture(false), r = await f.observe();
     const execution = f.driver.execute({ ...r, action: { kind: 'drag', from: { x: 20, y: 20 }, to: { x: 200, y: 20 }, durationMs: 3000 } }, 'p');
     await f.acting;
-    const rejected = expect(execution).rejects.toThrow('CANCELLED');
+    const rejected = expect(execution).resolves.toMatchObject({ lastDispatchReceipt: { dispatch: 'partial-dispatch', observationReady: false } });
     const stop = f.driver.cancel('user-stop');
     const pending = f.driver.getState();
     expect(pending.phase).toBe('stopping');
@@ -349,7 +496,7 @@ describe('self-window CUA safety', () => {
   it('reports a later close distinctly and cannot clear a failed release by closing or restarting observation', async () => {
     const f = fixture(), request = await f.observe();
     const execution = f.driver.execute({ ...request, action: { kind: 'drag', from: { x: 20, y: 20 }, to: { x: 200, y: 20 }, durationMs: 100 } }, 'p');
-    const rejected = expect(execution).rejects.toThrow('CANCELLED');
+    const rejected = expect(execution).resolves.toMatchObject({ lastDispatchReceipt: { dispatch: 'partial-dispatch', observationReady: false } });
     await f.acting;
     f.window.isDestroyed.mockReturnValue(true);
     f.window.emit('closed');
