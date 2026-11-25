@@ -758,7 +758,15 @@ export function useCuaOverlayState(options: {
         // Main process enforces fail-closed settlement timeouts.
       }
     })();
-  }, [flushSnapshotAsync, options.contentFingerprint, options.contentRevision, settlementTick, state.postInput?.stage]);
+  }, [
+    flushSnapshotAsync,
+    options.contentFingerprint,
+    options.contentRevision,
+    settlementTick,
+    state.postInput?.actionId,
+    state.postInput?.settlementToken,
+    state.postInput?.stage
+  ]);
 
   // Re-measure whenever page, committed contentRevision, busy/approval flags, or CUA phase changes.
   useEffect(() => {
