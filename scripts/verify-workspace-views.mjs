@@ -50,7 +50,7 @@ const HARNESS_HTML = `<!doctype html>
 `;
 
 const HARNESS_ENTRY = `
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import '${resolve(REPO_ROOT, 'src/renderer/styles/ui-tokens.css').replace(/\\/g, '/')}';
 import '${resolve(REPO_ROOT, 'src/renderer/styles/ui-primitives.css').replace(/\\/g, '/')}';
@@ -72,6 +72,11 @@ declare global {
     __WS_QA__?: {
       stopClicks: number;
       saveClicks: number;
+      windowSaveLeakCount: number;
+      cuaCaptureActive: boolean;
+      cuaCaptureEscapeCount: number;
+      composerSubmitCount: number;
+      intakeStartCount: number;
       setMode: (mode: WorkspaceMode) => void;
       setExportStatus: (status: WorkspaceExportStatus) => void;
     };
@@ -163,9 +168,34 @@ function QaApp() {
     ]
   });
 
+  useEffect(() => {
+    const onWindowKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
+        if (window.__WS_QA__) window.__WS_QA__.windowSaveLeakCount += 1;
+      }
+    };
+    const onCaptureEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && window.__WS_QA__?.cuaCaptureActive) {
+        window.__WS_QA__.cuaCaptureEscapeCount += 1;
+        event.preventDefault();
+      }
+    };
+    window.addEventListener('keydown', onWindowKeyDown);
+    window.addEventListener('keydown', onCaptureEscape, { capture: true });
+    return () => {
+      window.removeEventListener('keydown', onWindowKeyDown);
+      window.removeEventListener('keydown', onCaptureEscape, { capture: true });
+    };
+  }, []);
+
   window.__WS_QA__ = {
     stopClicks: window.__WS_QA__?.stopClicks ?? 0,
     saveClicks: window.__WS_QA__?.saveClicks ?? 0,
+    windowSaveLeakCount: window.__WS_QA__?.windowSaveLeakCount ?? 0,
+    cuaCaptureActive: window.__WS_QA__?.cuaCaptureActive ?? false,
+    cuaCaptureEscapeCount: window.__WS_QA__?.cuaCaptureEscapeCount ?? 0,
+    composerSubmitCount: window.__WS_QA__?.composerSubmitCount ?? 0,
+    intakeStartCount: window.__WS_QA__?.intakeStartCount ?? 0,
     setMode,
     setExportStatus
   };
@@ -226,7 +256,10 @@ function QaApp() {
           ]}
           recentProjects={INITIAL_PROJECTS}
           onPickMedia={() => {}}
-          onStart={() => setMode('natural')}
+          onStart={() => {
+            if (window.__WS_QA__) window.__WS_QA__.intakeStartCount += 1;
+            setMode('natural');
+          }}
           onOpenRecentProject={(id) => {
             setActiveProjectId(id);
             setMode('natural');
@@ -282,7 +315,10 @@ function QaApp() {
           }
           composerValue={composerValue}
           onComposerChange={setComposerValue}
-          onComposerSubmit={() => setComposerValue('')}
+          onComposerSubmit={() => {
+            if (window.__WS_QA__) window.__WS_QA__.composerSubmitCount += 1;
+            setComposerValue('');
+          }}
           onUpdateCandidateRange={(id, range) =>
             setCandidates((prev) => prev.map((item) => (item.id === id ? { ...item, ...range } : item)))
           }
@@ -488,16 +524,56 @@ app.whenReady().then(async () => {
   await wait(50);
   screenshots['natural-error-retry'] = await capture(win, 'natural-error-retry.png');
 
+  // 2b. Real Chromium keyboard input test for Defect #1: focus child checkbox and send real Space key
+  const checkboxCheckedBefore = await win.webContents.executeJavaScript(\`
+    (() => {
+      const cb = document.querySelector('[data-testid="candidate-checkbox-cand-1"]');
+      cb.focus();
+      return cb.checked;
+    })();
+  \`);
+  win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Space' });
+  win.webContents.sendInputEvent({ type: 'char', keyCode: ' ' });
+  win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Space' });
+  await wait(80);
+  const checkboxCheckedAfterSpace = await win.webContents.executeJavaScript(\`
+    document.querySelector('[data-testid="candidate-checkbox-cand-1"]').checked
+  \`);
+  // Restore checkbox to true so batch export still has selected items
+  if (!checkboxCheckedAfterSpace) {
+    win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Space' });
+    win.webContents.sendInputEvent({ type: 'char', keyCode: ' ' });
+    win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Space' });
+    await wait(60);
+  }
+
   const flowReport = await win.webContents.executeJavaScript(\`
     (async () => {
       const wait = (ms = 50) => new Promise((r) => setTimeout(r, ms));
       const partialPresentBefore = Boolean(document.querySelector('[data-testid="export-status-partial-error"]'));
       const rawErrorPreserved = Boolean(document.querySelector('[data-testid="export-raw-error"]')?.textContent?.includes('libx264 encoder timeout'));
 
-      // Select candidate 2 & retry failed export -> transitions to done
-      document.querySelector('[data-testid="candidate-row-cand-2"]').click();
+      // Defect #2: IME composition Enter in composer causes 0 submits; normal Enter submits once
+      const composer = document.querySelector('[data-testid="natural-composer-input"]');
+      const textareaSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
+      textareaSetter.call(composer, '자막 다듬기 테스트');
+      composer.dispatchEvent(new Event('input', { bubbles: true }));
       await wait();
-      const cand2Selected = document.querySelector('[data-testid="candidate-row-cand-2"]').getAttribute('data-selected') === 'true';
+      composer.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true, cancelable: true }));
+      composer.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 229, bubbles: true, cancelable: true }));
+      composer.dispatchEvent(new KeyboardEvent('keydown', { key: 'Process', bubbles: true, cancelable: true }));
+      await wait();
+      const submitsAfterImeEnter = window.__WS_QA__.composerSubmitCount;
+      composer.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+      await wait();
+      const submitsAfterNormalEnter = window.__WS_QA__.composerSubmitCount;
+
+      // Select candidate 2 via row keyboard Enter & retry failed export -> transitions to done
+      const row2 = document.querySelector('[data-testid="candidate-row-cand-2"]');
+      row2.focus();
+      row2.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+      await wait();
+      const cand2Selected = row2.getAttribute('data-selected') === 'true';
 
       document.querySelector('[data-testid="export-retry-failed-btn"]').click();
       await wait();
@@ -517,16 +593,37 @@ app.whenReady().then(async () => {
       await wait();
       const settingsClosed = !document.querySelector('[data-os-portal="sheet"][role="dialog"]');
 
-      // Open header DropdownMenu & verify CUA Stop remains unobstructed
+      // Defect #4: Open header DropdownMenu, verify Cmd+S & Ctrl+S cause 0 window Save leaks,
+      // capture-phase CUA Escape fires first, and CUA Stop remains unobstructed
       const menuTrigger = document.querySelector('[data-testid="workspace-project-menu-trigger"]');
       menuTrigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, button: 0, ctrlKey: false }));
       menuTrigger.click();
       await wait();
       const headerMenu = document.querySelector('[data-os-portal="dropdown-menu"][role="menu"]');
+      const firstMenuItem = headerMenu.querySelector('[role="menuitem"]');
       const hitAtStopUnderMenu = document.elementFromPoint(stopRect.left + stopRect.width / 2, stopRect.top + stopRect.height / 2);
       const stopUnobstructedUnderMenu = hitAtStopUnderMenu === stopBtn || stopBtn.contains(hitAtStopUnderMenu);
+
+      window.__WS_QA__.windowSaveLeakCount = 0;
+      headerMenu.dispatchEvent(new KeyboardEvent('keydown', { key: 's', metaKey: true, bubbles: true, cancelable: true }));
+      headerMenu.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true, cancelable: true }));
+      if (firstMenuItem) {
+        firstMenuItem.dispatchEvent(new KeyboardEvent('keydown', { key: 's', metaKey: true, bubbles: true, cancelable: true }));
+        firstMenuItem.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true, cancelable: true }));
+      }
+      await wait();
+      const menuSaveLeakCount = window.__WS_QA__.windowSaveLeakCount;
+
+      window.__WS_QA__.cuaCaptureActive = true;
+      window.__WS_QA__.cuaCaptureEscapeCount = 0;
       headerMenu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
       await wait();
+      const menuCuaCaptureEscapeCount = window.__WS_QA__.cuaCaptureEscapeCount;
+      window.__WS_QA__.cuaCaptureActive = false;
+
+      headerMenu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+      await wait();
+      const menuClosedAfterNormalEscape = !document.querySelector('[data-os-portal="dropdown-menu"][role="menu"]');
 
       // Switch to Precision tab -> verify host slot
       const precisionTab = document.querySelector('[data-testid="mode-tab-precision"]');
@@ -545,6 +642,8 @@ app.whenReady().then(async () => {
       return {
         partialPresentBefore,
         rawErrorPreserved,
+        submitsAfterImeEnter,
+        submitsAfterNormalEnter,
         cand2Selected,
         doneAfterRetry,
         settingsSheetMounted: Boolean(settingsSheet),
@@ -552,6 +651,9 @@ app.whenReady().then(async () => {
         settingsClosed,
         headerMenuMounted: Boolean(headerMenu),
         stopUnobstructedUnderMenu,
+        menuSaveLeakCount,
+        menuCuaCaptureEscapeCount,
+        menuClosedAfterNormalEscape,
         precisionActive,
         nodeImpactVisible
       };
@@ -560,7 +662,7 @@ app.whenReady().then(async () => {
 
   screenshots['node-impact-1440-100'] = await capture(win, 'node-impact-1440-100.png');
 
-  // Switch to Intake view & capture screenshot
+  // Switch to Intake view, verify Defect #3 (Ctrl/Cmd+Enter while Start disabled causes 0 onStart calls), & capture screenshot
   const intakeReport = await win.webContents.executeJavaScript(\`
     (async () => {
       const wait = (ms = 60) => new Promise((r) => setTimeout(r, ms));
@@ -568,13 +670,29 @@ app.whenReady().then(async () => {
       await wait();
       const intakeVisible = Boolean(document.querySelector('[data-testid="workspace-intake-view"]'));
       const docOverflow = document.documentElement.scrollWidth > window.innerWidth;
-      return { intakeVisible, docOverflow };
+      const startDisabled = Boolean(document.querySelector('[data-testid="intake-start-btn"]')?.disabled);
+      const intakeInput = document.querySelector('[data-testid="intake-prompt-input"]');
+      window.__WS_QA__.intakeStartCount = 0;
+      intakeInput.focus();
+      intakeInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true, cancelable: true }));
+      intakeInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true, cancelable: true }));
+      await wait();
+      const startCallsWhenDisabled = window.__WS_QA__.intakeStartCount;
+      const stillOnIntake = Boolean(document.querySelector('[data-testid="workspace-intake-view"]'));
+      return { intakeVisible, docOverflow, startDisabled, startCallsWhenDisabled, stillOnIntake };
     })();
   \`);
 
   screenshots['intake-1440-100'] = await capture(win, 'intake-1440-100.png');
 
-  process.stdout.write(JSON.stringify({ matrixResults, screenshots, flowReport, intakeReport, consoleErrors }, null, 2) + '\\n');
+  process.stdout.write(JSON.stringify({
+    matrixResults,
+    screenshots,
+    checkboxSpaceTest: { checkboxCheckedBefore, checkboxCheckedAfterSpace },
+    flowReport,
+    intakeReport,
+    consoleErrors
+  }, null, 2) + '\\n');
   win.destroy();
   app.quit();
 });
@@ -633,7 +751,7 @@ async function run() {
       throw new Error(`No JSON output from Electron QA: ${stdout}`);
     }
     const parsed = JSON.parse(stdout.slice(jsonStart));
-    const { matrixResults, screenshots, flowReport, intakeReport, consoleErrors } = parsed;
+    const { matrixResults, screenshots, checkboxSpaceTest, flowReport, intakeReport, consoleErrors } = parsed;
 
     const expectedShots = [
       'natural-1440-100',
@@ -659,13 +777,15 @@ async function run() {
       ['all 6 Phase 1A screenshots captured in /tmp/openscene-phase1a-qa/', allScreenshotsValid],
       ['all 9 viewport x zoom cells (1280/1440/1920 x 100%/125%/150%) have zero overflow, unclipped Stop button, unclipped sidebar & header controls', matrixResults.length === 9 && matrixResults.every((row) => !row.docOverflow && row.stopUnclipped && !row.anyHeaderButtonClipped && row.sidebarButtonUnclipped && row.projectNameTruncated)],
       ['partial_error displays preserved raw FFmpeg error', flowReport.partialPresentBefore && flowReport.rawErrorPreserved],
-      ['candidate selection works interactively', flowReport.cand2Selected],
+      ['Defect #1: Space on focused candidate checkbox flips checked state cleanly', checkboxSpaceTest.checkboxCheckedBefore === true && checkboxSpaceTest.checkboxCheckedAfterSpace === false],
+      ['Defect #2: IME composition Enter causes 0 submits; normal Enter submits once', flowReport.submitsAfterImeEnter === 0 && flowReport.submitsAfterNormalEnter === 1],
+      ['candidate selection works via row keyboard Enter', flowReport.cand2Selected],
       ['retry-failed transitions partial_error -> done', flowReport.doneAfterRetry],
       ['Settings Sheet opens & CUA Stop stays unobstructed via elementFromPoint', flowReport.settingsSheetMounted && flowReport.stopUnobstructedUnderSheet && flowReport.settingsClosed],
-      ['Header DropdownMenu opens & CUA Stop stays unobstructed via elementFromPoint', flowReport.headerMenuMounted && flowReport.stopUnobstructedUnderMenu],
+      ['Defect #4: Header DropdownMenu blocks Cmd+S & Ctrl+S from leaking to window Save while CUA capture Escape & unobstructed Stop work', flowReport.headerMenuMounted && flowReport.stopUnobstructedUnderMenu && flowReport.menuSaveLeakCount === 0 && flowReport.menuCuaCaptureEscapeCount === 1 && flowReport.menuClosedAfterNormalEscape],
       ['Precision tab mounts host slot cleanly', flowReport.precisionActive],
       ['Node tab mounts NodeWorkflowImpactPanel cleanly', flowReport.nodeImpactVisible],
-      ['Intake view mounts cleanly with zero overflow', intakeReport.intakeVisible && !intakeReport.docOverflow]
+      ['Defect #3: Intake empty state disables Start and Ctrl/Cmd+Enter causes 0 onStart calls with zero overflow', intakeReport.intakeVisible && !intakeReport.docOverflow && intakeReport.startDisabled && intakeReport.startCallsWhenDisabled === 0 && intakeReport.stillOnIntake]
     ];
 
     const failures = assertions.filter(([, ok]) => !ok).map(([name]) => name);
@@ -676,6 +796,7 @@ async function run() {
           total: assertions.length,
           failures,
           screenshots,
+          checkboxSpaceTest,
           matrixResults,
           flowReport,
           intakeReport,

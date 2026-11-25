@@ -87,6 +87,9 @@ export function NaturalStudioView({
   const checkedCandidates = candidates.filter((item) => item.selected);
 
   const handleComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
+    if (event.nativeEvent.isComposing || event.keyCode === 229 || event.key === 'Process') {
+      return;
+    }
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       if (!composerDisabled && !composerLoading && composerValue.trim().length > 0) {
@@ -212,6 +215,15 @@ export function NaturalStudioView({
                       data-testid={`candidate-row-${candidate.id}`}
                       onClick={() => onSelectCandidate(candidate.id)}
                       onKeyDown={(event) => {
+                        if (
+                          event.target !== event.currentTarget &&
+                          event.target instanceof Element &&
+                          event.target.closest(
+                            'input, button, textarea, select, a, label, [role="checkbox"], [role="button"]'
+                          ) !== null
+                        ) {
+                          return;
+                        }
                         if (event.key === 'Enter' || event.key === ' ') {
                           event.preventDefault();
                           onSelectCandidate(candidate.id);

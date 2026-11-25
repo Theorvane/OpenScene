@@ -1,7 +1,13 @@
-import { forwardRef, type ComponentPropsWithoutRef, type ElementRef, type HTMLAttributes } from 'react';
+import {
+  forwardRef,
+  type ComponentPropsWithoutRef,
+  type ElementRef,
+  type HTMLAttributes,
+  type KeyboardEvent as ReactKeyboardEvent
+} from 'react';
 import * as DropdownMenuPrimitive from '@radix-ui/react-dropdown-menu';
 
-import { cn, composeCuaSafeEscapeHandler, type CuaProtectedKind } from './cn';
+import { cn, composeCuaSafeEscapeHandler, isolateMenuKeyDown, type CuaProtectedKind } from './cn';
 
 export type DropdownMenuProps = ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Root>;
 export type DropdownMenuTriggerProps = ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Trigger>;
@@ -45,9 +51,14 @@ export const DropdownMenuContent = forwardRef<
   ElementRef<typeof DropdownMenuPrimitive.Content>,
   DropdownMenuContentProps
 >(function DropdownMenuContent(
-  { className, container, cuaProtectedKind = 'chrome-menu', onEscapeKeyDown, sideOffset = 4, ...props },
+  { className, container, cuaProtectedKind = 'chrome-menu', onEscapeKeyDown, onKeyDown, sideOffset = 4, ...props },
   ref
 ) {
+  const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
+    onKeyDown?.(event);
+    isolateMenuKeyDown(event);
+  };
+
   return (
     <DropdownMenuPrimitive.Portal {...(container !== undefined ? { container } : {})}>
       <DropdownMenuPrimitive.Content
@@ -57,6 +68,7 @@ export const DropdownMenuContent = forwardRef<
         data-cua-protected={cuaProtectedKind}
         data-os-portal="dropdown-menu"
         onEscapeKeyDown={composeCuaSafeEscapeHandler(onEscapeKeyDown)}
+        onKeyDown={handleKeyDown}
         {...props}
       />
     </DropdownMenuPrimitive.Portal>
@@ -79,13 +91,19 @@ export const DropdownMenuSubTrigger = forwardRef<
 export const DropdownMenuSubContent = forwardRef<
   ElementRef<typeof DropdownMenuPrimitive.SubContent>,
   DropdownMenuSubContentProps
->(function DropdownMenuSubContent({ className, cuaProtectedKind = 'chrome-menu', ...props }, ref) {
+>(function DropdownMenuSubContent({ className, cuaProtectedKind = 'chrome-menu', onKeyDown, ...props }, ref) {
+  const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
+    onKeyDown?.(event);
+    isolateMenuKeyDown(event);
+  };
+
   return (
     <DropdownMenuPrimitive.SubContent
       ref={ref}
       className={cn('os-ui-dropdown__content', className)}
       data-cua-protected={cuaProtectedKind}
       data-os-portal="dropdown-menu"
+      onKeyDown={handleKeyDown}
       {...props}
     />
   );

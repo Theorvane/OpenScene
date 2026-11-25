@@ -332,6 +332,52 @@ describe('WorkspaceIntakeView', () => {
     act(() => (container.querySelector('[data-testid="recent-project-r1"]') as DomEl).click());
     expect(onOpenRecentProject).toHaveBeenCalledWith('r1');
   });
+
+  it('never invokes onStart via Ctrl+Enter or Cmd+Enter when Start is disabled or during IME composition', () => {
+    const onStart = vi.fn();
+    const container = mount(
+      createElement(WS.WorkspaceIntakeView, {
+        prompt: '   ',
+        onPromptChange: vi.fn(),
+        presets: [],
+        recentProjects: [],
+        selectedFileName: null,
+        onPickMedia: vi.fn(),
+        onStart,
+        onOpenRecentProject: vi.fn()
+      })
+    );
+
+    const textarea = container.querySelector('[data-testid="intake-prompt-input"]') as DomEl;
+    const startBtn = container.querySelector('[data-testid="intake-start-btn"]') as DomEl;
+    expect(startBtn.disabled).toBe(true);
+
+    dispatchKey(textarea, 'Enter', { ctrlKey: true });
+    dispatchKey(textarea, 'Enter', { metaKey: true });
+    expect(onStart).not.toHaveBeenCalled();
+
+    // Non-empty prompt during IME composition must not trigger onStart either
+    const containerWithText = mount(
+      createElement(WS.WorkspaceIntakeView, {
+        prompt: '한국어 입력 중',
+        onPromptChange: vi.fn(),
+        presets: [],
+        recentProjects: [],
+        selectedFileName: null,
+        onPickMedia: vi.fn(),
+        onStart,
+        onOpenRecentProject: vi.fn()
+      })
+    );
+    const activeTextarea = containerWithText.querySelector('[data-testid="intake-prompt-input"]') as DomEl;
+    dispatchKey(activeTextarea, 'Enter', { metaKey: true, isComposing: true });
+    dispatchKey(activeTextarea, 'Enter', { ctrlKey: true, keyCode: 229 });
+    dispatchKey(activeTextarea, 'Process', { metaKey: true });
+    expect(onStart).not.toHaveBeenCalled();
+
+    dispatchKey(activeTextarea, 'Enter', { metaKey: true });
+    expect(onStart).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('NaturalStudioView', () => {
@@ -459,6 +505,143 @@ describe('NaturalStudioView', () => {
     // Composer Enter submits
     dispatchKey(container.querySelector('[data-testid="natural-composer-input"]') as DomEl, 'Enter');
     expect(onComposerSubmit).toHaveBeenCalledTimes(1);
+  });
+
+  it('allows Space on focused candidate checkbox without row interception and ignores IME Enter in composer', () => {
+    const onSelectCandidate = vi.fn();
+    const onToggleCandidate = vi.fn();
+    const onComposerSubmit = vi.fn();
+    const win = getWindow();
+
+    const container = mount(
+      createElement(WS.NaturalStudioView, {
+        turns: [],
+        steps: [],
+        approval: null,
+        candidates: [
+          {
+            id: 'c1',
+            index: 1,
+            title: '키보드 접근성 테스트',
+            startSec: 10,
+            endSec: 40,
+            reason: '행 내 체크박스 Space 토글 검증',
+            caption: '자막 테스트',
+            selected: false,
+            fitMode: 'contain',
+            scalePercent: 100,
+            offsetXPercent: 0
+          }
+        ],
+        selectedCandidateId: null,
+        onSelectCandidate,
+        onToggleCandidate,
+        exportStatus: { kind: 'idle' },
+        onExportSelected: vi.fn(),
+        composerValue: '한국어 조합 중',
+        onComposerChange: vi.fn(),
+        onComposerSubmit
+      })
+    );
+
+    // 1. Focusing child checkbox and pressing Space must NOT be prevented by row onKeyDown
+    const checkbox = container.querySelector('[data-testid="candidate-checkbox-c1"]') as DomEl;
+    const spaceOnCheckbox = new win.KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true }) as {
+      defaultPrevented: boolean;
+    };
+    act(() => {
+      checkbox.focus();
+      checkbox.dispatchEvent(spaceOnCheckbox);
+    });
+    expect(spaceOnCheckbox.defaultPrevented).toBe(false);
+    expect(onSelectCandidate).not.toHaveBeenCalled();
+
+    // Focusing the row itself and pressing Space or Enter selects the candidate cleanly
+    const row = container.querySelector('[data-testid="candidate-row-c1"]') as DomEl;
+    act(() => {
+      row.focus();
+    });
+    dispatchKey(row, ' ');
+    dispatchKey(row, 'Enter');
+    expect(onSelectCandidate).toHaveBeenCalledTimes(2);
+    expect(onSelectCandidate).toHaveBeenCalledWith('c1');
+
+    // 2. IME composition Enter variants must cause 0 submits; normal Enter submits once
+    const composer = container.querySelector('[data-testid="natural-composer-input"]') as DomEl;
+    dispatchKey(composer, 'Enter', { isComposing: true });
+    dispatchKey(composer, 'Enter', { keyCode: 229 });
+    dispatchKey(composer, 'Process');
+    expect(onComposerSubmit).not.toHaveBeenCalled();
+
+    dispatchKey(composer, 'Enter');
+    expect(onComposerSubmit).toHaveBeenCalledTimes(1);
+  });
+
+  it('blocks Cmd/Ctrl+S from leaking to window Save listener while WorkspaceShell header DropdownMenu is open', () => {
+    const doc = getDocument();
+    const globalWin = globalThis as unknown as {
+      window: {
+        addEventListener: (type: string, fn: (e: unknown) => void, opts?: boolean | { capture?: boolean }) => void;
+        removeEventListener: (type: string, fn: (e: unknown) => void, opts?: boolean | { capture?: boolean }) => void;
+      };
+    };
+    const leakedSaves: string[] = [];
+    const captureEscapes: string[] = [];
+
+    const onWindowSave = (event: unknown): void => {
+      const kb = event as { key: string; metaKey?: boolean; ctrlKey?: boolean };
+      if ((kb.metaKey || kb.ctrlKey) && kb.key.toLowerCase() === 's') {
+        leakedSaves.push(kb.key);
+      }
+    };
+    const onCaptureEscape = (event: unknown): void => {
+      const kb = event as { key: string; preventDefault: () => void };
+      if (kb.key === 'Escape') {
+        captureEscapes.push('cua-stop');
+        kb.preventDefault();
+      }
+    };
+
+    mount(
+      createElement(
+        WS.WorkspaceShell,
+        {
+          mode: 'natural',
+          onModeChange: vi.fn(),
+          projects: [{ id: 'p1', name: '테스트 프로젝트', updatedAtLabel: '방금' }],
+          activeProjectId: 'p1',
+          onSelectProject: vi.fn(),
+          onNewVideo: vi.fn(),
+          safety: { sourcePreserved: true, dirty: false, pendingApprovalCount: 0, cuaStatus: 'idle' },
+          onStop: vi.fn()
+        },
+        createElement('div', null, 'body')
+      )
+    );
+
+    const win = getWindow();
+    const trigger = doc.querySelector('[data-testid="workspace-project-menu-trigger"]') as DomEl;
+    act(() => {
+      trigger.dispatchEvent(new win.MouseEvent('pointerdown', { bubbles: true, cancelable: true, button: 0 }));
+      trigger.click();
+    });
+
+    const menu = doc.querySelector('[data-os-portal="dropdown-menu"][role="menu"]') as DomEl | null;
+    expect(menu).not.toBeNull();
+
+    globalWin.window.addEventListener('keydown', onWindowSave);
+    globalWin.window.addEventListener('keydown', onCaptureEscape, { capture: true });
+    try {
+      dispatchKey(menu as DomEl, 's', { metaKey: true });
+      dispatchKey(menu as DomEl, 's', { ctrlKey: true });
+      expect(leakedSaves).toEqual([]);
+
+      dispatchKey(menu as DomEl, 'Escape');
+      expect(captureEscapes).toEqual(['cua-stop']);
+    } finally {
+      globalWin.window.removeEventListener('keydown', onWindowSave);
+      globalWin.window.removeEventListener('keydown', onCaptureEscape, { capture: true });
+    }
   });
 
   it('renders clean empty states when candidates list is empty and error retry callback on full export error', () => {

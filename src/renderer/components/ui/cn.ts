@@ -71,12 +71,30 @@ export function isolateModalKeyDown(event: ReactKeyboardEvent<HTMLElement>): voi
   }
   if (isEditableElement(event.target)) {
     event.stopPropagation();
+    event.nativeEvent.stopPropagation();
     return;
   }
   // Prevent background timeline/save shortcuts (e.g. Cmd/Ctrl+S, Space, Delete)
   // from firing behind an active modal dialog or sheet.
   if (event.metaKey || event.ctrlKey || event.altKey) {
     event.stopPropagation();
+    event.nativeEvent.stopPropagation();
+  }
+}
+
+/**
+ * Prevents `Cmd/Ctrl+S` pressed while a `DropdownMenu` is open from leaking
+ * to global `window` / `document` Save listeners, without interfering with
+ * menu navigation or capture-phase CUA emergency Stop `Escape` handling.
+ */
+export function isolateMenuKeyDown(event: ReactKeyboardEvent<HTMLElement>): void {
+  if (event.key === 'Escape' || event.key === 'Tab') {
+    return;
+  }
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
+    event.preventDefault();
+    event.stopPropagation();
+    event.nativeEvent.stopPropagation();
   }
 }
 

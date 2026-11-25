@@ -65,10 +65,18 @@ export function WorkspaceIntakeView({
     }
   };
 
+  const canStart =
+    !starting && (prompt.trim().length > 0 || (selectedFileName !== null && selectedFileName.length > 0));
+
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
-    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter' && !starting) {
+    if (event.nativeEvent.isComposing || event.keyCode === 229 || event.key === 'Process') {
+      return;
+    }
+    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
       event.preventDefault();
-      onStart();
+      if (canStart) {
+        onStart();
+      }
     }
   };
 
@@ -139,7 +147,7 @@ export function WorkspaceIntakeView({
             <Button
               variant="primary"
               loading={starting}
-              disabled={prompt.trim().length === 0 && (selectedFileName === null || selectedFileName.length === 0)}
+              disabled={!canStart}
               onClick={onStart}
               data-testid="intake-start-btn"
             >
