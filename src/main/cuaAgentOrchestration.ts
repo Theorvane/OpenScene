@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type { CuaActionRequest, CuaFrame, CuaState } from '../shared/cua';
-import type { AgentCuaApprovalSummary, AgentCuaErrorCode } from '../shared/agentChat';
+import type { CuaActionRequest, CuaDispatchReceipt, CuaFrame, CuaState } from '../shared/cua';
+import type { AgentCuaApprovalSummary, AgentCuaErrorCode, CuaAgentActionResult } from '../shared/agentChat';
 import type { CuaSaveScope } from '../shared/cuaSave';
 import { CuaApprovalGate } from './cuaApprovalGate';
 
@@ -160,6 +160,7 @@ export interface CuaAgentDriver {
   execute(request: CuaActionRequest, permit: unknown, signal?: AbortSignal): Promise<CuaState>;
   cancel(reason?: string): Promise<CuaState>;
   getState(): CuaState;
+  getLastDispatchReceipt?(scope: { sessionId: string; runId: string; actionId?: string }): CuaDispatchReceipt | null;
   setExecutionBlocked(blocked: boolean): void;
 }
 
@@ -179,6 +180,41 @@ export class CuaAgentOrchestrator {
   private readonly runs = new Map<string, BoundRun>();
   private readonly byConversation = new Map<string, BoundRun>();
   private readonly cancellations = new Map<string, Promise<void>>();
+
+  private readonly dispatches = new Map<string, {
+    toolCallId: string; request: CuaActionRequest; receipt: CuaDispatchReceipt | null;
+  }>();
+
+  /** Trusted driver facts only. Never accepts renderer/provider receipt payloads. */
+  private captureDispatch(conversationId: string, receipt: CuaDispatchReceipt | null | undefined): void {
+    const entry = this.dispatches.get(conversationId);
+    if (!entry || !receipt) return;
+    const request = entry.request, previous = entry.receipt;
+    if (receipt.sessionId !== request.sessionId || receipt.runId !== request.runId
+      || receipt.windowId !== request.windowId || receipt.frameId !== request.frameId
+      || receipt.layoutRevision !== request.layoutRevision || receipt.contentRevision !== request.contentRevision
+      || receipt.actionKind !== request.action.kind || !receipt.actionId
+      || (previous && (previous.actionId !== receipt.actionId || previous.generation !== receipt.generation
+        || previous.expectedEvents !== receipt.expectedEvents || receipt.attemptedEvents < previous.attemptedEvents
+        || receipt.returnedEvents < previous.returnedEvents || receipt.release.attemptedEvents < previous.release.attemptedEvents
+        || receipt.release.returnedEvents < previous.release.returnedEvents
+        || (previous.dispatchUncertain && !receipt.dispatchUncertain)))) return;
+    // Deliberately enumerate the public receipt: no postInput token, permit,
+    // PNG, or future driver-only state can leak through a spread of CuaState.
+    const { actionId, actionKind, sessionId, runId, windowId, frameId, layoutRevision, contentRevision,
+      generation, dispatch, expectedEvents, attemptedEvents, returnedEvents, dispatchUncertain,
+      rendererSettlement, observationReady } = receipt;
+    entry.receipt = structuredClone({ actionId, actionKind, sessionId, runId, windowId, frameId,
+      layoutRevision, contentRevision, generation, dispatch, expectedEvents, attemptedEvents,
+      returnedEvents, dispatchUncertain, rendererSettlement, observationReady,
+      release: { attemptedEvents: receipt.release.attemptedEvents, returnedEvents: receipt.release.returnedEvents,
+        heldInputCount: receipt.release.heldInputCount, failures: [...receipt.release.failures] } });
+  }
+
+  getLastActionResult(conversationId: string): CuaAgentActionResult | null {
+    const entry = this.dispatches.get(conversationId);
+    return entry?.receipt ? structuredClone({ conversationId, toolCallId: entry.toolCallId, receipt: entry.receipt }) : null;
+  }
 
   constructor(readonly authority: CuaApprovalAuthority, private readonly options: {
     readonly driver: CuaAgentDriver;
@@ -213,6 +249,7 @@ export class CuaAgentOrchestrator {
     if (run?.controller.signal.aborted) throw new CuaApprovalError('CUA_CANCELLED');
     if (!run) {
       if (this.byConversation.size > 0) throw new CuaApprovalError('CUA_BUSY');
+      this.dispatches.delete(conversationId); // A new run cannot inherit the old run's receipt.
       run = { conversationId, projectId: projectId ?? null, runId: randomUUID(), controller: new AbortController(), frame: null, observation: null, pending: null };
       this.byConversation.set(conversationId, run);
       this.runs.set(run.runId, run);
@@ -278,22 +315,34 @@ export class CuaAgentOrchestrator {
     try {
       const permit = this.authority.issueApproved(conversationId, toolCallId, request);
       run.pending = null;
+      // Register immutable binding before driver callbacks can publish anything.
+      this.dispatches.delete(conversationId);
+      if (this.dispatches.size >= 100) this.dispatches.delete(this.dispatches.keys().next().value!);
+      this.dispatches.set(conversationId, { toolCallId, request: structuredClone(request), receipt: null });
       this.options.driver.setExecutionBlocked(false);
       const state = await this.options.driver.execute(request, permit, run.controller.signal);
+      this.captureDispatch(conversationId, state.lastDispatchReceipt);
       if (!state.cleanupComplete || state.phase === 'cleanup-failed') {
         this.authority.recordCleanupFailure();
         throw new CuaApprovalError('CUA_CLEANUP_FAILED');
       }
       run.frame = null;
-      // Input has settled successfully. A later observation can race a real
-      // committed-content report, so it is a separate tool step and cannot
-      // turn this successful action into an apparent failure/retry.
-      return { success: true, actionExecuted: true, observationRequired: true, state,
-        summary: 'The approved input executed and released successfully. Its original frame is consumed. Call observeEditorWindow alone for new evidence before another action; observation failure must not retry this input.' };
+      const result = this.getLastActionResult(conversationId);
+      const receipt = result?.receipt;
+      const actionExecuted = receipt?.dispatch === 'full-dispatch' && !receipt.dispatchUncertain;
+      const observationReady = actionExecuted && receipt?.rendererSettlement === 'acknowledged'
+        && receipt.observationReady && receipt.release.heldInputCount === 0 && receipt.release.failures.length === 0;
+      return { success: !!observationReady, actionExecuted: !!actionExecuted, observationReady: !!observationReady,
+        observationRequired: true, ...(result ? { cuaActionResult: result } : {}),
+        summary: observationReady
+          ? 'Native input and renderer settlement completed. Observe explicitly for new evidence; never retry this input.'
+          : 'Input outcome is not fully settled. Inspect the dispatch receipt; partial or uncertain dispatch may have effects. Do not retry this action or claim a verified editor change.' };
     } catch (error) {
       await this.cancelConversation(conversationId);
       throw error;
     } finally {
+      this.captureDispatch(conversationId, this.options.driver.getLastDispatchReceipt?.({
+        sessionId: request.sessionId, runId: request.runId }) ?? this.options.driver.getState().lastDispatchReceipt);
       this.options.driver.setExecutionBlocked(true);
     }
   }
@@ -310,6 +359,12 @@ export class CuaAgentOrchestrator {
 
   /** Trusted driver onState only; a renderer state payload must never call this. */
   settleRun(state: CuaState): void {
+    // This occurs before terminal run deletion and still works after onCancel
+    // aborted the graph. Mapping belongs to main, not to current UI selection.
+    for (const [conversationId, entry] of this.dispatches) {
+      if (entry.request.runId === state.runId && entry.request.sessionId === state.sessionId)
+        this.captureDispatch(conversationId, state.lastDispatchReceipt);
+    }
     if (state.sessionId !== this.sessionId || !state.runId) return;
     const run = this.runs.get(state.runId);
     if (!run) return;
@@ -333,6 +388,7 @@ export class CuaAgentOrchestrator {
       if (state.runId !== run.runId || state.sessionId !== this.sessionId) return;
       this.options.driver.setExecutionBlocked(true);
       const stopped = await this.options.driver.cancel('agent_cancelled');
+      this.captureDispatch(conversationId, stopped.lastDispatchReceipt);
       if (!stopped.cleanupComplete || stopped.phase === 'cleanup-failed') {
         this.authority.recordCleanupFailure();
         throw new CuaApprovalError('CUA_CLEANUP_FAILED');

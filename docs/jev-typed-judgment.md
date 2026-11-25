@@ -1,6 +1,6 @@
 # Optional Jev observation judgment
 
-Item42 / issue #563 stacks on CUA orchestration PR #561. This adapter preserves the selected chat LLM and every existing approval boundary. It is off by default. It never grants input, coordinates, approval, Save, cancellation, or credential-read authority to a model.
+Item42 / issue #563 extends the CUA observation path landed on dev through PR #562. This adapter preserves the selected chat LLM and every existing approval boundary. It is off by default. It never grants input, coordinates, approval, Save, cancellation, or credential-read authority to a model.
 
 ## Official contract verified 2026-11-24
 

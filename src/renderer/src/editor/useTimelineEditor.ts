@@ -43,6 +43,16 @@ import { connectVideoClips } from '../../../shared/videoCanvas';
 import { applyCanvasBlock } from '../../../shared/videoCanvasBlocks';
 import { EMPTY_CANVAS_GRAPH, parseVideoCanvasGraph, type VideoCanvasGraph } from '../../../shared/videoCanvasGraph';
 import { applyEditorOperations } from '../../../shared/editorOperations';
+import {
+  notifyCuaTimelineMutationScheduled,
+  notifyExternalCuaTimelineMutation
+} from '../cua/cuaActionSettlement';
+
+export function computeTimelineContentFingerprint(
+  project: Pick<LocalProjectSnapshot, 'id' | 'timeline' | 'assets'> | null
+): string {
+  return project === null ? 'null' : JSON.stringify([project.id, project.timeline, project.assets]);
+}
 import { errorMessage, type StatusMessage } from '../appTypes';
 import { hasActiveTimelineDrag } from '../cua/cuaDragGuard';
 import {
@@ -120,7 +130,7 @@ export function useTimelineEditor() {
     contentRevisionRef.current.timeline !== nextTimeline ||
     contentRevisionRef.current.assets !== nextAssets
   ) {
-    const nextFingerprint = project === null ? 'null' : JSON.stringify([project.id, project.timeline, project.assets]);
+    const nextFingerprint = computeTimelineContentFingerprint(project);
     if (nextFingerprint !== contentRevisionRef.current.fingerprint) {
       contentRevisionRef.current.revision += 1;
       contentRevisionRef.current.fingerprint = nextFingerprint;
@@ -130,6 +140,7 @@ export function useTimelineEditor() {
     contentRevisionRef.current.assets = nextAssets;
   }
   const contentRevision = contentRevisionRef.current.revision;
+  const contentFingerprint = contentRevisionRef.current.fingerprint;
   liveSaveStateRef.current = {
     project,
     contentRevision,
@@ -152,6 +163,7 @@ export function useTimelineEditor() {
   const playback = useTimelinePlayback(project);
 
   const setLoadedProject = useCallback((snapshot: LocalProjectSnapshot | null) => {
+    notifyExternalCuaTimelineMutation();
     setProject(snapshot);
     setSelectedClipIds([]);
     setTimelineHistory(snapshot === null ? null : createTimelineHistory(snapshot.timeline));
@@ -286,7 +298,11 @@ export function useTimelineEditor() {
     setStatusMessage({ tone: 'danger', text: errorMessage(response.error) });
   }, [invokeWhileBusy, project, refreshProjects, setLoadedProject]);
 
-  const { importAssets, importRecordingResult } = useProjectAssetImports({ project, setIsBusy, setProject, setSelectedAssetId, setStatusMessage });
+  const setProjectFromExternalImport: typeof setProject = useCallback((next) => {
+    notifyExternalCuaTimelineMutation();
+    setProject(next);
+  }, []);
+  const { importAssets, importRecordingResult } = useProjectAssetImports({ project, setIsBusy, setProject: setProjectFromExternalImport, setSelectedAssetId, setStatusMessage });
 
   const replaceTimeline = useCallback((update: TimelineUpdate, successText: string, rejectionText?: string): TimelineDocument | null => {
     if (project === null || cuaSaveFreezeTokenRef.current !== null) return null;
@@ -300,10 +316,14 @@ export function useTimelineEditor() {
       });
       return null;
     }
-    setProject({ ...project, timeline });
+    const nextProject = { ...project, timeline };
+    const nextFingerprint = computeTimelineContentFingerprint(nextProject);
+    const changed = nextFingerprint !== computeTimelineContentFingerprint(project);
+    setProject(nextProject);
     setTimelineHistory((current) => current === null ? createTimelineHistory(timeline) : pushTimelineHistory(current, timeline));
     playback.clampToTimeline(timeline);
     setHasUnsavedTimeline(true);
+    if (changed) notifyCuaTimelineMutationScheduled(nextFingerprint);
     setTimelineSaveError(null);
     setStatusMessage({ tone: 'neutral', text: successText });
     return timeline;
@@ -644,6 +664,7 @@ export function useTimelineEditor() {
       ? current.assets
       : [...current.assets, response.value.asset];
     if (transaction === null) {
+      notifyExternalCuaTimelineMutation();
       setProject({ ...current, assets });
       setSelectedAssetId(response.value.asset.id);
       setStatusMessage({
@@ -654,6 +675,7 @@ export function useTimelineEditor() {
     }
 
     const nextProject = { ...current, assets, timeline: transaction.timeline };
+    notifyExternalCuaTimelineMutation();
     projectRef.current = nextProject;
     setProject(nextProject);
     setTimelineHistory((history) => history === null
@@ -674,10 +696,16 @@ export function useTimelineEditor() {
     if (timelineHistory === null || cuaSaveFreezeTokenRef.current !== null) return;
     const next = undoTimelineHistory(timelineHistory);
     if (next === null) return;
+    const currentProject = projectRef.current;
+    const nextProject = currentProject === null ? null : { ...currentProject, timeline: next.present };
+    const nextFingerprint = nextProject === null ? null : computeTimelineContentFingerprint(nextProject);
+    const changed = currentProject !== null && nextFingerprint !== null
+      && nextFingerprint !== computeTimelineContentFingerprint(currentProject);
     setTimelineHistory(next);
     setProject((current) => current === null ? current : { ...current, timeline: next.present });
     playback.clampToTimeline(next.present);
     setHasUnsavedTimeline(true);
+    if (changed && nextFingerprint !== null) notifyCuaTimelineMutationScheduled(nextFingerprint);
     setStatusMessage({ tone: 'neutral', text: 'Undid timeline edit.' });
   }, [playback, timelineHistory]);
 
@@ -685,10 +713,16 @@ export function useTimelineEditor() {
     if (timelineHistory === null || cuaSaveFreezeTokenRef.current !== null) return;
     const next = redoTimelineHistory(timelineHistory);
     if (next === null) return;
+    const currentProject = projectRef.current;
+    const nextProject = currentProject === null ? null : { ...currentProject, timeline: next.present };
+    const nextFingerprint = nextProject === null ? null : computeTimelineContentFingerprint(nextProject);
+    const changed = currentProject !== null && nextFingerprint !== null
+      && nextFingerprint !== computeTimelineContentFingerprint(currentProject);
     setTimelineHistory(next);
     setProject((current) => current === null ? current : { ...current, timeline: next.present });
     playback.clampToTimeline(next.present);
     setHasUnsavedTimeline(true);
+    if (changed && nextFingerprint !== null) notifyCuaTimelineMutationScheduled(nextFingerprint);
     setStatusMessage({ tone: 'neutral', text: 'Redid timeline edit.' });
   }, [playback, timelineHistory]);
 
@@ -696,6 +730,7 @@ export function useTimelineEditor() {
     if (project === null || cuaSaveFreezeTokenRef.current !== null) return false;
     const response = await window.videoTool.updateAssetMetadata({ projectId: project.id, assetId, ...metadata });
     if (response.ok) {
+      notifyExternalCuaTimelineMutation();
       setProject((current) => current === null ? current : { ...current, assets: current.assets.map((asset) => asset.id === response.value.id ? response.value : asset) });
       clearMetadataProbeFailure(assetId);
       return true;
@@ -726,6 +761,7 @@ export function useTimelineEditor() {
           setStatusMessage({ tone: 'success', text: 'Timeline updated by the Edit Agent.' });
           return;
         }
+        notifyExternalCuaTimelineMutation();
         setProject(snapshot);
         setTimelineHistory((current) => current === null
           ? createTimelineHistory(snapshot.timeline)
@@ -768,6 +804,9 @@ export function useTimelineEditor() {
       if (response.ok) {
         // Saving before an Agent turn must not move the playhead or clear the
         // current selection. The persisted timeline is the one already shown.
+        if (computeTimelineContentFingerprint(response.value) !== computeTimelineContentFingerprint(project)) {
+          notifyExternalCuaTimelineMutation();
+        }
         setProject(response.value);
         setHasUnsavedTimeline(false);
         setTimelineSaveError(null);
@@ -917,7 +956,7 @@ export function useTimelineEditor() {
       (timeline) => connectVideoClips(timeline, fromId, toId),
       'Connected clips. The video track now plays continuously in the new order.'
     ),
-    addTimelineTrack, removeTimelineTrack, renameTimelineTrack, insertTimelineTrack, contentRevision, createProject, deleteCurrentProject, deleteSelectedClip, duplicateSelectedClip, hasUnsavedTimeline, importAssets,
+    addTimelineTrack, removeTimelineTrack, renameTimelineTrack, insertTimelineTrack, contentFingerprint, contentRevision, createProject, deleteCurrentProject, deleteSelectedClip, duplicateSelectedClip, hasUnsavedTimeline, importAssets,
     isSavingTimeline: effectiveIsSavingTimeline, isCuaSaveFrozen, timelineSaveError, timelineSaveStatus,
     importRecordingResult, isBusy, metadataProbeFailuresByAssetId, metadataProbeRetryRevisionsByAssetId, moveSelectedClip, newProjectName,
     cutAtPlayhead, transitionAtPlayhead, setTransitionAtPlayhead, removeTransitionAtPlayhead,

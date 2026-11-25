@@ -1,6 +1,15 @@
 import { createContext, createElement, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react';
 
-import type { CuaPhase, CuaState, CuaSurfaceSnapshot } from '../../../shared/cua';
+import type { CuaActionSettlementTag, CuaPhase, CuaRect, CuaState, CuaSurfaceSnapshot } from '../../../shared/cua';
+import {
+  beginCuaSafeClickAttribution,
+  clearCuaActionSettlement,
+  completeCuaSafeClickAttribution,
+  shouldDeferAttributedCuaContentReport,
+  subscribeCuaActionSettlement,
+  syncCuaActionSettlementFromState,
+  takeReadyCuaActionSettlement
+} from './cuaActionSettlement';
 import {
   abortActiveTimelineDragSync,
   handleCuaStateRollbackAndAckSync
@@ -10,6 +19,7 @@ import {
   CUA_VALID_SAFE_KINDS,
   CuaSurfaceRevisionTracker,
   INITIAL_CUA_STATE,
+  buildSurfaceGeometryKey,
   clipRectToViewport,
   computeExecutionBlockState,
   computeWorkspaceInert,
@@ -32,6 +42,101 @@ export {
   isCuaStopSettled,
   isCuaStoppablePhase
 } from './cuaSurfaceSnapshot';
+
+const OVERFLOW_CLIP_VALUES = new Set(['hidden', 'clip', 'scroll', 'auto']);
+const PROTECTED_FOCUS_SELECTOR = '[data-cua-protected],[role="dialog"],[role="menu"],.oc-editor-host__header';
+
+/**
+ * Returns true strictly when `document.activeElement` is already inside an
+ * active `[data-cua-safe-surface]` and outside any protected surface.
+ */
+export function hasActiveFocusInSafeSurface(
+  doc: Pick<Document, 'activeElement'> | undefined = typeof document === 'undefined' ? undefined : document
+): boolean {
+  const active = doc?.activeElement;
+  if (active === null || active === undefined) return false;
+  if (typeof Element !== 'undefined' && !(active instanceof Element)) return false;
+  if (typeof (active as Element).closest !== 'function') return false;
+  const el = active as Element;
+  return el.closest('[data-cua-safe-surface]') !== null && el.closest(PROTECTED_FOCUS_SELECTOR) === null;
+}
+
+/**
+ * Preserves already-existing DOM focus inside `[data-cua-safe-surface]` when
+ * the user clicks an approval button with the primary mouse button. Never
+ * fabricates or moves focus into the safe surface when it is not already there,
+ * and leaves keyboard Tab/Enter/Space activation untouched.
+ */
+export function preserveSafeSurfaceFocusOnPrimaryMouseDown(
+  event: { readonly button: number; readonly preventDefault: () => void },
+  doc: Pick<Document, 'activeElement'> | undefined = typeof document === 'undefined' ? undefined : document
+): boolean {
+  if (event.button !== 0) return false;
+  if (!hasActiveFocusInSafeSurface(doc)) return false;
+  event.preventDefault();
+  return true;
+}
+
+function isOverflowClipValue(value: string | null | undefined): boolean {
+  return typeof value === 'string' && OVERFLOW_CLIP_VALUES.has(value);
+}
+
+/**
+ * Intersects a measured DOM rect with the viewport and every overflow-clipping
+ * ancestor up to `document.documentElement` so scrolled descendants (such as an
+ * `approval-ui` card inside `.agent-chat-log` / `agent-panel`) report their
+ * true visible clipped bounds instead of spilling outside their scroll container.
+ */
+export function clipRectToOverflowAncestors(
+  element: Element,
+  rect: CuaRect,
+  viewport: { readonly width: number; readonly height: number }
+): CuaRect | null {
+  const initial = clipRectToViewport(rect, viewport);
+  if (initial === null) return null;
+
+  const elementStyle = window.getComputedStyle(element);
+  if (elementStyle.position === 'fixed') {
+    return initial;
+  }
+
+  let left = initial.x;
+  let top = initial.y;
+  let right = initial.x + initial.width;
+  let bottom = initial.y + initial.height;
+
+  const root = document.documentElement;
+  for (let ancestor = element.parentElement; ancestor !== null && ancestor !== root; ancestor = ancestor.parentElement) {
+    const style = window.getComputedStyle(ancestor);
+    const clipsX = isOverflowClipValue(style.overflowX || style.overflow);
+    const clipsY = isOverflowClipValue(style.overflowY || style.overflow);
+    if (!clipsX && !clipsY) continue;
+
+    const ancestorRect = roundRect(ancestor.getBoundingClientRect());
+    if (clipsX) {
+      left = Math.max(left, ancestorRect.x);
+      right = Math.min(right, ancestorRect.x + ancestorRect.width);
+    }
+    if (clipsY) {
+      top = Math.max(top, ancestorRect.y);
+      bottom = Math.min(bottom, ancestorRect.y + ancestorRect.height);
+    }
+    if (right <= left || bottom <= top) return null;
+  }
+
+  const x = Math.round(left * 100) / 100;
+  const y = Math.round(top * 100) / 100;
+  let width = Math.round((right - left) * 100) / 100;
+  let height = Math.round((bottom - top) * 100) / 100;
+  if (x + width > right) {
+    width = Math.max(0, Math.round((width - 0.01) * 100) / 100);
+  }
+  if (y + height > bottom) {
+    height = Math.max(0, Math.round((height - 0.01) * 100) / 100);
+  }
+  if (width <= 0 || height <= 0) return null;
+  return { x, y, width, height };
+}
 
 function isElementVisible(element: Element, allowOpacityZero = false): boolean {
   if (!(element instanceof HTMLElement)) return false;
@@ -88,7 +193,7 @@ export function collectDomSurfaceState(options: CollectDomSurfaceOptions): Measu
     // Always keep the fixed-footprint stop-button in protectedRects even when
     // visually idle (opacity: 0) so idle -> ready -> acting never alters protectedRects.
     if (seenElements.has(element) || !isElementVisible(element, kind === 'stop-button')) return;
-    const clipped = clipRectToViewport(roundRect(element.getBoundingClientRect()), viewport);
+    const clipped = clipRectToOverflowAncestors(element, roundRect(element.getBoundingClientRect()), viewport);
     if (clipped === null) return;
     seenElements.add(element);
     const prefix = fallbackId ?? kind;
@@ -227,6 +332,7 @@ const CuaOverlayContext = createContext<CuaOverlayController | null>(null);
 
 export function useCuaOverlayState(options: {
   readonly contentRevision: number;
+  readonly contentFingerprint?: string | null;
   readonly isAgentBusy: boolean;
   readonly hasPendingApproval: boolean;
   readonly activePageId: string;
@@ -235,7 +341,9 @@ export function useCuaOverlayState(options: {
   const [state, setState] = useState<CuaState>(INITIAL_CUA_STATE);
   const [stopPending, setStopPending] = useState(false);
   const [stopError, setStopError] = useState<string | null>(null);
+  const [settlementTick, setSettlementTick] = useState(0);
   const trackerRef = useRef<CuaSurfaceRevisionTracker>(new CuaSurfaceRevisionTracker());
+  const lastGeometryKeyRef = useRef<string | null>(null);
   const [snapshot, setSnapshot] = useState<CuaSurfaceSnapshot>(() => createFailClosedSnapshot(0, { width: 1, height: 1 }, 'unmounted', options.contentRevision));
   const isWorkspaceInert = computeWorkspaceInert({
     isAgentBusy: options.isAgentBusy,
@@ -253,20 +361,28 @@ export function useCuaOverlayState(options: {
   stopPendingRef.current = stopPending;
   optionsRef.current = options;
 
-  const reportSnapshotAsync = useCallback(async (nextSnapshot: CuaSurfaceSnapshot): Promise<boolean> => {
+  const reportSnapshotAsync = useCallback(async (
+    nextSnapshot: CuaSurfaceSnapshot,
+    settlement?: CuaActionSettlementTag
+  ): Promise<boolean> => {
     setSnapshot(nextSnapshot);
     const api = typeof window === 'undefined' ? undefined : window.videoTool;
     if (typeof api?.cuaReportSurfaceSnapshot !== 'function') return true;
     if (nextSnapshot.viewport.width <= 0 || nextSnapshot.viewport.height <= 0) return false;
     try {
-      const res = await api.cuaReportSurfaceSnapshot(nextSnapshot);
+      const res = settlement !== undefined
+        ? await api.cuaReportSurfaceSnapshot(nextSnapshot, settlement)
+        : await api.cuaReportSurfaceSnapshot(nextSnapshot);
       return res.ok && res.value.accepted;
     } catch {
       return false;
     }
   }, []);
 
-  const flushSnapshotAsync = useCallback(async (flushOptions?: { readonly force?: boolean }): Promise<CuaSurfaceSnapshot | null> => {
+  const flushSnapshotAsync = useCallback(async (flushOptions?: {
+    readonly force?: boolean;
+    readonly settlement?: CuaActionSettlementTag;
+  }): Promise<CuaSurfaceSnapshot | null> => {
     if (typeof window === 'undefined' || typeof document === 'undefined') return null;
     const currentOpts = optionsRef.current;
     const measured = collectDomSurfaceState({
@@ -275,9 +391,21 @@ export function useCuaOverlayState(options: {
       hasPendingApproval: currentOpts.hasPendingApproval,
       cuaPhase: stateRef.current.phase
     });
+    const geometryKey = buildSurfaceGeometryKey(measured);
+    if (
+      flushOptions?.settlement === undefined &&
+      shouldDeferAttributedCuaContentReport(currentOpts.contentRevision, currentOpts.contentFingerprint ?? null) &&
+      !measured.hasBlockingOverlay &&
+      !measured.executionBlocked &&
+      measured.safeSurface !== null &&
+      (lastGeometryKeyRef.current === null || geometryKey === lastGeometryKeyRef.current)
+    ) {
+      return null;
+    }
     const { snapshot: nextSnapshot, changed } = trackerRef.current.next(measured);
+    lastGeometryKeyRef.current = geometryKey;
     if (changed || flushOptions?.force === true) {
-      const ok = await reportSnapshotAsync(nextSnapshot);
+      const ok = await reportSnapshotAsync(nextSnapshot, flushOptions?.settlement);
       return ok ? nextSnapshot : null;
     }
     return nextSnapshot;
@@ -379,9 +507,15 @@ export function useCuaOverlayState(options: {
 
     const unsubscribe = typeof api?.onCuaStateChanged === 'function'
       ? api.onCuaStateChanged((nextState) => {
-          // MUST run synchronously BEFORE React setState: abort any held drag
-          // and immediately acknowledge cancelToken via cuaAckCancel.
+          // MUST run synchronously BEFORE React setState: abort any held drag,
+          // acknowledge cancelToken via cuaAckCancel, and register/advance any
+          // post-input settlement tracker before cuaAckPrepare can fire.
           handleCuaStateRollbackAndAckSync(nextState, api.cuaAckCancel);
+          syncCuaActionSettlementFromState(
+            nextState,
+            optionsRef.current.contentRevision,
+            optionsRef.current.contentFingerprint ?? null
+          );
           if (active) applyCuaState(nextState);
         })
       : undefined;
@@ -391,6 +525,11 @@ export function useCuaOverlayState(options: {
         .then((response) => {
           if (active && response.ok) {
             handleCuaStateRollbackAndAckSync(response.value, api.cuaAckCancel);
+            syncCuaActionSettlementFromState(
+              response.value,
+              optionsRef.current.contentRevision,
+              optionsRef.current.contentFingerprint ?? null
+            );
             applyCuaState(response.value);
           }
         })
@@ -402,8 +541,45 @@ export function useCuaOverlayState(options: {
     return () => {
       active = false;
       unsubscribe?.();
+      clearCuaActionSettlement();
     };
   }, [applyCuaState]);
+
+  // Subscribe to real DOM action handler attributions and attribute safe-surface click handlers.
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const unsubscribe = subscribeCuaActionSettlement(() => {
+      setSettlementTick((count) => count + 1);
+    });
+
+    const onDocumentClickCapture = (event: MouseEvent): void => {
+      const target = event.target;
+      if (
+        !(target instanceof Element) ||
+        target.closest('[data-cua-safe-surface]') === null ||
+        target.closest(PROTECTED_FOCUS_SELECTOR) !== null
+      ) {
+        return;
+      }
+      if (beginCuaSafeClickAttribution()) {
+        queueMicrotask(() => {
+          completeCuaSafeClickAttribution();
+        });
+      }
+    };
+
+    const onDocumentClickBubble = (): void => {
+      completeCuaSafeClickAttribution();
+    };
+
+    document.addEventListener('click', onDocumentClickCapture, true);
+    document.addEventListener('click', onDocumentClickBubble, false);
+    return () => {
+      unsubscribe();
+      document.removeEventListener('click', onDocumentClickCapture, true);
+      document.removeEventListener('click', onDocumentClickBubble, false);
+    };
+  }, []);
 
   // Global capture-phase Escape shortcut routed through the exact same unified triggerStop path as cua-stop-btn.
   useEffect(() => {
@@ -557,6 +733,40 @@ export function useCuaOverlayState(options: {
       cancelled = true;
     };
   }, [flushSnapshotAsync, isWorkspaceInert, state.phase, state.prepareToken, state.runId]);
+
+  // Post-input action settlement: after React commits the DOM/contentRevision for
+  // an attributed real action handler AND main has published postInput.stage === 'released',
+  // emit ONE tagged surface report followed (only if accepted) by cuaAckActionSettlement.
+  useLayoutEffect(() => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return;
+    const ready = takeReadyCuaActionSettlement(options.contentRevision, options.contentFingerprint ?? null);
+    if (ready === null) return;
+
+    void (async () => {
+      const reported = await flushSnapshotAsync({ force: true, settlement: ready.tag });
+      if (!mountedRef.current || reported === null) return;
+      const api = typeof window === 'undefined' ? undefined : window.videoTool;
+      if (typeof api?.cuaAckActionSettlement !== 'function') return;
+      try {
+        await api.cuaAckActionSettlement({
+          ...ready.tag,
+          layoutRevision: reported.layoutRevision,
+          contentRevision: reported.contentRevision,
+          outcome: ready.outcome
+        });
+      } catch {
+        // Main process enforces fail-closed settlement timeouts.
+      }
+    })();
+  }, [
+    flushSnapshotAsync,
+    options.contentFingerprint,
+    options.contentRevision,
+    settlementTick,
+    state.postInput?.actionId,
+    state.postInput?.settlementToken,
+    state.postInput?.stage
+  ]);
 
   // Re-measure whenever page, committed contentRevision, busy/approval flags, or CUA phase changes.
   useEffect(() => {

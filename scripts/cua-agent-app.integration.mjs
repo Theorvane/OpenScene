@@ -4,7 +4,8 @@
  * approval IPC, safety snapshots, driver and release settlement stay intact.
  * A fresh local fixture is written before app startup; no existing user data is used.
  */
-import { app, ipcMain, Menu } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu } from 'electron';
+import { waitForNativeMenuReady } from './cua-harness-readiness.mjs';
 import { ChatOllama } from '@langchain/ollama';
 import { AIMessage } from '@langchain/core/messages';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
@@ -45,6 +46,21 @@ let source = 'product';
 let scenario = { kind: 'move', stage: 0 };
 let callSequence = 0;
 let lastActionCallId = null;
+evidence.menuReports = [];
+evidence.menuReadiness = [];
+evidence.productPin = process.env.CUA_AGENT_PRODUCT_COMMIT || evidence.head;
+evidence.harnessHelperSha256 = createHash('sha256').update(readFileSync(new URL('./cua-harness-readiness.mjs', import.meta.url))).digest('hex');
+const originalOn = ipcMain.on.bind(ipcMain);
+ipcMain.on = (channel, handler) => originalOn(channel, channel !== 'timeline-menu:state' ? handler : (event, payload, ...rest) => {
+  const focused = BrowserWindow.getFocusedWindow();
+  const record = { at: performance.now(), sequence: evidence.menuReports.length + 1,
+    senderId: event.sender.id, focusedSenderId: focused?.webContents.id,
+    senderMatches: focused?.webContents === event.sender, payload: structuredClone(payload) };
+  const result = handler(event, payload, ...rest);
+  record.native = Object.fromEntries(['undo', 'redo'].map(command => [command, Menu.getApplicationMenu()?.getMenuItemById(`timeline:${command}`)?.enabled]));
+  evidence.menuReports.push(record);
+  return result;
+});
 const originalHandle = ipcMain.handle.bind(ipcMain);
 ipcMain.handle = (channel, handler) => {
   if (channel === 'project-timeline:save') return originalHandle(channel, async (event, payload) => {
@@ -65,10 +81,10 @@ ipcMain.handle = (channel, handler) => {
       pendingApproval: response?.value?.pendingApproval, cuaSaveResult: response?.value?.cuaSaveResult };
     return response;
   });
-  return originalHandle(channel, channel !== 'cua:report-surface-snapshot' ? handler : (event, snapshot) => {
+  return originalHandle(channel, channel !== 'cua:report-surface-snapshot' ? handler : (event, snapshot, ...rest) => {
   // Passive evidence tap: original sender, payload, handler and return value.
   evidence.surfaceReports.push({ at: performance.now(), snapshot: structuredClone(snapshot) });
-  return handler(event, snapshot);
+  return handler(event, snapshot, ...rest);
   });
 };
 
@@ -98,6 +114,21 @@ async function bridge(method, ...args) {
   const response = await js(`window.videoTool[${JSON.stringify(method)}](...${JSON.stringify(args)})`);
   assert.equal(response?.ok, true, `${method}: ${JSON.stringify(response)}`);
   return response.value;
+}
+async function nativeMenuReady(command, afterSequence = 0) {
+  try {
+    const result = await waitForNativeMenuReady({ command, read: async () => {
+      const report = evidence.menuReports.at(-1);
+      return { at: performance.now(), enabled: Menu.getApplicationMenu()?.getMenuItemById(`timeline:${command}`)?.enabled,
+        report: report && report.sequence > afterSequence ? { ...report, enabled: report.payload?.commands?.[command]?.enabled } : null,
+        focus: { window: target.isFocused(), contents: target.webContents.isFocused() },
+        dom: await js(`(() => {const e=document.querySelector('.timeline-clip');return {position:e?.dataset.timelineStartMs,dirty:document.querySelector('[data-testid=timeline-canvas]')?.dataset.dirty,undoDisabled:document.querySelector('[data-testid="timeline-undo-btn"]')?.disabled,redoDisabled:document.querySelector('[data-testid="timeline-redo-btn"]')?.disabled,activeTag:document.activeElement?.tagName};})()`) };
+    } });
+    evidence.menuReadiness.push({ command, afterSequence, result });
+  } catch (error) {
+    evidence.menuReadiness.push({ command, afterSequence, timeout: error.telemetry });
+    throw error;
+  }
 }
 async function mcp(name, args) {
   const result = await bridge('mcpExecuteTool', name, args);
@@ -173,7 +204,10 @@ ChatOllama.prototype.invoke = async function(messages, options) {
     if (!frame) return new AIMessage('Synthetic planner stopped after the actual observation tool refused. No input was requested.');
     const point = await pointFor('.timeline-clip', undefined, false);
     assert.ok(point, 'Fixture clip is visible to the deterministic synthetic planner');
-    const action = scenario.kind.startsWith('remap-') ? { kind: 'key', key: 'ArrowUp', modifiers: [] }
+    const focusPointer = scenario.kind === 'remap-key' ? await pointFor('[aria-label="Audio 1 lane. Drop assets or clips here."]', undefined, false) : null;
+    if (scenario.kind === 'remap-key') assert.ok(focusPointer, 'Separate disclosed focus-pointer target is visible');
+    const action = scenario.kind === 'remap-key' ? { kind: 'click', point: focusPointer }
+      : scenario.kind.startsWith('remap-') ? { kind: 'key', key: 'ArrowUp', modifiers: [] }
       : ['move', 'move-save', 'save-deny', 'cancel'].includes(scenario.kind)
       ? { kind: 'drag', from: point, to: { x: point.x + 65, y: point.y }, durationMs: scenario.kind === 'cancel' ? 1800 : 600 }
       : { kind: 'click', point };
@@ -189,6 +223,21 @@ ChatOllama.prototype.invoke = async function(messages, options) {
       if (JSON.parse(result?.content).actionExecuted) return new AIMessage({ content: '',
         tool_calls: [{ id: `observe-after-action-${++callSequence}`, name: 'observeEditorWindow', args: {} }] });
     } catch { /* A denied/failed input is never retried. */ }
+  }
+  if (scenario.kind === 'remap-key' && scenario.stage === 4) {
+    const frame = lastFrame(messages);
+    assert.ok(frame, 'A new post-pointer observation is required for the separate key approval');
+    lastActionCallId = `key-action-${++callSequence}`;
+    return new AIMessage({ content: '', tool_calls: [{ id: lastActionCallId, name: 'executeCuaAction', args: {
+      sessionId: frame.sessionId, runId: frame.runId, windowId: frame.windowId, frameId: frame.frameId,
+      layoutRevision: frame.layoutRevision, contentRevision: frame.contentRevision,
+      action: { kind: 'key', key: 'ArrowUp', modifiers: [] }
+    } }] });
+  }
+  if (scenario.kind === 'remap-key' && scenario.stage === 5) {
+    const result = [...messages].reverse().find(message => message.name === 'executeCuaAction');
+    if (JSON.parse(result?.content).actionExecuted) return new AIMessage({ content: '',
+      tool_calls: [{ id: `observe-after-key-${++callSequence}`, name: 'observeEditorWindow', args: {} }] });
   }
   if (['move-save', 'save-deny'].includes(scenario.kind) && scenario.stage === 4) {
     const frame = lastFrame(messages);
@@ -278,9 +327,22 @@ async function runScenarios() {
 try {
   await app.whenReady();
   await until('actual OpenScene renderer', async () => target && !target.webContents.isLoading() && await js('!!window.videoTool&&!!document.querySelector("#root")'));
-  // Test setup explicitly selects only this own app once. Never bypass the
-  // production driver's focus checks or refocus during an approved action.
-  app.focus({ steal: true }); target.focus(); target.webContents.focus();
+  if (process.env.CUA_AGENT_REMAP_SAVE_PROBE === '1' || process.env.CUA_AGENT_ORDINARY_SAVE_PROBE === '1') {
+    // App mounts the hidden editor on the home screen. Its preference hook reads
+    // once, so persisted fixture preferences require a fresh mount before ANY
+    // project interaction, observation, run or approval. Never reload a proposal.
+    assert.equal(evidence.agentRequests.length, 0);
+    await js(`localStorage.setItem('window-loom-editor-shortcuts', JSON.stringify({schemaVersion:1,overrides:{saveTimeline:'ArrowUp'}}))`);
+    const loaded = new Promise(resolveLoaded => target.webContents.once('did-finish-load', resolveLoaded));
+    target.webContents.reload();
+    await loaded;
+    await until('fresh renderer after persisted shortcut fixture', () => js('!!window.videoTool&&!!document.querySelector("#root")'));
+    evidence.shortcutFixture = { storageKey: 'window-loom-editor-shortcuts', action: 'saveTimeline', key: 'ArrowUp',
+      initialization: 'persist-then-reload-before-any-project-or-agent-interaction', agentRequestsBeforeReload: 0 };
+  }
+  // No OS activation or programmatic focus, including initial setup.
+  // Native window-manager focus or an actual user selection is required.
+  evidence.userRole = { synthetic: true, actualHumanSelection: false, autoFocus: false };
   evidence.window = { id: target.id, title: target.getTitle(), windowFocused: target.isFocused(), contentsFocused: target.webContents.isFocused() };
   await js(`window.__cuaAgentEvents=[];window.__cuaAgentStates=[];
     window.videoTool.onCuaStateChanged(s=>window.__cuaAgentStates.push({at:performance.now(),state:s}));
@@ -292,18 +354,14 @@ try {
   const clip = await mcp('addClipToTimeline', { projectId, assetId, durationSeconds: 2 });
   evidence.fixtureClip = clip;
   evidence.fixtureTimeline = await mcp('getProjectTimeline', { projectId });
-  if (process.env.CUA_AGENT_REMAP_SAVE_PROBE === '1') {
-    // Isolated-profile preference fixture only; editor/timeline state is untouched.
-    // Set before the editor mounts and reads its persisted shortcut preferences.
-    await js(`localStorage.setItem('window-loom-editor-shortcuts', JSON.stringify({schemaVersion:1,overrides:{saveTimeline:'ArrowUp'}}))`);
-    evidence.shortcutFixture = { storageKey: 'window-loom-editor-shortcuts', action: 'saveTimeline', key: 'ArrowUp' };
-  }
   await click('.projects-home__project');
   await until('MCP-created timeline clip', () => pointFor('.timeline-clip'));
   if (!await pointFor('[aria-label="Edit Agent prompt"]')) await click('button', 'Assistant');
-  await click('[data-testid="agent-mode-self-window"]');
-  await until('explicit Window CUA mode after cancellation settlement', () => js('document.querySelector("[data-testid=agent-mode-self-window]")?.getAttribute("aria-pressed")==="true"'));
-  if (process.env.CUA_AGENT_DIRTY_READ_PROBE === '1' || process.env.CUA_AGENT_REMAP_SAVE_PROBE === '1') {
+  if (process.env.CUA_AGENT_ORDINARY_SAVE_PROBE !== '1') {
+    await click('[data-testid="agent-mode-self-window"]');
+    await until('explicit Window CUA mode after cancellation settlement', () => js('document.querySelector("[data-testid=agent-mode-self-window]")?.getAttribute("aria-pressed")==="true"'));
+  }
+  if (process.env.CUA_AGENT_DIRTY_READ_PROBE === '1' || process.env.CUA_AGENT_REMAP_SAVE_PROBE === '1' || process.env.CUA_AGENT_ORDINARY_SAVE_PROBE === '1') {
     const before = await liveClip();
     const point = await pointFor('.timeline-clip');
     const zoom = target.webContents.getZoomFactor();
@@ -341,7 +399,28 @@ try {
     assert.fail('CUA_NOT_FOCUSED: actual own OpenScene window/contents lack focus; observed product tool refusal, zero product input, guard remains enabled');
   }
   await until('Frontend safe surface marker', () => js('!!document.querySelector("[data-cua-safe-surface]")'));
-  if (process.env.CUA_AGENT_DIRTY_READ_PROBE === '1') {
+  if (process.env.CUA_AGENT_ORDINARY_SAVE_PROBE === '1') {
+    const state = await bridge('cuaGetState');
+    assert.ok(['idle', 'stopped'].includes(state.phase) && state.cleanupComplete, 'Ordinary Save fixture has no active CUA run');
+    assert.equal(await js('!!document.querySelector(".agent-chat-approval")'), false);
+    assert.equal(evidence.agentRequests.length, 0, 'Independent ordinary fixture submits no agent prompt');
+    const before = await savedPosition(), live = await liveClip(), legacyBefore = evidence.saveRequests.length;
+    await click('[aria-label="Audio 1 lane. Drop assets or clips here."]');
+    await until('ordinary user pointer focus delivery', () => js('!!document.activeElement?.closest("[data-cua-safe-surface]")'));
+    assert.equal(await js('!!document.activeElement?.closest("[data-cua-safe-surface]")'), true, 'Disclosed ordinary-user pointer established safe focus');
+    input({ type: 'keyDown', keyCode: 'Up' });
+    input({ type: 'keyUp', keyCode: 'Up' });
+    await until('ordinary user remapped Save main acknowledgement', () => evidence.saves.some(save => save.ok === true && save.startedAt >= (evidence.saveRequests[legacyBefore]?.at ?? Infinity)));
+    await until('ordinary user remapped Save clears dirty', () => js('document.querySelector("[data-testid=timeline-canvas]")?.dataset.dirty==="false"'));
+    assert.ok(evidence.saveRequests.length > legacyBefore);
+    assert.ok(live.timelineStartMs > before);
+    assert.equal(await savedPosition(), live.timelineStartMs);
+    assert.equal(JSON.parse(readFileSync(join(projectDirectory, 'project.json'), 'utf8')).timeline.tracks.flatMap(track => track.clips)[0].timelineStartMs, live.timelineStartMs);
+    assert.deepEqual(heldInputs(), []);
+    evidence.scenarios.push({ kind: 'ordinary-user-remapped-save', actor: 'harness-ui', actualHumanSelection: false,
+      before, after: live.timelineStartMs, legacySaveRequests: evidence.saveRequests.length - legacyBefore, passed: true });
+    await capture('ordinary-user-remapped-save-settled');
+  } else if (process.env.CUA_AGENT_DIRTY_READ_PROBE === '1') {
     const legacyBefore = evidence.saveRequests.length;
     const liveBefore = await liveClip(), savedBefore = await savedPosition();
     await prompt('dirty-observe');
@@ -354,7 +433,7 @@ try {
     evidence.scenarios.push({ kind: 'dirty-observe-only', legacySaveRequests: 0, live: await liveClip(), savedPosition: savedBefore });
     await capture('dirty-observe-only-settled');
   } else {
-  const scenarios = (process.env.CUA_AGENT_SCENARIOS || (process.env.CUA_AGENT_REMAP_SAVE_PROBE === '1' ? 'remap-deny,remap-cancel,remap-key' : 'deny,stale,duplicate,save-deny,move-save,cancel')).split(',');
+  const scenarios = (process.env.CUA_AGENT_SCENARIOS || (process.env.CUA_AGENT_REMAP_SAVE_PROBE === '1' ? 'remap-deny,remap-cancel,remap-pending-click,remap-key' : 'deny,stale,duplicate,save-deny,move-save,cancel')).split(',');
   for (const kind of scenarios) {
     const before = await savedPosition();
     const liveBefore = await liveClip();
@@ -370,6 +449,62 @@ try {
       assert.equal(evidence.saveRequests.length, legacyBefore, 'Opening a CUA proposal must not perform legacy Save');
       assert.equal(productDowns(), downs);
       const conversation = kind === 'duplicate' ? (await bridge('agentChatHistoryList')).find((entry) => entry.projectId === projectId && entry.title.includes('duplicate')) : null;
+      if (kind === 'remap-pending-click') {
+        const readSafeReturn = async () => ({
+          state: await bridge('cuaGetState'), live: await liveClip(),
+          dom: await js(`(() => {const active=document.activeElement;return {
+            activeTag:active?.tagName,safeFocus:!!active?.closest('[data-cua-safe-surface]'),
+            dirty:document.querySelector('[data-testid=timeline-canvas]')?.dataset.dirty,
+            approval:document.querySelector('.agent-chat-approval')?.textContent??null};})()`),
+          inputCount: evidence.inputs.length, productDowns: productDowns()
+        });
+        const beforeReturn = await readSafeReturn();
+        // Explicit harness-user pointer action, not an agent action or a human
+        // window selection. It receives no permit and cannot rebind a frame.
+        await click('.timeline-clip');
+        const afterReturn = await readSafeReturn();
+        evidence.scenarios.push({ kind: 'explicit-harness-user-safe-return', actor: 'harness-ui',
+          actualHumanSelection: false, before: beforeReturn, after: afterReturn });
+        await capture('remap-pending-click-user-cancellation');
+        assert.equal(afterReturn.live.timelineStartMs, beforeReturn.live.timelineStartMs, 'Safe return must not mutate content');
+        assert.equal(afterReturn.dom.dirty, beforeReturn.dom.dirty);
+        assert.equal(afterReturn.productDowns, beforeReturn.productDowns, 'Safe return is not guarded product input');
+        const stopped = await until('pending external user click cancels and releases', async () => {
+          const state = await bridge('cuaGetState');
+          return state.phase === 'stopped' && state.cleanupComplete ? state : null;
+        });
+        assert.equal(stopped.error, 'user-input');
+        assert.deepEqual(heldInputs(), []);
+        assert.equal(await savedPosition(), before, 'Pending user click cancellation never publishes');
+        assert.equal(evidence.saveRequests.length, legacyBefore);
+        assert.equal(evidence.inputs.filter(event => event.source === 'product' && event.type === 'keyDown').length, 0);
+        assert.equal(afterReturn.state.sessionId, beforeReturn.state.sessionId);
+        assert.equal(afterReturn.state.runId, beforeReturn.state.runId);
+        assert.equal(afterReturn.dom.approval, beforeReturn.dom.approval, 'Never reuse a replaced approval');
+        evidence.scenarios.push({ kind, before, after: await savedPosition(), passed: true, held: heldInputs(),
+          negativeOnly: true, actualHumanSelection: false, stopped });
+        await capture('remap-pending-click-cancelled');
+        await click('[aria-label="Reset conversation"]');
+        continue; // Never approve, retry or rebind the cancelled request.
+      }
+      if (kind === 'remap-key') {
+        const pointerApproval = [...evidence.agentRequests].reverse().find(record => record.response?.pendingApproval?.toolName === 'executeCuaAction')?.response.pendingApproval;
+        assert.equal(pointerApproval?.cuaApproval?.actionKind, 'click');
+        evidence.scenarios.push({ kind: 'disclosed-separate-pointer-approval', actor: 'harness-ui', actualHumanSelection: false, approval: pointerApproval });
+        await click('.agent-chat-approval button', 'Run once');
+        await until('new separately approved key after pointer settlement and observation', () => js('document.querySelector(".agent-chat-approval")?.textContent.includes("Press ArrowUp")'));
+        const state = await bridge('cuaGetState');
+        assert.equal(state.phase, 'ready');
+        assert.equal(state.lastDispatchReceipt?.actionKind, 'click');
+        assert.equal(state.lastDispatchReceipt?.rendererSettlement, 'acknowledged');
+        assert.equal(state.cleanupComplete, true);
+        assert.equal(await js('!!document.activeElement?.closest("[data-cua-safe-surface]")'), true, 'Separate pointer action established focus without user input during key approval');
+        const keyApproval = [...evidence.agentRequests].reverse().find(record => record.response?.pendingApproval?.toolName === 'executeCuaAction')?.response.pendingApproval;
+        assert.equal(keyApproval?.cuaApproval?.actionKind, 'key');
+        assert.notEqual(keyApproval?.args?.frameId, pointerApproval?.args?.frameId, 'Key binds a fresh post-pointer observation');
+        evidence.scenarios.push({ kind: 'disclosed-separate-key-approval', actor: 'harness-ui', actualHumanSelection: false, approval: keyApproval, pointerReceipt: state.lastDispatchReceipt });
+        await capture('remap-key-separate-key-pending');
+      }
       if (kind === 'remap-cancel') await click('[data-testid="cua-stop-btn"]');
       else await click('.agent-chat-approval button', ['deny', 'remap-deny'].includes(kind) ? 'Deny' : 'Run once');
       if (kind === 'duplicate') {
@@ -421,6 +556,7 @@ try {
       assert.equal(await js('document.querySelector("[data-testid=timeline-canvas]")?.dataset.dirty'), 'true');
       evidence.scenarios.push({ kind: 'explicit-save-denied', live: liveAfter, saved: before, legacySaveRequests: evidence.saveRequests.length - legacyBefore });
       const undo = Menu.getApplicationMenu()?.getMenuItemById('timeline:undo');
+      await nativeMenuReady('undo');
       assert.ok(undo?.enabled); undo.click(undefined, target, undefined);
       await until('user-role cleanup Undo after denied Save', async () => (await liveClip()).timelineStartMs === before);
     } else if (kind.startsWith('remap-')) {
@@ -428,7 +564,17 @@ try {
       assert.equal(await savedPosition(), before, 'Remapped CUA key must not publish');
       const keyDowns = evidence.inputs.filter(event => event.source === 'product' && event.type === 'keyDown' && event.keyCode === 'Up');
       evidence.scenarios.push({ kind: 'remap-save-boundary', scenario: kind, productArrowUpDowns: keyDowns.length, legacySaveRequests: 0 });
-      if (kind === 'remap-key') assert.ok(keyDowns.length > 0, 'Focus/safety refusal is not proof of safe dispatched key semantics');
+      if (kind === 'remap-key') {
+        assert.ok(keyDowns.length > 0, 'Focus/safety refusal is not proof of safe dispatched key semantics');
+        const state = await bridge('cuaGetState');
+        assert.equal(state.lastDispatchReceipt?.actionKind, 'key');
+        assert.equal(state.lastDispatchReceipt?.dispatch, 'full-dispatch');
+        assert.equal(state.lastDispatchReceipt?.rendererSettlement, 'acknowledged');
+        assert.equal(state.cleanupComplete, true);
+        assert.deepEqual(state.releaseFailures, []);
+        assert.equal(liveAfter.timelineStartMs, liveBefore.timelineStartMs, 'Fixed ArrowUp semantics never publishes or moves the clip');
+        evidence.scenarios.push({ kind: 'positive-key-terminal-receipt', receipt: state.lastDispatchReceipt });
+      }
       else assert.equal(keyDowns.length, 0, 'Denied/cancelled key must dispatch zero inputs');
       assert.deepEqual(heldInputs(), []);
     } else await saveThroughUi();
@@ -442,10 +588,13 @@ try {
       evidence.scenarios.push({ kind: 'user-role-native-key-undo', key: `${modifier}+z`, live: await liveClip(),
         savedBeforeUndoSave: await savedPosition(), productionCuaKeyValidated: false });
       const redo = Menu.getApplicationMenu()?.getMenuItemById('timeline:redo');
+      await nativeMenuReady('redo');
       assert.ok(redo?.enabled, 'The single live edit can be redone through the actual app menu');
+      const beforeRedoReport = evidence.menuReports.length;
       redo.click(undefined, target, undefined);
       await until('app menu Redo restores the moved live clip', async () => (await liveClip()).timelineStartMs === after);
       const undo = Menu.getApplicationMenu()?.getMenuItemById('timeline:undo');
+      await nativeMenuReady('undo', beforeRedoReport);
       assert.ok(undo?.enabled, 'Actual app Undo menu is enabled');
       evidence.scenarios.push({ kind: 'ui-undo-menu', menuId: undo.id, at: performance.now() });
       undo.click(undefined, target, undefined);
@@ -462,17 +611,6 @@ try {
     // Actual reset waits driver release and removes the old run/checkpoint.
     await click('[aria-label="Reset conversation"]');
   }
-  }
-  if (process.env.CUA_AGENT_REMAP_SAVE_PROBE === '1') {
-    const legacyBefore = evidence.saveRequests.length;
-    await click('.timeline-clip');
-    input({ type: 'keyDown', keyCode: 'Up' });
-    input({ type: 'keyUp', keyCode: 'Up' });
-    await until('ordinary user remapped Save main acknowledgement', () => evidence.saves.some(save => save.ok === true && save.startedAt >= (evidence.saveRequests[legacyBefore]?.at ?? Infinity)));
-    await until('ordinary user remapped Save clears dirty', () => js('document.querySelector("[data-testid=timeline-canvas]")?.dataset.dirty==="false"'));
-    assert.ok(evidence.saveRequests.length > legacyBefore, 'Normal user remapped shortcut remains functional');
-    assert.equal(await savedPosition(), (await liveClip()).timelineStartMs);
-    evidence.scenarios.push({ kind: 'ordinary-user-remapped-save', legacySaveRequests: evidence.saveRequests.length - legacyBefore });
   }
   evidence.states = await js('window.__cuaAgentStates');
   evidence.domEvents = await js('window.__cuaAgentEvents');

@@ -26,6 +26,12 @@ function fixture() {
       expect(blocked).toBe(false);
       authority.consume(request, permit);
       inputs++;
+      state = { ...state, lastDispatchReceipt: { actionId: `action-${inputs}`, actionKind: request.action.kind,
+        sessionId: request.sessionId, runId: request.runId, windowId: request.windowId, frameId: request.frameId,
+        layoutRevision: request.layoutRevision, contentRevision: request.contentRevision, generation: 1,
+        dispatch: 'full-dispatch', expectedEvents: 2, attemptedEvents: 2, returnedEvents: 2, dispatchUncertain: false,
+        release: { attemptedEvents: 1, returnedEvents: 1, heldInputCount: 0, failures: [] },
+        rendererSettlement: 'acknowledged', observationReady: true } };
       return state;
     },
     getState: () => state,

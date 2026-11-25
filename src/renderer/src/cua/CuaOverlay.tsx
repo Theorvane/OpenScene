@@ -52,12 +52,17 @@ export function CuaOverlay({ state, stopPending, stopError, agentBusy = false, o
   const isStoppingDisplay = stopPending || state.phase === 'stopping';
   const isCleanupFailed = state.phase === 'cleanup-failed';
   const canClickStop = agentBusy || isCuaStoppablePhase(state.phase);
+  // Keep cua-stop-btn enabled while agentBusy/pendingApproval is still active even
+  // if main-process CuaDriver transitions phase ready -> stopping -> stopped on
+  // mouseDown before mouseUp/click fires, so onStop -> agent-chat:cancel still runs.
+  const stopButtonBusy = stopPending || (state.phase === 'stopping' && !agentBusy);
+  const stopButtonDisabled = !isActive || !canClickStop || stopButtonBusy;
   const showHudBanner = state.phase !== 'idle' || stopPending;
-  const stopButtonLabel = isStoppingDisplay
+  const stopButtonLabel = stopButtonBusy
     ? 'Stopping…'
-    : isCleanupFailed
+    : isCleanupFailed && !agentBusy
       ? 'Locked'
-      : state.phase === 'stopped' && state.cleanupComplete
+      : state.phase === 'stopped' && state.cleanupComplete && !agentBusy
         ? 'Stopped'
         : 'Stop (Esc)';
   const cleanupStatus = getCuaCleanupStatusText(state, stopPending);
@@ -167,9 +172,9 @@ export function CuaOverlay({ state, stopPending, stopError, agentBusy = false, o
         data-cua-protected-id="cua-stop-btn"
         aria-label="Stop CUA control"
         aria-hidden={isActive ? undefined : true}
-        aria-busy={isStoppingDisplay}
+        aria-busy={stopButtonBusy}
         tabIndex={isActive ? 0 : -1}
-        disabled={!isActive || isStoppingDisplay || !canClickStop}
+        disabled={stopButtonDisabled}
         onClick={onStop}
       >
         {stopButtonLabel}
