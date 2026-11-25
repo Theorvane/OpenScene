@@ -45,6 +45,8 @@ export function ProjectSettingsDialog({ project, summary, isBusy, onRename, onRe
       <div
         ref={dialogRef}
         className="project-settings"
+        data-cua-protected="modal"
+        data-cua-protected-id="project-settings-dialog"
         role="dialog"
         aria-modal="true"
         aria-labelledby="project-settings-title"

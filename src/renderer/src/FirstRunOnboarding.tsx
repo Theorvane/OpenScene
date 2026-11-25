@@ -65,7 +65,16 @@ export function FirstRunOnboarding({ onComplete }: FirstRunOnboardingProps): Rea
   }, []);
 
   return (
-    <div className="first-run-onboarding" aria-labelledby="first-run-onboarding-title" role="dialog" aria-modal="true" ref={dialogRef} tabIndex={-1}>
+    <div
+      className="first-run-onboarding"
+      data-cua-protected="modal"
+      data-cua-protected-id="first-run-onboarding"
+      aria-labelledby="first-run-onboarding-title"
+      role="dialog"
+      aria-modal="true"
+      ref={dialogRef}
+      tabIndex={-1}
+    >
       <div className="first-run-onboarding__scrim" aria-hidden="true" />
       <section className="first-run-onboarding__panel">
         <header className="first-run-onboarding__header">

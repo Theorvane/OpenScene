@@ -147,7 +147,8 @@ export async function writeProjectSnapshot(rootDirectory: string, snapshot: Loca
 export async function writeProjectSnapshotAtDirectory(
   projectDirectoryPath: string,
   snapshot: LocalProjectSnapshot,
-  publication: 'replace' | 'create' = 'replace'
+  publication: 'replace' | 'create' = 'replace',
+  beforePublish?: () => void
 ): Promise<void> {
   const directory = resolve(projectDirectoryPath);
   const projectFile = join(directory, PROJECT_FILE_NAME);
@@ -184,6 +185,10 @@ export async function writeProjectSnapshotAtDirectory(
     ) {
       throw new ProjectStoreError('Project snapshot changed before it could be published.');
     }
+    // Trusted main-only authority boundary. All async staging and identity
+    // checks have completed; nothing may await between this guard and publish.
+    const guardResult: unknown = beforePublish?.();
+    if (guardResult !== undefined) throw new ProjectStoreError('Project publication guard must be synchronous and return no value.');
     if (publication === 'create') {
       // A same-directory hard link publishes complete bytes without replacing
       // any existing entry (including a dangling symlink). Never fall back to

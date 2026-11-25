@@ -1,4 +1,4 @@
-import type { IpcMain } from 'electron';
+import type { IpcMain, IpcMainInvokeEvent } from 'electron';
 
 import type { AgentChatHistoryGetInput, AgentChatTurnState } from '../shared/agentChat';
 import { IPC_CHANNELS } from '../shared/ipc';
@@ -9,7 +9,11 @@ import type { AgentChatSessionManager } from './agentChatSession';
 export function registerAgentChatIpcHandlers(
   ipcMain: IpcMain,
   sessions: AgentChatSessionManager,
-  history: AgentChatHistoryStore | null = null
+  history: AgentChatHistoryStore | null = null,
+  options: {
+    readonly cancelChannel?: string;
+    readonly isTrustedSender?: (event: IpcMainInvokeEvent) => boolean;
+  } = {}
 ): void {
   const recordTurn = async (turn: AgentChatTurnState): Promise<void> => {
     if (history === null || turn.messages.length === 0) return;
@@ -27,6 +31,7 @@ export function registerAgentChatIpcHandlers(
   };
 
   ipcMain.handle(IPC_CHANNELS.agentChatSend, async (_event, request) => {
+    if (options.isTrustedSender && !options.isTrustedSender(_event)) return fail('INVALID_INPUT', 'Untrusted agent chat sender');
     try {
       const turn = await sessions.sendMessage(request);
       await recordTurn(turn);
@@ -37,6 +42,7 @@ export function registerAgentChatIpcHandlers(
   });
 
   ipcMain.handle(IPC_CHANNELS.agentChatApprove, async (_event, request) => {
+    if (options.isTrustedSender && !options.isTrustedSender(_event)) return fail('INVALID_INPUT', 'Untrusted approval sender');
     try {
       const turn = await sessions.respondToApproval(request);
       await recordTurn(turn);
@@ -46,7 +52,19 @@ export function registerAgentChatIpcHandlers(
     }
   });
 
+  if (options.cancelChannel) ipcMain.handle(options.cancelChannel, async (event, request) => {
+    if (!options.isTrustedSender?.(event)) return fail('INVALID_INPUT', 'Untrusted cancellation sender');
+    if (!request || typeof request.conversationId !== 'string' || !request.conversationId.trim()
+      || request.conversationId.length > 256) return fail('INVALID_INPUT', 'Invalid cancellation conversation');
+    try {
+      return ok(await sessions.cancelConversation({ conversationId: request.conversationId }));
+    } catch (error) {
+      return fail('UNKNOWN_ERROR', error instanceof Error ? error.message : 'Failed to settle agent cancellation');
+    }
+  });
+
   ipcMain.handle(IPC_CHANNELS.agentChatCompact, async (_event, request) => {
+    if (options.isTrustedSender && !options.isTrustedSender(_event)) return fail('INVALID_INPUT', 'Untrusted agent chat sender');
     try {
       const turn = await sessions.compactConversation(request);
       await recordTurn(turn);
@@ -57,6 +75,7 @@ export function registerAgentChatIpcHandlers(
   });
 
   ipcMain.handle(IPC_CHANNELS.agentChatReset, async (_event, request) => {
+    if (options.isTrustedSender && !options.isTrustedSender(_event)) return fail('INVALID_INPUT', 'Untrusted agent chat sender');
     try {
       return ok(await sessions.resetConversation(request));
     } catch (err) {
@@ -74,6 +93,7 @@ export function registerAgentChatIpcHandlers(
   });
 
   ipcMain.handle(IPC_CHANNELS.agentChatHistoryDelete, async (_event, request) => {
+    if (options.isTrustedSender && !options.isTrustedSender(_event)) return fail('INVALID_INPUT', 'Untrusted agent chat sender');
     if (history === null) return ok(false);
     const input = request as Partial<AgentChatHistoryGetInput> | undefined;
     if (typeof input?.projectId !== 'string' || typeof input.conversationId !== 'string') {
