@@ -1,7 +1,10 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
+import type { CuaActionSettlementAck, CuaActionSettlementTag, CuaCancelAck, CuaPrepareAck, CuaState, CuaStopResult, CuaSurfaceSnapshot } from '../shared/cua';
+import type { CuaSaveCommitAck, CuaSaveReadyAck, CuaSaveReadyRequest, CuaSaveResult, CuaSaveSnapshotReport, CuaSaveSnapshotRequest } from '../shared/cuaSave';
 
 import type {
   AgentChatApprovalInput,
+  AgentChatCancelInput,
   AgentChatCompactInput,
   AgentChatHistoryEntry,
   AgentChatHistoryGetInput,
@@ -66,6 +69,19 @@ type AssetPlaybackUrl = {
 };
 
 export interface VideoToolApi extends JevCredentialApi, JevConfigApi {
+  onCuaSaveSnapshotRequested(listener: (request: CuaSaveSnapshotRequest) => void): () => void;
+  cuaReportSaveSnapshot(report: CuaSaveSnapshotReport): Promise<ApiResponse<{ accepted: boolean }>>;
+  onCuaSaveRequested(listener: (request: CuaSaveReadyRequest) => void): () => void;
+  cuaAckSaveReady(ack: CuaSaveReadyAck): Promise<ApiResponse<{ accepted: boolean }>>;
+  onCuaSaveFinished(listener: (result: CuaSaveResult) => void): () => void;
+  cuaAckSaveCommit(ack: CuaSaveCommitAck): Promise<ApiResponse<{ accepted: boolean }>>;
+  cuaAckCancel(ack: CuaCancelAck): Promise<ApiResponse<{ accepted: boolean }>>;
+  cuaAckActionSettlement(ack: CuaActionSettlementAck): Promise<ApiResponse<{ accepted: boolean }>>;
+  cuaAckPrepare(ack: CuaPrepareAck): Promise<ApiResponse<{ accepted: boolean }>>;
+  cuaGetState(): Promise<ApiResponse<CuaState>>;
+  cuaStop(): Promise<ApiResponse<CuaStopResult>>;
+  cuaReportSurfaceSnapshot(snapshot: CuaSurfaceSnapshot, settlement?: CuaActionSettlementTag): Promise<ApiResponse<{ accepted: boolean }>>;
+  onCuaStateChanged(listener: (state: CuaState) => void): () => void;
   shortsStart(input: ShortsStartInput): Promise<ApiResponse<ShortsJob>>;
   shortsGet(input: ShortsJobInput): Promise<ApiResponse<ShortsJob>>;
   shortsList(input: ShortsListInput): Promise<ApiResponse<readonly ShortsJob[]>>;
@@ -128,6 +144,7 @@ export interface VideoToolApi extends JevCredentialApi, JevConfigApi {
   mcpGetTools(): Promise<ApiResponse<unknown>>;
   mcpExecuteTool(toolName: string, params: unknown): Promise<ApiResponse<unknown>>;
   agentChatSend(input: AgentChatSendInput): Promise<ApiResponse<AgentChatTurnState>>;
+  agentChatCancel(input: AgentChatCancelInput): Promise<ApiResponse<AgentChatTurnState>>;
   agentChatApprove(input: AgentChatApprovalInput): Promise<ApiResponse<AgentChatTurnState>>;
   agentChatReset(input: AgentChatResetInput): Promise<ApiResponse<AgentChatTurnState>>;
   agentChatCompact(input: AgentChatCompactInput): Promise<ApiResponse<AgentChatTurnState>>;
@@ -155,6 +172,35 @@ function parseUpdaterSnapshot(payload: unknown): UpdaterSnapshot | null {
 }
 
 const videoTool: VideoToolApi = {
+  onCuaSaveSnapshotRequested: listener => {
+    const subscription = (_event: IpcRendererEvent, request: CuaSaveSnapshotRequest): void => listener(request);
+    ipcRenderer.on(IPC_CHANNELS.cuaSaveSnapshotRequested, subscription);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.cuaSaveSnapshotRequested, subscription);
+  },
+  cuaReportSaveSnapshot: report => ipcRenderer.invoke(IPC_CHANNELS.cuaReportSaveSnapshot, report) as Promise<ApiResponse<{ accepted: boolean }>>,
+  onCuaSaveRequested: listener => {
+    const subscription = (_event: IpcRendererEvent, request: CuaSaveReadyRequest): void => listener(request);
+    ipcRenderer.on(IPC_CHANNELS.cuaSaveRequested, subscription);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.cuaSaveRequested, subscription);
+  },
+  cuaAckSaveReady: ack => ipcRenderer.invoke(IPC_CHANNELS.cuaAckSaveReady, ack) as Promise<ApiResponse<{ accepted: boolean }>>,
+  onCuaSaveFinished: listener => {
+    const subscription = (_event: IpcRendererEvent, result: CuaSaveResult): void => listener(result);
+    ipcRenderer.on(IPC_CHANNELS.cuaSaveFinished, subscription);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.cuaSaveFinished, subscription);
+  },
+  cuaAckSaveCommit: ack => ipcRenderer.invoke(IPC_CHANNELS.cuaAckSaveCommit, ack) as Promise<ApiResponse<{ accepted: boolean }>>,
+  cuaAckCancel: ack => ipcRenderer.invoke(IPC_CHANNELS.cuaAckCancel, ack) as Promise<ApiResponse<{ accepted: boolean }>>,
+  cuaAckActionSettlement: ack => ipcRenderer.invoke(IPC_CHANNELS.cuaAckActionSettlement, ack) as Promise<ApiResponse<{ accepted: boolean }>>,
+  cuaAckPrepare: ack => ipcRenderer.invoke(IPC_CHANNELS.cuaAckPrepare, ack) as Promise<ApiResponse<{ accepted: boolean }>>,
+  cuaGetState: () => ipcRenderer.invoke(IPC_CHANNELS.cuaGetState) as Promise<ApiResponse<CuaState>>,
+  cuaStop: () => ipcRenderer.invoke(IPC_CHANNELS.cuaStop) as Promise<ApiResponse<CuaStopResult>>,
+  cuaReportSurfaceSnapshot: (snapshot, settlement) => ipcRenderer.invoke(IPC_CHANNELS.cuaReportSurfaceSnapshot, snapshot, settlement) as Promise<ApiResponse<{ accepted: boolean }>>,
+  onCuaStateChanged: listener => {
+    const subscription = (_event: IpcRendererEvent, state: CuaState): void => listener(state);
+    ipcRenderer.on(IPC_CHANNELS.cuaStateChanged, subscription);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.cuaStateChanged, subscription);
+  },
   getJevConfig: () => ipcRenderer.invoke(JEV_CONFIG_CHANNELS.get),
   setJevConfig: (config) => ipcRenderer.invoke(JEV_CONFIG_CHANNELS.set, config),
   getJevCredentialStatus: () => ipcRenderer.invoke(JEV_CREDENTIAL_CHANNELS.status),
@@ -253,6 +299,7 @@ const videoTool: VideoToolApi = {
   mcpExecuteTool: (toolName: string, params: unknown) =>
     ipcRenderer.invoke(IPC_CHANNELS.mcpExecuteTool, toolName, params) as Promise<ApiResponse<unknown>>,
   agentChatSend: (input) => ipcRenderer.invoke(IPC_CHANNELS.agentChatSend, input) as Promise<ApiResponse<AgentChatTurnState>>,
+  agentChatCancel: input => ipcRenderer.invoke(IPC_CHANNELS.agentChatCancel, input) as Promise<ApiResponse<AgentChatTurnState>>,
   agentChatApprove: (input) =>
     ipcRenderer.invoke(IPC_CHANNELS.agentChatApprove, input) as Promise<ApiResponse<AgentChatTurnState>>,
   agentChatReset: (input) => ipcRenderer.invoke(IPC_CHANNELS.agentChatReset, input) as Promise<ApiResponse<AgentChatTurnState>>,

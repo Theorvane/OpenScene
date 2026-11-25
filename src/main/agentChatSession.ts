@@ -5,10 +5,13 @@ import type { MemorySaver } from '@langchain/langgraph-checkpoint';
 import type { BaseMessage } from '@langchain/core/messages';
 import type {
   AgentChatApprovalInput,
+  AgentChatInteractionMode,
+  AgentChatCancelInput,
   AgentChatDisplayMessage,
   AgentChatResetInput,
   AgentChatSendInput,
   AgentChatTurnState,
+  CuaAgentActionResult,
   AgentToolCallProposal
 } from '../shared/agentChat';
 import type { EditAgentContextAsset, EditAgentProjectContext } from '../shared/editAgentContext';
@@ -16,8 +19,11 @@ import { getDomainModel } from '../shared/aiDomainModels';
 import { buildContextUsage, type TurnTokenUsage } from '../shared/agentChatUsage';
 import type { OpenAiAuthMode, ReasoningEffort } from '../shared/openAiAuth';
 import { isAiLike, isHumanMessage, isSystemMessage, isToolMessage, type AgentChatGraphBundle } from './agentChatGraph';
+import { CuaApprovalError } from './cuaAgentOrchestration';
+import type { CuaSaveResult } from '../shared/cuaSave';
 
 interface ConversationConfig {
+  readonly interactionMode: AgentChatInteractionMode;
   readonly modelId: string;
   readonly openAiAuthMode: OpenAiAuthMode | undefined;
   readonly reasoningEffort: ReasoningEffort | undefined;
@@ -31,15 +37,55 @@ export class AgentChatSessionManager {
   private readonly checkpointer: MemorySaver;
   private readonly createModel: AgentChatGraphBundle['createModel'];
   private readonly conversationConfigs = new Map<string, ConversationConfig>();
+  private readonly activeTurns = new Map<string, { controller: AbortController; settled: Promise<void>; initialSaveToken: string | undefined }>();
+  private readonly cancellations = new Map<string, Promise<AgentChatTurnState>>();
+  private readonly actionSaveBaselines = new Map<string, { actionId: string; saveToken: string | undefined; receipt: CuaAgentActionResult['receipt'] }>();
+  private readonly getActionResult: (conversationId: string) => CuaAgentActionResult | null;
+  private readonly cleanupLocked = new Set<string>();
 
-  constructor(bundle: AgentChatGraphBundle) {
+  constructor(bundle: AgentChatGraphBundle, private readonly lifecycle: {
+    readonly cancelCua?: (conversationId: string) => Promise<void>;
+    readonly getActionResult?: (conversationId: string) => CuaAgentActionResult | null;
+    readonly getSaveResult?: (conversationId: string) => CuaSaveResult | null;
+  } = {}) {
+    const readActionResult = lifecycle.getActionResult ?? bundle.getActionResult;
+    this.getActionResult = id => {
+      const result = readActionResult(id);
+      if (result && (result.receipt.attemptedEvents > 0 || result.receipt.dispatchUncertain)
+        && this.actionSaveBaselines.get(id)?.actionId !== result.receipt.actionId) {
+        if (this.actionSaveBaselines.size >= 100) this.actionSaveBaselines.delete(this.actionSaveBaselines.keys().next().value!);
+        const turn = this.activeTurns.get(id);
+        this.actionSaveBaselines.set(id, { actionId: result.receipt.actionId, receipt: structuredClone(result.receipt),
+          saveToken: turn ? turn.initialSaveToken : lifecycle.getSaveResult?.(id)?.saveToken });
+      }
+      return result;
+    };
     this.graph = bundle.graph;
     this.checkpointer = bundle.checkpointer;
     this.createModel = bundle.createModel;
   }
 
   async sendMessage(input: AgentChatSendInput): Promise<AgentChatTurnState> {
+    return this.runExclusive(input.conversationId, () => this.sendMessageUnchecked(input));
+  }
+
+  private async sendMessageUnchecked(input: AgentChatSendInput): Promise<AgentChatTurnState> {
+    const mode = input.interactionMode ?? 'project-tools';
+    const previous = this.conversationConfigs.get(input.conversationId);
+    const existing = await this.graph.getState(this.runnableConfig(input.conversationId)).catch(() => null);
+    const pending = existing ? findPendingProposal(existing) : null;
+    if (pending) return { conversationId: input.conversationId,
+      messages: toDisplayMessages((existing!.values as { messages?: BaseMessage[] }).messages ?? []),
+      pendingApproval: pending, status: 'awaiting-approval', error: 'Respond to the current approval or cancel it before sending another request.' };
+    if ((mode !== 'project-tools' && mode !== 'self-window') || (previous && previous.interactionMode !== mode)) {
+      return this.errorState(input.conversationId, new CuaApprovalError('CUA_MODE_CHANGED'));
+    }
+    if (mode === 'self-window' && previous?.activeProject?.projectId
+      && previous.activeProject.projectId !== input.activeProject?.projectId) {
+      return this.errorState(input.conversationId, new CuaApprovalError('CUA_SCOPE_CHANGED'));
+    }
     this.conversationConfigs.set(input.conversationId, {
+      interactionMode: mode,
       modelId: input.modelId,
       openAiAuthMode: input.openAiAuthMode,
       reasoningEffort: input.reasoningEffort,
@@ -52,7 +98,7 @@ export class AgentChatSessionManager {
     try {
       const seed = await this.restoredSeed(input);
       const result = await this.graph.invoke(
-        { messages: [...seed, new HumanMessage(input.text)] },
+        { messages: [...seed, new HumanMessage(input.text)], selfWindowUnsaved: mode === 'self-window' && (input.hasUnsavedTimeline !== false || this.hasUnverifiedAction(input.conversationId)), lastPolicyError: null },
         this.runnableConfig(input.conversationId)
       );
       return await this.toTurnState(input.conversationId, result);
@@ -87,6 +133,10 @@ export class AgentChatSessionManager {
   }
 
   async respondToApproval(input: AgentChatApprovalInput): Promise<AgentChatTurnState> {
+    return this.runExclusive(input.conversationId, () => this.respondToApprovalUnchecked(input));
+  }
+
+  private async respondToApprovalUnchecked(input: AgentChatApprovalInput): Promise<AgentChatTurnState> {
     const config = this.runnableConfig(input.conversationId);
 
     try {
@@ -121,6 +171,10 @@ export class AgentChatSessionManager {
    * summary replaces the old history, the recent tail stays verbatim.
    */
   async compactConversation(input: AgentChatCompactInput): Promise<AgentChatTurnState> {
+    return this.runExclusive(input.conversationId, () => this.compactConversationUnchecked(input));
+  }
+
+  private async compactConversationUnchecked(input: AgentChatCompactInput): Promise<AgentChatTurnState> {
     const config = this.runnableConfig(input.conversationId);
     const stored = this.conversationConfigs.get(input.conversationId);
     if (stored === undefined) {
@@ -130,6 +184,9 @@ export class AgentChatSessionManager {
     try {
       const snapshot = await this.graph.getState(config);
       const messages = ((snapshot.values as { messages?: BaseMessage[] } | undefined)?.messages ?? []) as BaseMessage[];
+      const pendingApproval = findPendingProposal(snapshot);
+      if (pendingApproval) return { conversationId: input.conversationId, messages: toDisplayMessages(messages),
+        pendingApproval, status: 'awaiting-approval', error: 'Respond to the current approval or cancel it before compacting.' };
       const conversation = messages.filter((message) => !isSystemMessage(message));
       if (conversation.length <= COMPACTION_KEEP_RECENT) {
         return this.errorState(input.conversationId, new Error('This conversation is too short to compact.'));
@@ -143,7 +200,8 @@ export class AgentChatSessionManager {
         modelId: stored.modelId,
         openAiAuthMode: stored.openAiAuthMode,
         reasoningEffort: stored.reasoningEffort,
-        ollamaBaseUrl: stored.ollamaBaseUrl
+        ollamaBaseUrl: stored.ollamaBaseUrl,
+        interactionMode: stored.interactionMode
       });
       const summaryReply = await model.invoke([
         new HumanMessage(`${COMPACTION_PROMPT}\n\n<conversation>\n${transcriptForSummary(older)}\n</conversation>`)
@@ -157,7 +215,7 @@ export class AgentChatSessionManager {
       // with the summary followed by the untouched recent tail.
       await this.checkpointer.deleteThread(input.conversationId);
       const seeded = [new HumanMessage(`${COMPACTION_SUMMARY_PREFIX}\n\n${summary}`), ...recent];
-      await this.graph.updateState(config, { messages: seeded });
+      await this.graph.updateState(config, { messages: seeded, selfWindowUnsaved: stored.interactionMode === 'self-window', lastPolicyError: null });
 
       const state = await this.graph.getState(config);
       const compacted = ((state.values as { messages?: BaseMessage[] } | undefined)?.messages ?? []) as BaseMessage[];
@@ -173,16 +231,117 @@ export class AgentChatSessionManager {
   }
 
   async resetConversation(input: AgentChatResetInput): Promise<AgentChatTurnState> {
+    const cancelled = await this.cancelConversation(input);
+    if (cancelled.errorCode === 'CUA_CLEANUP_FAILED') return cancelled;
     this.conversationConfigs.delete(input.conversationId);
     await this.checkpointer.deleteThread(input.conversationId);
-    return { conversationId: input.conversationId, messages: [], pendingApproval: null, status: 'idle' };
+    return this.withActionOutcome({ conversationId: input.conversationId, messages: [], pendingApproval: null, status: 'idle' });
   }
 
-  private runnableConfig(conversationId: string): { configurable: Record<string, string | undefined> } {
+  /** Driver callbacks use this synchronous method; it never re-enters cancel. */
+  abortConversation(conversationId: string): void {
+    this.activeTurns.get(conversationId)?.controller.abort();
+  }
+
+  cancelConversation(input: AgentChatCancelInput): Promise<AgentChatTurnState> {
+    const existing = this.cancellations.get(input.conversationId);
+    if (existing) return existing;
+    this.abortConversation(input.conversationId);
+    // Install the promise before invoking the driver, whose callback may abort
+    // this conversation synchronously. Never remove a running checkpoint.
+    const cancellation = Promise.resolve().then(async () => {
+      try {
+        await this.lifecycle.cancelCua?.(input.conversationId);
+      } catch (error) {
+        this.cleanupLocked.add(input.conversationId);
+        await this.activeTurns.get(input.conversationId)?.settled;
+        return { ...await this.errorState(input.conversationId, error), errorCode: 'CUA_CLEANUP_FAILED' as const };
+      }
+      await this.activeTurns.get(input.conversationId)?.settled;
+      const previous = await this.errorState(input.conversationId, new Error('CUA_CANCELLED'));
+      await this.checkpointer.deleteThread(input.conversationId);
+      return this.withActionOutcome(this.withSaveOutcome({ ...previous, status: 'idle', error: undefined, errorCode: undefined }, undefined, true));
+    }).finally(() => { this.cancellations.delete(input.conversationId); });
+    this.cancellations.set(input.conversationId, cancellation);
+    return cancellation;
+  }
+
+  private async runExclusive(conversationId: string, run: () => Promise<AgentChatTurnState>): Promise<AgentChatTurnState> {
+    if (this.cleanupLocked.has(conversationId)) return {
+      ...await this.errorState(conversationId, new Error('CUA_CLEANUP_FAILED')), errorCode: 'CUA_CLEANUP_FAILED'
+    };
+    if (this.activeTurns.has(conversationId) || this.cancellations.has(conversationId)) {
+      return { ...await this.errorState(conversationId, new Error('CUA_BUSY')), errorCode: 'CUA_BUSY' };
+    }
+    const controller = new AbortController();
+    const previousSaveToken = this.lifecycle.getSaveResult?.(conversationId)?.saveToken;
+    let settle!: () => void;
+    const settled = new Promise<void>((resolve) => { settle = resolve; });
+    this.activeTurns.set(conversationId, { controller, settled, initialSaveToken: previousSaveToken });
+    try {
+      const result = await run();
+      // LangGraph may reject on AbortSignal before an invoked tool's promise
+      // settles. Driver-originated Stop must obey the same physical-release
+      // boundary as explicit cancel IPC; never return a terminal turn early.
+      if (controller.signal.aborted) {
+        try { await this.lifecycle.cancelCua?.(conversationId); }
+        catch (error) {
+          this.cleanupLocked.add(conversationId);
+          return { ...await this.errorState(conversationId, error), errorCode: 'CUA_CLEANUP_FAILED' };
+        }
+      }
+      return this.withActionOutcome(this.withSaveOutcome(result, previousSaveToken, controller.signal.aborted));
+    }
+    finally { this.activeTurns.delete(conversationId); settle(); }
+  }
+
+  private hasUnverifiedAction(conversationId: string): boolean {
+    this.getActionResult(conversationId); // Refresh facts without treating a new/no-input run as a Save.
+    const action = this.actionSaveBaselines.get(conversationId)?.receipt;
+    if (!action || (action.attemptedEvents === 0 && !action.dispatchUncertain)) return false;
+    const saved = this.lifecycle.getSaveResult?.(conversationId);
+    return !(saved && saved.saveToken !== this.actionSaveBaselines.get(conversationId)?.saveToken
+      && (saved.runId === action.runId || saved.projectId === this.conversationConfigs.get(conversationId)?.activeProject?.projectId)
+      && saved.expectedContentRevision >= action.contentRevision
+      && ['persisted', 'persisted-after-cancel', 'already-clean'].includes(saved.status)
+      && saved.diskMatches === true && saved.uiApplied === true);
+  }
+
+  private withActionOutcome(state: AgentChatTurnState): AgentChatTurnState {
+    const result = this.getActionResult(state.conversationId);
+    if (!result) return state;
+    const id = `cua-dispatch:${result.receipt.actionId}`;
+    const receiptMessage: AgentChatDisplayMessage = { id, role: 'tool', toolName: 'executeCuaAction',
+      text: `Main native-dispatch receipt (not proof of an editor edit). Do not retry partial or uncertain input. ${JSON.stringify(result)}` };
+    const messages = state.messages.some(message => message.id !== id && message.toolName === 'executeCuaAction' && message.text.includes(result.receipt.actionId))
+      ? state.messages : [...state.messages.filter(message => message.id !== id), receiptMessage];
+    return { ...state, messages, cuaActionResult: structuredClone(result) };
+  }
+
+  private withSaveOutcome(state: AgentChatTurnState, previousSaveToken: string | undefined, aborted: boolean): AgentChatTurnState {
+    const receipt = this.lifecycle.getSaveResult?.(state.conversationId);
+    if (!receipt) return state;
+    const projected = { ...state, cuaSaveResult: receipt };
+    if (receipt.saveToken === previousSaveToken || state.pendingApproval) return projected;
+    if (receipt.status === 'write-outcome-unknown') return { ...projected, status: 'error',
+      error: 'The Save publication outcome is unknown. Inspect the saved project before another Save; this write was not retried.', errorCode: 'CUA_SAVE_OUTCOME_UNKNOWN' };
+    if (receipt.status === 'not-written') return { ...projected, status: 'error',
+      error: receipt.errorCode ?? 'The approved snapshot was not saved.', errorCode: 'CUA_SAVE_NOT_WRITTEN' };
+    const persisted = ['persisted', 'persisted-after-cancel', 'already-clean'].includes(receipt.status);
+    if (persisted && receipt.diskMatches !== true) return { ...projected, status: 'error',
+      error: 'Save returned a persisted receipt, but the current disk snapshot was not verified. UI acknowledgement is not proof of disk state.', errorCode: 'CUA_SAVE_NOT_VERIFIED' };
+    if (persisted && aborted) return { ...projected, status: 'idle', pendingApproval: null, error: undefined, errorCode: undefined };
+    return projected;
+  }
+
+  private runnableConfig(conversationId: string): { configurable: Record<string, string | undefined>; signal?: AbortSignal; recursionLimit: number } {
     const stored = this.conversationConfigs.get(conversationId);
     return {
+      recursionLimit: 48,
+      ...(this.activeTurns.get(conversationId) ? { signal: this.activeTurns.get(conversationId)!.controller.signal } : {}),
       configurable: {
         thread_id: conversationId,
+        interactionMode: stored?.interactionMode ?? 'project-tools',
         modelId: stored?.modelId,
         openAiAuthMode: stored?.openAiAuthMode,
         reasoningEffort: stored?.reasoningEffort,
@@ -208,11 +367,15 @@ export class AgentChatSessionManager {
     }
 
     const messages = ((invokeResult as { messages?: BaseMessage[] } | undefined)?.messages ?? []) as BaseMessage[];
+    const policyError = (invokeResult as { lastPolicyError?: 'CUA_MODE_REQUIRED' | 'CUA_EXPLICIT_SAVE_REQUIRED' } | undefined)?.lastPolicyError;
     return {
       conversationId,
       messages: toDisplayMessages(messages),
       pendingApproval: null,
-      status: 'idle',
+      status: policyError ? 'error' : 'idle',
+      ...(policyError ? { errorCode: policyError, error: policyError === 'CUA_MODE_REQUIRED'
+        ? 'Window controls require an explicitly selected Window CUA conversation.'
+        : 'The live editor may be dirty. Explicitly approve Save before using saved-project tools.' } : {}),
       ...this.contextUsageFor(conversationId, messages)
     };
   }
@@ -238,13 +401,16 @@ export class AgentChatSessionManager {
   private async errorState(conversationId: string, err: unknown): Promise<AgentChatTurnState> {
     const snapshot = await this.graph.getState(this.runnableConfig(conversationId)).catch(() => null);
     const messages = ((snapshot?.values as { messages?: BaseMessage[] } | undefined)?.messages ?? []) as BaseMessage[];
-    return {
+    return this.withActionOutcome({
       conversationId,
       messages: toDisplayMessages(messages),
       pendingApproval: null,
       status: 'error',
-      error: err instanceof Error ? err.message : 'Agent chat failed unexpectedly.'
-    };
+      error: err instanceof Error ? err.message : 'Agent chat failed unexpectedly.',
+      ...(this.getActionResult(conversationId) ? { cuaActionResult: structuredClone(this.getActionResult(conversationId)!) } : {}),
+      ...(this.lifecycle.getSaveResult?.(conversationId) ? { cuaSaveResult: this.lifecycle.getSaveResult(conversationId)! } : {}),
+      ...(err instanceof CuaApprovalError ? { errorCode: err.code } : {})
+    });
   }
 }
 

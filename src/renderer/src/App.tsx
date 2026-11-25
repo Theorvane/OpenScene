@@ -231,6 +231,9 @@ export function App(): ReactElement {
         hasActiveProject={hasActiveProject}
         onPageChange={setActivePage}
         activeProjectContext={activeProjectContext}
+        hasUnsavedTimeline={editor.hasUnsavedTimeline}
+        contentRevision={editor.contentRevision}
+        contentFingerprint={editor.contentFingerprint}
         prepareAgentProject={() => editor.hasUnsavedTimeline ? editor.saveTimeline() : Promise.resolve(true)}
         studioLayout={false}
         projectTabs={projectTabs}
@@ -278,6 +281,8 @@ export function App(): ReactElement {
           <section
             aria-labelledby="settings-title"
             className="app-page app-page--settings"
+            data-cua-protected="settings"
+            data-cua-protected-id="settings-page"
             hidden={activePageId !== 'settings'}
             id="app-page-panel-settings"
             ref={setPagePanelRef('settings')}

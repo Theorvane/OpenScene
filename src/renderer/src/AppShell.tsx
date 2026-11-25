@@ -16,6 +16,8 @@ import { Button } from './ui';
 import { useAgentChatLayoutPreference } from './useAgentChatLayoutPreference';
 import { ApplicationMenuProvider } from './ApplicationMenuContext';
 import { ApplicationMenuBar } from './ApplicationMenuBar';
+import { CuaOverlay } from './cua/CuaOverlay';
+import { CuaOverlayProvider, useCuaOverlayState } from './cua/useCuaOverlay';
 
 type ChatPanelDragOrigin = {
   readonly clientX: number;
@@ -38,7 +40,10 @@ type AppShellProps = {
   readonly hasActiveProject: boolean;
   readonly onPageChange: (pageId: AppPageId) => void;
   readonly activeProjectContext: EditAgentProjectContext | null;
+  readonly contentRevision?: number;
+  readonly contentFingerprint?: string | null;
   readonly prepareAgentProject?: () => Promise<boolean>;
+  readonly hasUnsavedTimeline?: boolean;
   readonly studioLayout?: boolean;
   readonly projectTabs?: readonly ProjectTab[];
   readonly activeProjectId?: string | null;
@@ -75,8 +80,19 @@ function FolderIcon(): ReactElement {
   );
 }
 
-function AppShellContent({ activePage, children, hasActiveProject, onPageChange, activeProjectContext, studioLayout = false, projectTabs = [], activeProjectId = null, onSelectProjectTab, onCloseProjectTab, chatRestoreRequest = null, canNavigateBack = false, onNavigateBack }: AppShellProps): ReactElement {
-  const { isBusy } = useAgentChat();
+function AppShellContent({ activePage, children, hasActiveProject, onPageChange, activeProjectContext, contentRevision = 0, contentFingerprint = null, studioLayout = false, projectTabs = [], activeProjectId = null, onSelectProjectTab, onCloseProjectTab, chatRestoreRequest = null, canNavigateBack = false, onNavigateBack }: AppShellProps): ReactElement {
+  const { isBusy, pendingApproval, cancelConversation } = useAgentChat();
+  const cua = useCuaOverlayState({
+    contentRevision,
+    contentFingerprint,
+    isAgentBusy: isBusy,
+    hasPendingApproval: pendingApproval !== null,
+    activePageId: activePage.id,
+    onStopRequested: () => {
+      if (isBusy || pendingApproval !== null) void cancelConversation();
+    }
+  });
+  const workspaceInert = cua.isWorkspaceInert;
   const { layoutPreference, updateLayoutPreference } = useAgentChatLayoutPreference();
   const shellBodyRef = useRef<HTMLDivElement | null>(null);
   const dragOriginRef = useRef<ChatPanelDragOrigin | null>(null);
@@ -145,11 +161,12 @@ function AppShellContent({ activePage, children, hasActiveProject, onPageChange,
   };
 
   return (
+    <CuaOverlayProvider controller={cua}>
     <main className="app-shell">
       <AppShellBackground />
       {/* Draggable window titlebar: the native frame is hidden on macOS, so this
           bar owns window dragging; interactive controls opt out via no-drag. */}
-      <header className="product-chrome" aria-label="Application chrome" inert={isBusy}>
+      <header className="product-chrome" aria-label="Application chrome" inert={isBusy} data-cua-protected="chrome-menu" data-cua-protected-id="product-chrome">
             <ApplicationMenuBar
               editorActive={activePage.id === 'edit'}
               onProjects={() => onPageChange('projects')}
@@ -227,9 +244,9 @@ function AppShellContent({ activePage, children, hasActiveProject, onPageChange,
         </div>
       </header>
       <div ref={shellBodyRef} className="app-shell__body">
-        <div id="app-shell-workspace" className="agent-workspace-lock" aria-busy={isBusy} inert={isBusy}>
+        <div id="app-shell-workspace" className="agent-workspace-lock" aria-busy={isBusy} inert={workspaceInert}>
           <div className="agent-workspace-lock__content">{children}</div>
-          {isBusy && (
+          {isBusy && !cua.isActing && !cua.isPreparing && cua.state.phase !== 'ready' && (
             <div aria-live="polite">
               <div className="agent-workspace-lock__message" aria-hidden="true">
                 Edit Agent is updating your workspace...
@@ -249,6 +266,8 @@ function AppShellContent({ activePage, children, hasActiveProject, onPageChange,
               aria-valuenow={chatPanelWidth}
               aria-valuetext={`Edit Agent chat ${chatPanelWidth} pixels`}
               className="agent-chat-resize-splitter"
+              data-cua-protected="chrome-menu"
+              data-cua-protected-id="agent-chat-splitter"
               onKeyDown={onChatSplitterKeyDown}
               onPointerDown={onChatSplitterPointerDown}
               onPointerMove={onChatSplitterPointerMove}
@@ -261,7 +280,17 @@ function AppShellContent({ activePage, children, hasActiveProject, onPageChange,
           </>
         )}
       </div>
+      <CuaOverlay
+        state={cua.state}
+        stopPending={cua.stopPending}
+        stopError={cua.stopError}
+        agentBusy={isBusy || pendingApproval !== null}
+        onStop={() => {
+          void cua.triggerStop();
+        }}
+      />
     </main>
+    </CuaOverlayProvider>
   );
 }
 
@@ -269,6 +298,7 @@ export function AppShell(props: AppShellProps): ReactElement {
   return (
     <AgentChatProvider
       activeProject={props.activeProjectContext}
+      hasUnsavedTimeline={props.hasUnsavedTimeline ?? true}
       {...(props.prepareAgentProject === undefined ? {} : { prepareProject: props.prepareAgentProject })}
       restoreRequest={props.chatRestoreRequest ?? null}
       {...(props.onChatRestoreHandled === undefined ? {} : { onRestoreHandled: props.onChatRestoreHandled })}
