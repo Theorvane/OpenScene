@@ -34,6 +34,38 @@ export {
 } from './cuaSurfaceSnapshot';
 
 const OVERFLOW_CLIP_VALUES = new Set(['hidden', 'clip', 'scroll', 'auto']);
+const PROTECTED_FOCUS_SELECTOR = '[data-cua-protected],[role="dialog"],[role="menu"],.oc-editor-host__header';
+
+/**
+ * Returns true strictly when `document.activeElement` is already inside an
+ * active `[data-cua-safe-surface]` and outside any protected surface.
+ */
+export function hasActiveFocusInSafeSurface(
+  doc: Pick<Document, 'activeElement'> | undefined = typeof document === 'undefined' ? undefined : document
+): boolean {
+  const active = doc?.activeElement;
+  if (active === null || active === undefined) return false;
+  if (typeof Element !== 'undefined' && !(active instanceof Element)) return false;
+  if (typeof (active as Element).closest !== 'function') return false;
+  const el = active as Element;
+  return el.closest('[data-cua-safe-surface]') !== null && el.closest(PROTECTED_FOCUS_SELECTOR) === null;
+}
+
+/**
+ * Preserves already-existing DOM focus inside `[data-cua-safe-surface]` when
+ * the user clicks an approval button with the primary mouse button. Never
+ * fabricates or moves focus into the safe surface when it is not already there,
+ * and leaves keyboard Tab/Enter/Space activation untouched.
+ */
+export function preserveSafeSurfaceFocusOnPrimaryMouseDown(
+  event: { readonly button: number; readonly preventDefault: () => void },
+  doc: Pick<Document, 'activeElement'> | undefined = typeof document === 'undefined' ? undefined : document
+): boolean {
+  if (event.button !== 0) return false;
+  if (!hasActiveFocusInSafeSurface(doc)) return false;
+  event.preventDefault();
+  return true;
+}
 
 function isOverflowClipValue(value: string | null | undefined): boolean {
   return typeof value === 'string' && OVERFLOW_CLIP_VALUES.has(value);

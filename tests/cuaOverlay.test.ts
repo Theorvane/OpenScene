@@ -28,6 +28,11 @@ interface UseCuaOverlayModule {
     readonly cuaPhase: CuaPhase;
     readonly isUpdating?: boolean;
   }) => MeasuredSurfaceState;
+  readonly hasActiveFocusInSafeSurface: (doc?: Pick<Document, 'activeElement'>) => boolean;
+  readonly preserveSafeSurfaceFocusOnPrimaryMouseDown: (
+    event: { readonly button: number; readonly preventDefault: () => void },
+    doc?: Pick<Document, 'activeElement'>
+  ) => boolean;
 }
 
 async function loadUseCuaOverlayModule(): Promise<UseCuaOverlayModule> {
@@ -614,5 +619,129 @@ describe('clipRectToOverflowAncestors and collectDomSurfaceState protected rect 
     );
 
     expect(buildSurfaceGeometryKey(after)).not.toBe(buildSurfaceGeometryKey(before));
+  });
+});
+
+describe('approval button mouse safe-surface focus preservation', () => {
+  it('preserves existing safe-surface DOM focus on primary mouseDown without stealing focus while still allowing onApprove click', async () => {
+    const { hasActiveFocusInSafeSurface, preserveSafeSurfaceFocusOnPrimaryMouseDown } = await loadUseCuaOverlayModule();
+
+    const timelineSurface = new MockHtmlElement({
+      attrs: { 'data-cua-safe-surface': 'timeline' },
+      rect: { x: 8, y: 52, width: 840, height: 735 }
+    });
+    const timelineClip = new MockHtmlElement({
+      attrs: { 'data-testid': 'timeline-clip-1' },
+      rect: { x: 186, y: 582, width: 200, height: 48 },
+      parentElement: timelineSurface
+    });
+    timelineClip.closest = (selector: string) =>
+      selector === '[data-cua-safe-surface]' ? timelineSurface : null;
+
+    const approveButton = new MockHtmlElement({
+      attrs: { 'data-testid': 'approve-btn' },
+      rect: { x: 880, y: 600, width: 100, height: 32 }
+    });
+    let activeElement: MockHtmlElement | null = timelineClip;
+    const mockDoc = {
+      get activeElement() {
+        return activeElement as unknown as Element | null;
+      }
+    };
+
+    expect(hasActiveFocusInSafeSurface(mockDoc)).toBe(true);
+
+    // Primary mouseDown (button=0) prevents browser focus transfer away from timelineClip.
+    let prevented = false;
+    const didPreserve = preserveSafeSurfaceFocusOnPrimaryMouseDown(
+      { button: 0, preventDefault: () => { prevented = true; } },
+      mockDoc
+    );
+    expect(didPreserve).toBe(true);
+    expect(prevented).toBe(true);
+    if (!prevented) activeElement = approveButton;
+    expect(activeElement).toBe(timelineClip);
+
+    // Click handler still fires normally after preserved mouseDown.
+    let approveCalls = 0;
+    const onApprove = () => { approveCalls += 1; };
+    onApprove();
+    expect(approveCalls).toBe(1);
+    expect(activeElement).toBe(timelineClip);
+
+    // Non-primary mouseDown (right click, button=2) does not preventDefault.
+    let rightPrevented = false;
+    expect(
+      preserveSafeSurfaceFocusOnPrimaryMouseDown(
+        { button: 2, preventDefault: () => { rightPrevented = true; } },
+        mockDoc
+      )
+    ).toBe(false);
+    expect(rightPrevented).toBe(false);
+  });
+
+  it('never fabricates or moves focus into safe surface when activeElement is inside agent-panel or outside safe surface', async () => {
+    const { hasActiveFocusInSafeSurface, preserveSafeSurfaceFocusOnPrimaryMouseDown } = await loadUseCuaOverlayModule();
+
+    const agentPanel = new MockHtmlElement({
+      attrs: { 'data-cua-protected': 'agent-panel' },
+      rect: { x: 854, y: 52, width: 360, height: 735 }
+    });
+    const promptTextarea = new MockHtmlElement({
+      attrs: { 'aria-label': 'Edit Agent prompt' },
+      rect: { x: 869, y: 700, width: 320, height: 52 },
+      parentElement: agentPanel
+    });
+    promptTextarea.closest = (selector: string) =>
+      selector.includes('[data-cua-protected]') ? agentPanel : null;
+
+    let timelineFocusCalls = 0;
+    const timelineSurface = Object.assign(
+      new MockHtmlElement({
+        attrs: { 'data-cua-safe-surface': 'timeline' },
+        rect: { x: 8, y: 52, width: 840, height: 735 }
+      }),
+      { focus: () => { timelineFocusCalls += 1; } }
+    );
+    void timelineSurface;
+
+    const mockDoc = { activeElement: promptTextarea as unknown as Element };
+    expect(hasActiveFocusInSafeSurface(mockDoc)).toBe(false);
+
+    let prevented = false;
+    const didPreserve = preserveSafeSurfaceFocusOnPrimaryMouseDown(
+      { button: 0, preventDefault: () => { prevented = true; } },
+      mockDoc
+    );
+    expect(didPreserve).toBe(false);
+    expect(prevented).toBe(false);
+    expect(timelineFocusCalls).toBe(0);
+    expect(mockDoc.activeElement).toBe(promptTextarea as unknown as Element);
+
+    // Also fail-closed when activeElement is null.
+    expect(hasActiveFocusInSafeSurface({ activeElement: null })).toBe(false);
+    let nullPrevented = false;
+    expect(
+      preserveSafeSurfaceFocusOnPrimaryMouseDown(
+        { button: 0, preventDefault: () => { nullPrevented = true; } },
+        { activeElement: null }
+      )
+    ).toBe(false);
+    expect(nullPrevented).toBe(false);
+  });
+
+  it('wires preserveSafeSurfaceFocusOnPrimaryMouseDown in AgentChatPanel without autoFocus or keyboard accessibility regression', async () => {
+    const panelSource = await readFile(new URL('../src/renderer/src/AgentChatPanel.tsx', import.meta.url), 'utf8');
+    expect(panelSource).toContain('onMouseDown={(event) => { preserveSafeSurfaceFocusOnPrimaryMouseDown(event); }}');
+    expect(panelSource).toContain('data-testid="agent-cua-key-focus-hint"');
+    expect(panelSource).toContain('data-testid="agent-cua-unsafe-key-guidance"');
+    // Approval UI must never auto-focus or programmatically steal/fabricate safe-surface focus.
+    expect(panelSource).not.toContain('autoFocus');
+    expect(panelSource).not.toContain('.focus(');
+    // Keyboard activation (Tab + Enter/Space) remains intact: approval buttons are native <Button> without negative tabIndex.
+    const approvalBlock = panelSource.slice(panelSource.indexOf('className="agent-chat-approval__actions"'), panelSource.indexOf('{status === \'thinking\'}'));
+    expect(approvalBlock).toContain('Run once');
+    expect(approvalBlock).toContain('Deny');
+    expect(approvalBlock).not.toContain('tabIndex={-1}');
   });
 });
