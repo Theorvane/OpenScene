@@ -42,8 +42,55 @@ export interface CuaActionRequest {
   readonly layoutRevision: number;
   readonly action: CuaAction;
 }
+/** Main-generated correlation only; never an approval capability. */
+export interface CuaActionSettlementTag {
+  readonly sessionId: string;
+  readonly runId: string;
+  readonly windowId: number;
+  readonly actionId: string;
+  readonly generation: number;
+  readonly settlementToken: string;
+}
+export interface CuaPostInputState extends CuaActionSettlementTag {
+  readonly actionKind: CuaAction['kind'];
+  readonly stage: 'prepared' | 'armed' | 'released';
+}
+export interface CuaActionSettlementAck extends CuaActionSettlementTag {
+  readonly layoutRevision: number;
+  readonly contentRevision: number;
+  readonly outcome: 'committed' | 'noop';
+}
+export type CuaReleaseFailure = 'mouse-release-failed' | 'key-release-failed' | 'rollback-unconfirmed' | 'target-gone' | 'authority-revoke-failed';
+/** Native-call receipt, not proof of a successful renderer edit. No secrets/tokens/PNG. */
+export interface CuaDispatchReceipt {
+  readonly actionId: string;
+  readonly actionKind: CuaAction['kind'];
+  readonly sessionId: string;
+  readonly runId: string;
+  readonly windowId: number;
+  readonly frameId: string;
+  readonly layoutRevision: number;
+  readonly contentRevision: number;
+  readonly generation: number;
+  readonly dispatch: 'no-dispatch' | 'partial-dispatch' | 'full-dispatch';
+  readonly expectedEvents: number;
+  readonly attemptedEvents: number;
+  readonly returnedEvents: number;
+  readonly dispatchUncertain: boolean;
+  readonly release: {
+    readonly attemptedEvents: number;
+    readonly returnedEvents: number;
+    readonly heldInputCount: number;
+    readonly failures: readonly CuaReleaseFailure[];
+  };
+  readonly rendererSettlement: 'pending' | 'acknowledged' | 'cancelled' | 'timed-out';
+  readonly observationReady: boolean;
+}
 export type CuaPhase = 'idle' | 'ready' | 'preparing' | 'acting' | 'stopping' | 'stopped' | 'cleanup-failed';
 export interface CuaState {
+  /** Additive fields; absent only in older renderer fixtures. */
+  readonly postInput?: CuaPostInputState | null;
+  readonly lastDispatchReceipt?: CuaDispatchReceipt | null;
   /** Input-free preparation, bound to an already approved main-only permit. */
   readonly prepareToken: string | null;
   /** Present only while a held drag awaits synchronous renderer rollback. */
