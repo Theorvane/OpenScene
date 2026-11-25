@@ -650,4 +650,67 @@ describe('CuaActionSettlementCoordinator (renderer post-input action attribution
     // Permanently consumed after one use:
     expect(cleanCoord.takeReadySettlement(2, 'fp-2')).toBeNull();
   });
+
+  it('defers stray untagged flushSnapshot at stage=released until takeReadySettlement consumes clean commit, while never deferring tainted/mismatched/prepared/post-ACK states', async () => {
+    const { CuaActionSettlementCoordinator } = await loadSettlementModule();
+
+    // 1. Clean attributed drag commit reaching stage='released' before useLayoutEffect runs:
+    const coord = new CuaActionSettlementCoordinator();
+    coord.syncFromCuaState(makeState({ phase: 'preparing', postInput: makePostInput({ actionId: 'act-raf', stage: 'prepared' }) }), 1, 'fp-1');
+    // Never defer during pre-input prepared stage:
+    expect(coord.shouldDeferAttributedContentReport(2, 'fp-2')).toBe(false);
+
+    coord.syncFromCuaState(makeState({ phase: 'acting', postInput: makePostInput({ actionId: 'act-raf', stage: 'armed' }) }), 1, 'fp-1');
+    coord.runWithAttribution('drag', () => {
+      coord.notifyTimelineMutationScheduled('fp-2');
+    });
+    coord.syncFromCuaState(makeState({ phase: 'acting', postInput: makePostInput({ actionId: 'act-raf', stage: 'released' }) }), 2, 'fp-2');
+
+    // Stray MutationObserver / rAF flushSnapshot() arrives AFTER stage='released' and BEFORE useLayoutEffect:
+    expect(coord.shouldDeferAttributedContentReport(2, 'fp-2')).toBe(true);
+
+    // useLayoutEffect consumes the clean single-step commit with exact settlement tag:
+    expect(coord.takeReadySettlement(2, 'fp-2')).toMatchObject({
+      outcome: 'committed',
+      baseContentRevision: 1,
+      tag: { actionId: 'act-raf', settlementToken: 'tok-1' }
+    });
+
+    // Immediately after consumption, defer returns false so post-ACK external rev 2 -> 3 flushes untagged:
+    expect(coord.shouldDeferAttributedContentReport(2, 'fp-2')).toBe(false);
+    expect(coord.shouldDeferAttributedContentReport(3, 'fp-3')).toBe(false);
+
+    // 2. Tainted tracker at stage='released' MUST return false:
+    const taintedCoord = new CuaActionSettlementCoordinator();
+    taintedCoord.syncFromCuaState(makeState({ phase: 'acting', postInput: makePostInput({ actionId: 'act-taint', stage: 'armed' }) }), 1, 'fp-1');
+    taintedCoord.runWithAttribution('drag', () => {
+      taintedCoord.notifyTimelineMutationScheduled('fp-2');
+    });
+    taintedCoord.notifyTimelineMutationScheduled('fp-ext'); // out-of-scope taint
+    taintedCoord.syncFromCuaState(makeState({ phase: 'acting', postInput: makePostInput({ actionId: 'act-taint', stage: 'released' }) }), 2, 'fp-2');
+    expect(taintedCoord.shouldDeferAttributedContentReport(2, 'fp-2')).toBe(false);
+    expect(taintedCoord.takeReadySettlement(2, 'fp-2')).toBeNull();
+
+    // 3. Multi-step rev=3 at stage='released' MUST taint and return false:
+    const revJumpCoord = new CuaActionSettlementCoordinator();
+    revJumpCoord.syncFromCuaState(makeState({ phase: 'acting', postInput: makePostInput({ actionId: 'act-jump', stage: 'armed' }) }), 1, 'fp-1');
+    revJumpCoord.runWithAttribution('drag', () => {
+      revJumpCoord.notifyTimelineMutationScheduled('fp-2');
+    });
+    revJumpCoord.syncFromCuaState(makeState({ phase: 'acting', postInput: makePostInput({ actionId: 'act-jump', stage: 'released' }) }), 3, 'fp-3');
+    expect(revJumpCoord.shouldDeferAttributedContentReport(3, 'fp-3')).toBe(false);
+    expect(revJumpCoord.getTracker()?.tainted).toBe(true);
+    expect(revJumpCoord.takeReadySettlement(3, 'fp-3')).toBeNull();
+
+    // 4. Same-commit mixed fingerprint rev=2 at stage='released' MUST taint and return false:
+    const mixedFpCoord = new CuaActionSettlementCoordinator();
+    mixedFpCoord.syncFromCuaState(makeState({ phase: 'acting', postInput: makePostInput({ actionId: 'act-mix', stage: 'armed' }) }), 1, 'fp-1');
+    mixedFpCoord.runWithAttribution('drag', () => {
+      mixedFpCoord.notifyTimelineMutationScheduled('fp-2');
+    });
+    mixedFpCoord.syncFromCuaState(makeState({ phase: 'acting', postInput: makePostInput({ actionId: 'act-mix', stage: 'released' }) }), 2, 'fp-2-plus-external');
+    expect(mixedFpCoord.shouldDeferAttributedContentReport(2, 'fp-2-plus-external')).toBe(false);
+    expect(mixedFpCoord.getTracker()?.tainted).toBe(true);
+    expect(mixedFpCoord.takeReadySettlement(2, 'fp-2-plus-external')).toBeNull();
+  });
 });

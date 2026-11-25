@@ -404,13 +404,18 @@ export class CuaActionSettlementCoordinator {
   }
 
   /**
-   * Returns true ONLY when a clean, untainted attributed commit has already
-   * committed its exact single-step `contentRevision` and `contentFingerprint`
-   * BEFORE main's `postInput.stage === 'released'` IPC message arrives.
+   * Returns true ONLY when a clean, untainted, unconsumed attributed commit in
+   * `armed` or `released` stage has already committed its exact single-step
+   * `contentRevision` (`base + 1`) and `contentFingerprint` (`expectedContentFingerprint`)
+   * and is awaiting `useLayoutEffect`'s `takeReadySettlement` consumption.
    *
-   * Any tainted, unattributed, multi-step (`rev > base + 1`), or
-   * fingerprint-mismatched change returns `false` so it flushes UNTAGGED
-   * immediately and `CuaDriver` cancels with `content-changed`.
+   * This prevents stray `MutationObserver`/`rAF` `flushSnapshot()` calls from
+   * leaking an untagged `crev = base + 1` report between `syncFromCuaState(stage='released')`
+   * and `useLayoutEffect` consumption.
+   *
+   * Any pre-input (`prepared`), consumed, tainted, unattributed, multi-step
+   * (`rev !== base + 1`), or fingerprint-mismatched change returns `false` so
+   * it flushes UNTAGGED immediately and `CuaDriver` cancels with `content-changed`.
    */
   shouldDeferAttributedContentReport(
     currentContentRevision: number,
@@ -418,7 +423,7 @@ export class CuaActionSettlementCoordinator {
   ): boolean {
     const tracker = this.tracker;
     if (tracker === null || tracker.consumed || tracker.tainted || tracker.attribution === null) return false;
-    if (tracker.stage === 'released') return false;
+    if (tracker.stage !== 'armed' && tracker.stage !== 'released') return false;
     if (!tracker.attribution.expectCommit) return false;
     return this.verifyCausalMatchOrTaint(tracker, currentContentRevision, currentContentFingerprint) === 'match';
   }
