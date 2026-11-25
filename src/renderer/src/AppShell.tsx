@@ -41,6 +41,7 @@ type AppShellProps = {
   readonly onPageChange: (pageId: AppPageId) => void;
   readonly activeProjectContext: EditAgentProjectContext | null;
   readonly contentRevision?: number;
+  readonly contentFingerprint?: string | null;
   readonly prepareAgentProject?: () => Promise<boolean>;
   readonly hasUnsavedTimeline?: boolean;
   readonly studioLayout?: boolean;
@@ -79,10 +80,11 @@ function FolderIcon(): ReactElement {
   );
 }
 
-function AppShellContent({ activePage, children, hasActiveProject, onPageChange, activeProjectContext, contentRevision = 0, studioLayout = false, projectTabs = [], activeProjectId = null, onSelectProjectTab, onCloseProjectTab, chatRestoreRequest = null, canNavigateBack = false, onNavigateBack }: AppShellProps): ReactElement {
+function AppShellContent({ activePage, children, hasActiveProject, onPageChange, activeProjectContext, contentRevision = 0, contentFingerprint = null, studioLayout = false, projectTabs = [], activeProjectId = null, onSelectProjectTab, onCloseProjectTab, chatRestoreRequest = null, canNavigateBack = false, onNavigateBack }: AppShellProps): ReactElement {
   const { isBusy, pendingApproval, cancelConversation } = useAgentChat();
   const cua = useCuaOverlayState({
     contentRevision,
+    contentFingerprint,
     isAgentBusy: isBusy,
     hasPendingApproval: pendingApproval !== null,
     activePageId: activePage.id,
