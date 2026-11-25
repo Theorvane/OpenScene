@@ -282,7 +282,7 @@ function AppShellContent({ activePage, children, hasActiveProject, onPageChange,
         state={cua.state}
         stopPending={cua.stopPending}
         stopError={cua.stopError}
-        agentBusy={isBusy}
+        agentBusy={isBusy || pendingApproval !== null}
         onStop={() => {
           void cua.triggerStop();
         }}
