@@ -390,12 +390,17 @@ export function buildAgentChatGraph(options: BuildAgentChatGraphOptions) {
 
         try {
           config.signal?.throwIfAborted();
+          // Approved dispatch can be interrupted before graph state receives its receipt.
+          if (call.name === 'executeCuaAction') selfWindowUnsaved = true;
           const output: unknown = options.cua && call.name === 'executeCuaAction'
             ? await options.cua.executeApproved(String(config.configurable?.thread_id), call.id, CUA_ACTION_TOOL_SCHEMA.parse(call.args))
             : options.cuaSave && call.name === 'saveCuaEditorProject'
               ? await options.cuaSave.executeApproved(String(config.configurable?.thread_id), call.id, CUA_SAVE_TOOL_SCHEMA.parse(call.args))
               : await tool.invoke(call.args ?? {}, config);
-          if (call.name === 'executeCuaAction' && (output as { actionExecuted?: boolean })?.actionExecuted === true) selfWindowUnsaved = true;
+          if (call.name === 'executeCuaAction') {
+            const actionResult = options.cua?.getLastActionResult(String(config.configurable?.thread_id));
+            if (actionResult?.toolCallId === call.id && (actionResult.receipt.attemptedEvents > 0 || actionResult.receipt.dispatchUncertain)) selfWindowUnsaved = true;
+          }
           if (call.name === 'saveCuaEditorProject') {
             const saved = output as { status?: string; diskMatches?: boolean; uiApplied?: boolean };
             if (['persisted', 'persisted-after-cancel', 'already-clean'].includes(saved.status ?? '') && saved.diskMatches === true && saved.uiApplied === true) selfWindowUnsaved = false;
@@ -433,6 +438,14 @@ export function buildAgentChatGraph(options: BuildAgentChatGraphOptions) {
           const content = typeof output === 'string' ? output : JSON.stringify(output);
           results.push(new ToolMessage({ content, tool_call_id: call.id, name: call.name }));
         } catch (err) {
+          const actionResult = call.name === 'executeCuaAction'
+            ? options.cua?.getLastActionResult(String(config.configurable?.thread_id)) : null;
+          if (actionResult?.toolCallId === call.id) {
+            if (actionResult.receipt.attemptedEvents > 0 || actionResult.receipt.dispatchUncertain) selfWindowUnsaved = true;
+            results.push(new ToolMessage({ content: JSON.stringify({ cuaActionResult: actionResult,
+              summary: 'The tool stopped. Native dispatch facts survive cancellation; partial/uncertain input may have effects. Do not retry this action. Cleanup and renderer settlement are separate.' }), tool_call_id: call.id, name: call.name }));
+            continue;
+          }
           const detail = err instanceof Error ? err.message : String(err);
           results.push(new ToolMessage({ content: `Tool "${call.name}" failed: ${detail}`, tool_call_id: call.id, name: call.name }));
         }
@@ -454,7 +467,8 @@ export function buildAgentChatGraph(options: BuildAgentChatGraphOptions) {
   const graph = builder.compile({ checkpointer });
   // Compaction summarizes with the conversation's own model, so the session
   // manager needs the same factory the graph uses.
-  return { graph, checkpointer, createModel: options.createModel };
+  return { graph, checkpointer, createModel: options.createModel,
+    getActionResult: (conversationId: string) => options.cua?.getLastActionResult(conversationId) ?? null };
 }
 
 export { isHumanMessage, isAiLike, isSystemMessage, isToolMessage };

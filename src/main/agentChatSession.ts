@@ -11,6 +11,7 @@ import type {
   AgentChatResetInput,
   AgentChatSendInput,
   AgentChatTurnState,
+  CuaAgentActionResult,
   AgentToolCallProposal
 } from '../shared/agentChat';
 import type { EditAgentContextAsset, EditAgentProjectContext } from '../shared/editAgentContext';
@@ -36,14 +37,29 @@ export class AgentChatSessionManager {
   private readonly checkpointer: MemorySaver;
   private readonly createModel: AgentChatGraphBundle['createModel'];
   private readonly conversationConfigs = new Map<string, ConversationConfig>();
-  private readonly activeTurns = new Map<string, { controller: AbortController; settled: Promise<void> }>();
+  private readonly activeTurns = new Map<string, { controller: AbortController; settled: Promise<void>; initialSaveToken: string | undefined }>();
   private readonly cancellations = new Map<string, Promise<AgentChatTurnState>>();
+  private readonly actionSaveBaselines = new Map<string, { actionId: string; saveToken: string | undefined; receipt: CuaAgentActionResult['receipt'] }>();
+  private readonly getActionResult: (conversationId: string) => CuaAgentActionResult | null;
   private readonly cleanupLocked = new Set<string>();
 
   constructor(bundle: AgentChatGraphBundle, private readonly lifecycle: {
     readonly cancelCua?: (conversationId: string) => Promise<void>;
+    readonly getActionResult?: (conversationId: string) => CuaAgentActionResult | null;
     readonly getSaveResult?: (conversationId: string) => CuaSaveResult | null;
   } = {}) {
+    const readActionResult = lifecycle.getActionResult ?? bundle.getActionResult;
+    this.getActionResult = id => {
+      const result = readActionResult(id);
+      if (result && (result.receipt.attemptedEvents > 0 || result.receipt.dispatchUncertain)
+        && this.actionSaveBaselines.get(id)?.actionId !== result.receipt.actionId) {
+        if (this.actionSaveBaselines.size >= 100) this.actionSaveBaselines.delete(this.actionSaveBaselines.keys().next().value!);
+        const turn = this.activeTurns.get(id);
+        this.actionSaveBaselines.set(id, { actionId: result.receipt.actionId, receipt: structuredClone(result.receipt),
+          saveToken: turn ? turn.initialSaveToken : lifecycle.getSaveResult?.(id)?.saveToken });
+      }
+      return result;
+    };
     this.graph = bundle.graph;
     this.checkpointer = bundle.checkpointer;
     this.createModel = bundle.createModel;
@@ -82,7 +98,7 @@ export class AgentChatSessionManager {
     try {
       const seed = await this.restoredSeed(input);
       const result = await this.graph.invoke(
-        { messages: [...seed, new HumanMessage(input.text)], selfWindowUnsaved: mode === 'self-window' && input.hasUnsavedTimeline !== false, lastPolicyError: null },
+        { messages: [...seed, new HumanMessage(input.text)], selfWindowUnsaved: mode === 'self-window' && (input.hasUnsavedTimeline !== false || this.hasUnverifiedAction(input.conversationId)), lastPolicyError: null },
         this.runnableConfig(input.conversationId)
       );
       return await this.toTurnState(input.conversationId, result);
@@ -219,7 +235,7 @@ export class AgentChatSessionManager {
     if (cancelled.errorCode === 'CUA_CLEANUP_FAILED') return cancelled;
     this.conversationConfigs.delete(input.conversationId);
     await this.checkpointer.deleteThread(input.conversationId);
-    return { conversationId: input.conversationId, messages: [], pendingApproval: null, status: 'idle' };
+    return this.withActionOutcome({ conversationId: input.conversationId, messages: [], pendingApproval: null, status: 'idle' });
   }
 
   /** Driver callbacks use this synchronous method; it never re-enters cancel. */
@@ -244,7 +260,7 @@ export class AgentChatSessionManager {
       await this.activeTurns.get(input.conversationId)?.settled;
       const previous = await this.errorState(input.conversationId, new Error('CUA_CANCELLED'));
       await this.checkpointer.deleteThread(input.conversationId);
-      return this.withSaveOutcome({ ...previous, status: 'idle', error: undefined, errorCode: undefined }, undefined, true);
+      return this.withActionOutcome(this.withSaveOutcome({ ...previous, status: 'idle', error: undefined, errorCode: undefined }, undefined, true));
     }).finally(() => { this.cancellations.delete(input.conversationId); });
     this.cancellations.set(input.conversationId, cancellation);
     return cancellation;
@@ -261,7 +277,7 @@ export class AgentChatSessionManager {
     const previousSaveToken = this.lifecycle.getSaveResult?.(conversationId)?.saveToken;
     let settle!: () => void;
     const settled = new Promise<void>((resolve) => { settle = resolve; });
-    this.activeTurns.set(conversationId, { controller, settled });
+    this.activeTurns.set(conversationId, { controller, settled, initialSaveToken: previousSaveToken });
     try {
       const result = await run();
       // LangGraph may reject on AbortSignal before an invoked tool's promise
@@ -274,9 +290,32 @@ export class AgentChatSessionManager {
           return { ...await this.errorState(conversationId, error), errorCode: 'CUA_CLEANUP_FAILED' };
         }
       }
-      return this.withSaveOutcome(result, previousSaveToken, controller.signal.aborted);
+      return this.withActionOutcome(this.withSaveOutcome(result, previousSaveToken, controller.signal.aborted));
     }
     finally { this.activeTurns.delete(conversationId); settle(); }
+  }
+
+  private hasUnverifiedAction(conversationId: string): boolean {
+    this.getActionResult(conversationId); // Refresh facts without treating a new/no-input run as a Save.
+    const action = this.actionSaveBaselines.get(conversationId)?.receipt;
+    if (!action || (action.attemptedEvents === 0 && !action.dispatchUncertain)) return false;
+    const saved = this.lifecycle.getSaveResult?.(conversationId);
+    return !(saved && saved.saveToken !== this.actionSaveBaselines.get(conversationId)?.saveToken
+      && (saved.runId === action.runId || saved.projectId === this.conversationConfigs.get(conversationId)?.activeProject?.projectId)
+      && saved.expectedContentRevision >= action.contentRevision
+      && ['persisted', 'persisted-after-cancel', 'already-clean'].includes(saved.status)
+      && saved.diskMatches === true && saved.uiApplied === true);
+  }
+
+  private withActionOutcome(state: AgentChatTurnState): AgentChatTurnState {
+    const result = this.getActionResult(state.conversationId);
+    if (!result) return state;
+    const id = `cua-dispatch:${result.receipt.actionId}`;
+    const receiptMessage: AgentChatDisplayMessage = { id, role: 'tool', toolName: 'executeCuaAction',
+      text: `Main native-dispatch receipt (not proof of an editor edit). Do not retry partial or uncertain input. ${JSON.stringify(result)}` };
+    const messages = state.messages.some(message => message.id !== id && message.toolName === 'executeCuaAction' && message.text.includes(result.receipt.actionId))
+      ? state.messages : [...state.messages.filter(message => message.id !== id), receiptMessage];
+    return { ...state, messages, cuaActionResult: structuredClone(result) };
   }
 
   private withSaveOutcome(state: AgentChatTurnState, previousSaveToken: string | undefined, aborted: boolean): AgentChatTurnState {
@@ -362,15 +401,16 @@ export class AgentChatSessionManager {
   private async errorState(conversationId: string, err: unknown): Promise<AgentChatTurnState> {
     const snapshot = await this.graph.getState(this.runnableConfig(conversationId)).catch(() => null);
     const messages = ((snapshot?.values as { messages?: BaseMessage[] } | undefined)?.messages ?? []) as BaseMessage[];
-    return {
+    return this.withActionOutcome({
       conversationId,
       messages: toDisplayMessages(messages),
       pendingApproval: null,
       status: 'error',
       error: err instanceof Error ? err.message : 'Agent chat failed unexpectedly.',
+      ...(this.getActionResult(conversationId) ? { cuaActionResult: structuredClone(this.getActionResult(conversationId)!) } : {}),
       ...(this.lifecycle.getSaveResult?.(conversationId) ? { cuaSaveResult: this.lifecycle.getSaveResult(conversationId)! } : {}),
       ...(err instanceof CuaApprovalError ? { errorCode: err.code } : {})
-    };
+    });
   }
 }
 

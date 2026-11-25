@@ -1,5 +1,6 @@
 import type { EditAgentContextAsset, EditAgentProjectContext } from './editAgentContext';
 import type { OpenAiAuthMode, ReasoningEffort } from './openAiAuth';
+import type { CuaDispatchReceipt } from './cua';
 import type { CuaSaveResult } from './cuaSave';
 
 export type AgentChatMessageRole = 'user' | 'assistant' | 'tool';
@@ -88,6 +89,13 @@ export interface AgentChatContextUsage {
   readonly limitTokens?: number | undefined;
 }
 
+/** Main dispatch facts, independent of graph cancellation and renderer effects. */
+export interface CuaAgentActionResult {
+  readonly conversationId: string;
+  readonly toolCallId: string;
+  readonly receipt: CuaDispatchReceipt;
+}
+
 export interface AgentChatTurnState {
   readonly conversationId: string;
   readonly messages: readonly AgentChatDisplayMessage[];
@@ -97,6 +105,7 @@ export interface AgentChatTurnState {
   readonly errorCode?: AgentCuaErrorCode | undefined;
   /** Main-confirmed Save receipt; independent of later cancellation or UI acknowledgement. */
   readonly cuaSaveResult?: CuaSaveResult | undefined;
+  readonly cuaActionResult?: CuaAgentActionResult | undefined;
   readonly contextUsage?: AgentChatContextUsage | undefined;
 }
 
