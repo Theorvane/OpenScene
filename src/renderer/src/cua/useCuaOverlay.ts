@@ -1,6 +1,15 @@
 import { createContext, createElement, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react';
 
-import type { CuaPhase, CuaRect, CuaState, CuaSurfaceSnapshot } from '../../../shared/cua';
+import type { CuaActionSettlementTag, CuaPhase, CuaRect, CuaState, CuaSurfaceSnapshot } from '../../../shared/cua';
+import {
+  beginCuaSafeClickAttribution,
+  clearCuaActionSettlement,
+  completeCuaSafeClickAttribution,
+  shouldDeferAttributedCuaContentReport,
+  subscribeCuaActionSettlement,
+  syncCuaActionSettlementFromState,
+  takeReadyCuaActionSettlement
+} from './cuaActionSettlement';
 import {
   abortActiveTimelineDragSync,
   handleCuaStateRollbackAndAckSync
@@ -10,6 +19,7 @@ import {
   CUA_VALID_SAFE_KINDS,
   CuaSurfaceRevisionTracker,
   INITIAL_CUA_STATE,
+  buildSurfaceGeometryKey,
   clipRectToViewport,
   computeExecutionBlockState,
   computeWorkspaceInert,
@@ -330,7 +340,9 @@ export function useCuaOverlayState(options: {
   const [state, setState] = useState<CuaState>(INITIAL_CUA_STATE);
   const [stopPending, setStopPending] = useState(false);
   const [stopError, setStopError] = useState<string | null>(null);
+  const [settlementTick, setSettlementTick] = useState(0);
   const trackerRef = useRef<CuaSurfaceRevisionTracker>(new CuaSurfaceRevisionTracker());
+  const lastGeometryKeyRef = useRef<string | null>(null);
   const [snapshot, setSnapshot] = useState<CuaSurfaceSnapshot>(() => createFailClosedSnapshot(0, { width: 1, height: 1 }, 'unmounted', options.contentRevision));
   const isWorkspaceInert = computeWorkspaceInert({
     isAgentBusy: options.isAgentBusy,
@@ -348,20 +360,28 @@ export function useCuaOverlayState(options: {
   stopPendingRef.current = stopPending;
   optionsRef.current = options;
 
-  const reportSnapshotAsync = useCallback(async (nextSnapshot: CuaSurfaceSnapshot): Promise<boolean> => {
+  const reportSnapshotAsync = useCallback(async (
+    nextSnapshot: CuaSurfaceSnapshot,
+    settlement?: CuaActionSettlementTag
+  ): Promise<boolean> => {
     setSnapshot(nextSnapshot);
     const api = typeof window === 'undefined' ? undefined : window.videoTool;
     if (typeof api?.cuaReportSurfaceSnapshot !== 'function') return true;
     if (nextSnapshot.viewport.width <= 0 || nextSnapshot.viewport.height <= 0) return false;
     try {
-      const res = await api.cuaReportSurfaceSnapshot(nextSnapshot);
+      const res = settlement !== undefined
+        ? await api.cuaReportSurfaceSnapshot(nextSnapshot, settlement)
+        : await api.cuaReportSurfaceSnapshot(nextSnapshot);
       return res.ok && res.value.accepted;
     } catch {
       return false;
     }
   }, []);
 
-  const flushSnapshotAsync = useCallback(async (flushOptions?: { readonly force?: boolean }): Promise<CuaSurfaceSnapshot | null> => {
+  const flushSnapshotAsync = useCallback(async (flushOptions?: {
+    readonly force?: boolean;
+    readonly settlement?: CuaActionSettlementTag;
+  }): Promise<CuaSurfaceSnapshot | null> => {
     if (typeof window === 'undefined' || typeof document === 'undefined') return null;
     const currentOpts = optionsRef.current;
     const measured = collectDomSurfaceState({
@@ -370,9 +390,21 @@ export function useCuaOverlayState(options: {
       hasPendingApproval: currentOpts.hasPendingApproval,
       cuaPhase: stateRef.current.phase
     });
+    const geometryKey = buildSurfaceGeometryKey(measured);
+    if (
+      flushOptions?.settlement === undefined &&
+      shouldDeferAttributedCuaContentReport(currentOpts.contentRevision) &&
+      !measured.hasBlockingOverlay &&
+      !measured.executionBlocked &&
+      measured.safeSurface !== null &&
+      (lastGeometryKeyRef.current === null || geometryKey === lastGeometryKeyRef.current)
+    ) {
+      return null;
+    }
     const { snapshot: nextSnapshot, changed } = trackerRef.current.next(measured);
+    lastGeometryKeyRef.current = geometryKey;
     if (changed || flushOptions?.force === true) {
-      const ok = await reportSnapshotAsync(nextSnapshot);
+      const ok = await reportSnapshotAsync(nextSnapshot, flushOptions?.settlement);
       return ok ? nextSnapshot : null;
     }
     return nextSnapshot;
@@ -474,9 +506,11 @@ export function useCuaOverlayState(options: {
 
     const unsubscribe = typeof api?.onCuaStateChanged === 'function'
       ? api.onCuaStateChanged((nextState) => {
-          // MUST run synchronously BEFORE React setState: abort any held drag
-          // and immediately acknowledge cancelToken via cuaAckCancel.
+          // MUST run synchronously BEFORE React setState: abort any held drag,
+          // acknowledge cancelToken via cuaAckCancel, and register/advance any
+          // post-input settlement tracker before cuaAckPrepare can fire.
           handleCuaStateRollbackAndAckSync(nextState, api.cuaAckCancel);
+          syncCuaActionSettlementFromState(nextState, optionsRef.current.contentRevision);
           if (active) applyCuaState(nextState);
         })
       : undefined;
@@ -486,6 +520,7 @@ export function useCuaOverlayState(options: {
         .then((response) => {
           if (active && response.ok) {
             handleCuaStateRollbackAndAckSync(response.value, api.cuaAckCancel);
+            syncCuaActionSettlementFromState(response.value, optionsRef.current.contentRevision);
             applyCuaState(response.value);
           }
         })
@@ -497,8 +532,45 @@ export function useCuaOverlayState(options: {
     return () => {
       active = false;
       unsubscribe?.();
+      clearCuaActionSettlement();
     };
   }, [applyCuaState]);
+
+  // Subscribe to real DOM action handler attributions and attribute safe-surface click handlers.
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const unsubscribe = subscribeCuaActionSettlement(() => {
+      setSettlementTick((count) => count + 1);
+    });
+
+    const onDocumentClickCapture = (event: MouseEvent): void => {
+      const target = event.target;
+      if (
+        !(target instanceof Element) ||
+        target.closest('[data-cua-safe-surface]') === null ||
+        target.closest(PROTECTED_FOCUS_SELECTOR) !== null
+      ) {
+        return;
+      }
+      if (beginCuaSafeClickAttribution()) {
+        queueMicrotask(() => {
+          completeCuaSafeClickAttribution();
+        });
+      }
+    };
+
+    const onDocumentClickBubble = (): void => {
+      completeCuaSafeClickAttribution();
+    };
+
+    document.addEventListener('click', onDocumentClickCapture, true);
+    document.addEventListener('click', onDocumentClickBubble, false);
+    return () => {
+      unsubscribe();
+      document.removeEventListener('click', onDocumentClickCapture, true);
+      document.removeEventListener('click', onDocumentClickBubble, false);
+    };
+  }, []);
 
   // Global capture-phase Escape shortcut routed through the exact same unified triggerStop path as cua-stop-btn.
   useEffect(() => {
@@ -652,6 +724,32 @@ export function useCuaOverlayState(options: {
       cancelled = true;
     };
   }, [flushSnapshotAsync, isWorkspaceInert, state.phase, state.prepareToken, state.runId]);
+
+  // Post-input action settlement: after React commits the DOM/contentRevision for
+  // an attributed real action handler AND main has published postInput.stage === 'released',
+  // emit ONE tagged surface report followed (only if accepted) by cuaAckActionSettlement.
+  useLayoutEffect(() => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return;
+    const ready = takeReadyCuaActionSettlement(options.contentRevision);
+    if (ready === null) return;
+
+    void (async () => {
+      const reported = await flushSnapshotAsync({ force: true, settlement: ready.tag });
+      if (!mountedRef.current || reported === null) return;
+      const api = typeof window === 'undefined' ? undefined : window.videoTool;
+      if (typeof api?.cuaAckActionSettlement !== 'function') return;
+      try {
+        await api.cuaAckActionSettlement({
+          ...ready.tag,
+          layoutRevision: reported.layoutRevision,
+          contentRevision: reported.contentRevision,
+          outcome: ready.outcome
+        });
+      } catch {
+        // Main process enforces fail-closed settlement timeouts.
+      }
+    })();
+  }, [flushSnapshotAsync, options.contentRevision, settlementTick, state.postInput?.stage]);
 
   // Re-measure whenever page, committed contentRevision, busy/approval flags, or CUA phase changes.
   useEffect(() => {

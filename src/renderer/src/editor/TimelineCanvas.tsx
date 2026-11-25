@@ -14,6 +14,7 @@ import {
   isActiveTimelineDragAborted,
   registerActiveTimelineDrag
 } from '../cua/cuaDragGuard';
+import { runWithCuaActionAttribution } from '../cua/cuaActionSettlement';
 import {
   computeClipDropPositionMs,
   computeTrimPositionMs,
@@ -455,51 +456,55 @@ export function TimelineCanvas({ editor, id }: TimelineCanvasProps): ReactElemen
       setDragOverTrackId(null);
       setDragPreview(null);
 
-      if (wasAborted || !active.moved || ctx.project === null || ctx.view === null) return;
+      if (wasAborted) return;
 
-      suppressNextClickClipIdRef.current = active.clipId;
-      window.setTimeout(() => {
-        if (suppressNextClickClipIdRef.current === active.clipId) {
-          suppressNextClickClipIdRef.current = null;
+      runWithCuaActionAttribution('drag', () => {
+        if (!active.moved || ctx.project === null || ctx.view === null) return;
+
+        suppressNextClickClipIdRef.current = active.clipId;
+        window.setTimeout(() => {
+          if (suppressNextClickClipIdRef.current === active.clipId) {
+            suppressNextClickClipIdRef.current = null;
+          }
+        }, 0);
+
+        const lanes = readLaneBounds();
+        if (active.kind === 'clip') {
+          const targetLane = resolveTargetLane(lanes, event.clientY, active.sourceTrackId, ctx.lockedTracks);
+          if (targetLane === null) return;
+          const position = computeClipDropPositionMs({
+            timeline: ctx.project.timeline,
+            clipId: active.clipId,
+            clientX: event.clientX,
+            laneLeft: targetLane.left,
+            laneWidth: targetLane.width,
+            durationMs: ctx.view.durationMs,
+            offsetMs: active.offsetMs,
+            playheadMs: ctx.editor.playheadMs,
+            snappingEnabled: ctx.snappingEnabled,
+            altKey: event.altKey,
+            snapMs
+          });
+          ctx.editor.moveClipToTrack(active.clipId, targetLane.trackId, position);
+          return;
         }
-      }, 0);
 
-      const lanes = readLaneBounds();
-      if (active.kind === 'clip') {
-        const targetLane = resolveTargetLane(lanes, event.clientY, active.sourceTrackId, ctx.lockedTracks);
-        if (targetLane === null) return;
-        const position = computeClipDropPositionMs({
+        const trimLane = lanes.find((lane) => lane.trackId === active.trackId && !ctx.lockedTracks[lane.trackId]);
+        if (trimLane === undefined) return;
+        const position = computeTrimPositionMs({
           timeline: ctx.project.timeline,
           clipId: active.clipId,
           clientX: event.clientX,
-          laneLeft: targetLane.left,
-          laneWidth: targetLane.width,
+          laneLeft: trimLane.left,
+          laneWidth: trimLane.width,
           durationMs: ctx.view.durationMs,
-          offsetMs: active.offsetMs,
           playheadMs: ctx.editor.playheadMs,
           snappingEnabled: ctx.snappingEnabled,
           altKey: event.altKey,
           snapMs
         });
-        ctx.editor.moveClipToTrack(active.clipId, targetLane.trackId, position);
-        return;
-      }
-
-      const trimLane = lanes.find((lane) => lane.trackId === active.trackId && !ctx.lockedTracks[lane.trackId]);
-      if (trimLane === undefined) return;
-      const position = computeTrimPositionMs({
-        timeline: ctx.project.timeline,
-        clipId: active.clipId,
-        clientX: event.clientX,
-        laneLeft: trimLane.left,
-        laneWidth: trimLane.width,
-        durationMs: ctx.view.durationMs,
-        playheadMs: ctx.editor.playheadMs,
-        snappingEnabled: ctx.snappingEnabled,
-        altKey: event.altKey,
-        snapMs
+        ctx.editor.trimClipTo(active.clipId, active.edge, position);
       });
-      ctx.editor.trimClipTo(active.clipId, active.edge, position);
     };
 
     const onWindowPointerCancel = (event: PointerEvent): void => {
@@ -672,6 +677,9 @@ export function TimelineCanvas({ editor, id }: TimelineCanvasProps): ReactElemen
   const onStackPointerUp = (event: React.PointerEvent<HTMLDivElement>): void => {
     panOriginRef.current = null;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    if (event.type === 'pointerup' && !isActiveTimelineDragAborted() && pointerDragRef.current === null) {
+      runWithCuaActionAttribution('drag', () => undefined);
+    }
   };
 
   // Razor tool: clicking a clip splits it at the clicked timeline position.
