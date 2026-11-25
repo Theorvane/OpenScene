@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import type { BrowserWindow, KeyboardInputEvent, MouseInputEvent } from 'electron';
-import { CUA_KEYS, type CuaActionRequest, type CuaCancelAck, type CuaFrame, type CuaKey, type CuaPoint, type CuaPrepareAck, type CuaRect, type CuaState, type CuaSurfaceSnapshot } from '../shared/cua';
+import { CUA_KEYS, type CuaActionSettlementAck, type CuaActionSettlementTag, type CuaDispatchReceipt, type CuaReleaseFailure, type CuaActionRequest, type CuaCancelAck, type CuaFrame, type CuaKey, type CuaPoint, type CuaPrepareAck, type CuaRect, type CuaState, type CuaSurfaceSnapshot } from '../shared/cua';
 
 export type CuaFrameScope = Pick<CuaFrame, 'sessionId' | 'runId' | 'windowId' | 'frameId' | 'layoutRevision' | 'contentRevision'>;
 export type CuaFrameMetadata = Omit<CuaFrame, 'pngDataUrl'>;
@@ -40,6 +40,14 @@ function crosses(a: CuaPoint, b: CuaPoint, r: CuaRect): boolean {
 
 /** Holds only the explicitly supplied app window; never discovers OS windows. */
 export class CuaDriver {
+  private receipt: CuaDispatchReceipt | null = null;
+  private normalRelease = false;
+  private physicalRelease: Promise<void> | null = null;
+  private postInput: {
+    tag: CuaActionSettlementTag; stage: 'prepared' | 'armed' | 'released'; triggerAttempted: boolean;
+    reported: { layoutRevision: number; contentRevision: number } | null;
+    resolve: (accepted: boolean) => void;
+  } | null = null;
   private observationLease: { controller: AbortController; settled: Promise<void> } | null = null;
   private surface: CuaSurfaceSnapshot | null = null;
   private frame: CuaFrame | null = null;
@@ -59,7 +67,7 @@ export class CuaDriver {
   private state: CuaState;
 
   constructor(private readonly window: BrowserWindow, private readonly dependencies: CuaDriverDependencies) {
-    this.state = { prepareToken: null, cancelToken: null, targetGone: false, sessionId: null, runId: null, windowId: window.id, phase: 'idle', cursor: null, dragStart: null, target: null, label: null, error: null, cleanupComplete: true, releaseFailures: [] };
+    this.state = { postInput: null, lastDispatchReceipt: null, prepareToken: null, cancelToken: null, targetGone: false, sessionId: null, runId: null, windowId: window.id, phase: 'idle', cursor: null, dragStart: null, target: null, label: null, error: null, cleanupComplete: true, releaseFailures: [] };
     window.on('blur', () => { void this.cancel('blur'); });
     window.on('resize', () => { void this.cancel('resize'); });
     window.on('move', () => { void this.cancel('window-moved'); });
@@ -87,6 +95,42 @@ export class CuaDriver {
     });
   }
   getState(): CuaState { return structuredClone(this.state); }
+  getLastDispatchReceipt(scope: { sessionId: string; runId: string; actionId?: string }): CuaDispatchReceipt | null {
+    const receipt = this.receipt;
+    return receipt && receipt.sessionId === scope.sessionId && receipt.runId === scope.runId
+      && (scope.actionId === undefined || receipt.actionId === scope.actionId) ? structuredClone(receipt) : null;
+  }
+  private updateReceipt(patch: Partial<CuaDispatchReceipt>, notify = true): void {
+    if (!this.receipt) return;
+    this.receipt = { ...this.receipt, ...patch };
+    const r = this.receipt;
+    this.receipt = { ...r, dispatch: r.attemptedEvents === 0 ? 'no-dispatch'
+      : r.attemptedEvents === r.expectedEvents && r.returnedEvents === r.expectedEvents && !r.dispatchUncertain
+        && r.release.heldInputCount === 0 && !r.release.failures.length ? 'full-dispatch' : 'partial-dispatch' };
+    this.state = { ...this.state, lastDispatchReceipt: structuredClone(this.receipt) };
+    if (notify) this.publish({ lastDispatchReceipt: structuredClone(this.receipt) });
+  }
+  private matchesSettlement(tag: CuaActionSettlementTag): boolean {
+    const pending = this.postInput;
+    return !!pending && !!tag && pending.tag.sessionId === tag.sessionId && pending.tag.runId === tag.runId
+      && pending.tag.windowId === tag.windowId && pending.tag.actionId === tag.actionId
+      && pending.tag.generation === tag.generation && this.generation === tag.generation
+      && pending.tag.settlementToken === tag.settlementToken;
+  }
+  acknowledgeActionSettlement(ack: CuaActionSettlementAck): boolean {
+    const pending = this.postInput;
+    if (!this.matchesSettlement(ack) || !pending || pending.stage !== 'released' || !pending.reported
+      || !['committed', 'noop'].includes(ack.outcome) || this.getHeldInputCount() !== 0
+      || !this.receipt || (ack.outcome === 'noop' ? ack.contentRevision !== this.receipt.contentRevision : ack.contentRevision <= this.receipt.contentRevision)
+      || ack.layoutRevision !== pending.reported.layoutRevision || ack.contentRevision !== pending.reported.contentRevision
+      || this.surface?.layoutRevision !== ack.layoutRevision || this.surface.contentRevision !== ack.contentRevision) return false;
+    try { this.live(); } catch { return false; }
+    if (this.state.phase !== 'acting' || this.executionBlocked || this.surface.executionBlocked || !this.surface.safeSurface?.interactive) return false;
+    this.postInput = null;
+    this.updateReceipt({ rendererSettlement: 'acknowledged', observationReady: true });
+    pending.resolve(true);
+    return true;
+  }
   /** Main-only diagnostics; no input, capture or authority is granted. */
   getHeldInputCount(): number {
     return Number(this.heldMouse !== null) + Number(this.heldKey !== null);
@@ -183,7 +227,11 @@ export class CuaDriver {
     if (['ready', 'preparing', 'acting'].includes(this.state.phase)) void this.cancel('invalid-surface');
     throw new Error(code);
   }
-  reportSurface(snapshot: CuaSurfaceSnapshot): void {
+  reportSurface(snapshot: CuaSurfaceSnapshot, settlement?: CuaActionSettlementTag): boolean {
+    if (!snapshot) this.invalidSurface();
+    if (settlement && (!this.matchesSettlement(settlement) || this.postInput?.stage === 'prepared' || !this.postInput?.triggerAttempted)) return false;
+    if (settlement && this.postInput?.reported && (snapshot.layoutRevision !== this.postInput.reported.layoutRevision
+      || snapshot.contentRevision !== this.postInput.reported.contentRevision)) { void this.cancel('settlement-content-changed'); return false; }
     // Runtime validation is mandatory: the bridge does not make renderer data trusted.
     if (!snapshot || !Number.isSafeInteger(snapshot.layoutRevision) || snapshot.layoutRevision < 0
       || !Number.isSafeInteger(snapshot.contentRevision) || snapshot.contentRevision < 0
@@ -216,12 +264,17 @@ export class CuaDriver {
     const contentChanged = this.surface !== null && snapshot.contentRevision !== this.surface.contentRevision;
     this.surface = structuredClone(snapshot);
     if (changed) { this.frame = null; if (['ready', 'preparing', 'acting'].includes(this.state.phase)) void this.cancel('surface-changed'); }
-    else if (contentChanged) this.invalidateContent();
+    else if (contentChanged && !settlement) this.invalidateContent();
     else if (this.state.phase === 'acting' && (snapshot.executionBlocked || !snapshot.safeSurface?.interactive)) void this.cancel('surface-blocked');
+    if (settlement && this.matchesSettlement(settlement) && this.postInput && !changed) {
+      this.postInput.reported = { layoutRevision: snapshot.layoutRevision, contentRevision: snapshot.contentRevision };
+      return true;
+    }
+    return !settlement;
   }
   async observe(context: { sessionId: string; runId: string }): Promise<CuaFrame> {
     this.live();
-    if (this.observationLease || this.dependencies.getPendingApproval?.()) throw new Error('CUA_BUSY');
+    if (this.postInput || this.observationLease || this.dependencies.getPendingApproval?.()) throw new Error('CUA_BUSY');
     if (this.observing || this.state.phase === 'acting' || this.state.phase === 'preparing' || this.state.phase === 'stopping' || this.cleanupFailureLatched) throw new Error('CUA_BUSY');
     if (!context.sessionId || !context.runId || !this.surface?.safeSurface) throw new Error('CUA_UNSAFE_SURFACE');
     this.observing = true;
@@ -316,9 +369,28 @@ export class CuaDriver {
       if (!this.frame || this.window.webContents.getZoomFactor() !== this.frame.zoomFactor
         || (this.dependencies.getDeviceScaleFactor?.() ?? 1) !== this.frame.deviceScaleFactor) throw new Error('CUA_STALE_FRAME');
     }
+    if (this.postInput?.stage === 'armed' && this.receipt && (
+      (this.receipt.actionKind === 'key' && event.type === 'keyDown')
+      || (this.receipt.actionKind === 'click' && event.type === 'mouseDown')
+      || (this.receipt.actionKind === 'drag' && this.normalRelease && event.type === 'mouseUp')
+    )) this.postInput.triggerAttempted = true;
+    const planned = !release || this.normalRelease;
+    if (this.receipt) this.updateReceipt({
+      attemptedEvents: this.receipt.attemptedEvents + Number(planned),
+      release: { ...this.receipt.release, heldInputCount: this.getHeldInputCount(), attemptedEvents: this.receipt.release.attemptedEvents + Number(release) }
+    }, false);
     this.injecting = true;
-    try { this.window.webContents.sendInputEvent(event); }
-    finally { this.injecting = false; }
+    try {
+      this.window.webContents.sendInputEvent(event);
+      if (this.receipt) this.updateReceipt({ returnedEvents: this.receipt.returnedEvents + Number(planned),
+        release: { ...this.receipt.release, returnedEvents: this.receipt.release.returnedEvents + Number(release) } }, false);
+    } catch (error) {
+      this.updateReceipt({ dispatchUncertain: true }, false);
+      throw new Error('CUA_NATIVE_DISPATCH_UNCERTAIN');
+    } finally {
+      this.injecting = false;
+      if (this.receipt && !release) this.publish({ lastDispatchReceipt: structuredClone(this.receipt) });
+    }
   }
   private async verifyDom(request: CuaActionRequest, points: readonly CuaPoint[]): Promise<void> {
     const surface = this.surface;
@@ -346,6 +418,22 @@ export class CuaDriver {
     if (signal?.aborted) throw new Error('CUA_CANCELLED');
     this.dependencies.checkPermit(request, permit); // No preparation without exact main approval.
     const generation = this.generation;
+    const actionId = randomUUID();
+    const tag: CuaActionSettlementTag = { sessionId: request.sessionId, runId: request.runId, windowId: request.windowId,
+      actionId, generation, settlementToken: randomUUID() };
+    const settled = new Promise<boolean>(resolve => { this.postInput = { tag, stage: 'prepared', triggerAttempted: false, reported: null, resolve }; });
+    this.receipt = { actionId, actionKind: request.action.kind, sessionId: request.sessionId, runId: request.runId,
+      windowId: request.windowId, frameId: request.frameId, layoutRevision: request.layoutRevision, contentRevision: request.contentRevision,
+      generation, dispatch: 'no-dispatch', expectedEvents: request.action.kind === 'key' ? 2 : this.validate(request, false, true).length + 2,
+      attemptedEvents: 0, returnedEvents: 0, dispatchUncertain: false,
+      release: { attemptedEvents: 0, returnedEvents: 0, heldInputCount: 0, failures: [] }, rendererSettlement: 'pending', observationReady: false };
+    this.updateReceipt({}, false);
+    const arm = (): void => {
+      if (!this.postInput || generation !== this.generation) throw new Error('CUA_CANCELLED');
+      this.postInput.stage = 'armed';
+      this.publish({ postInput: { ...tag, actionKind: request.action.kind, stage: 'armed' } });
+      if (generation !== this.generation || this.state.phase !== 'acting' || !this.postInput) throw new Error('CUA_CANCELLED');
+    };
     const abort = (): void => { void this.cancel('aborted'); };
     signal?.addEventListener('abort', abort, { once: true });
     try {
@@ -353,7 +441,7 @@ export class CuaDriver {
       const acknowledged = new Promise<boolean>(resolve => {
         this.prepareAck = { token: prepareToken, request: structuredClone(request), resolve };
       });
-      this.publish({ phase: 'preparing', prepareToken, cleanupComplete: true, label: request.action.kind });
+      this.publish({ postInput: { ...tag, actionKind: request.action.kind, stage: 'prepared' }, phase: 'preparing', prepareToken, cleanupComplete: true, label: request.action.kind });
       let timeout!: ReturnType<typeof setTimeout>;
       let prepared: boolean;
       try { prepared = await Promise.race([acknowledged, new Promise<false>(resolve => { timeout = setTimeout(() => resolve(false), 500); })]); }
@@ -370,11 +458,14 @@ export class CuaDriver {
       this.publish({ phase: 'acting', prepareToken: null, cleanupComplete: false });
       if (generation !== this.generation || signal?.aborted) throw new Error('CUA_CANCELLED');
       if (request.action.kind === 'key') {
+        arm();
         this.heldKey = { type: 'keyDown', keyCode: ELECTRON_KEY_CODES[request.action.key] ?? request.action.key, modifiers: [...request.action.modifiers] };
         this.input(this.heldKey);
       } else {
         const first = points[0]!;
-        this.mouse('mouseMove', first); this.heldMouse = first; this.heldZoom = this.window.webContents.getZoomFactor(); this.mouse('mouseDown', first);
+        this.mouse('mouseMove', first); this.heldMouse = first; this.heldZoom = this.window.webContents.getZoomFactor();
+        if (request.action.kind === 'click') arm();
+        this.mouse('mouseDown', first);
         this.publish({ cursor: first, dragStart: request.action.kind === 'drag' ? first : null, target: points.at(-1)! });
         if (request.action.kind === 'drag') for (const p of points.slice(1)) {
           await new Promise(resolve => setTimeout(resolve, request.action.kind === 'drag' ? request.action.durationMs / 60 : 0));
@@ -385,30 +476,60 @@ export class CuaDriver {
         }
       }
       if (generation !== this.generation) throw new Error('CUA_CANCELLED');
-      const failures = this.release();
-      if (failures.length) this.cleanupFailureLatched = true;
+      if (request.action.kind === 'drag') arm();
+      this.normalRelease = true;
+      let failures: string[];
+      try { failures = this.release(); } finally { this.normalRelease = false; }
+      if (failures.length) { this.cleanupFailureLatched = true; throw new Error('CUA_RELEASE_FAILED'); }
+      if (generation !== this.generation || !this.postInput) throw new Error('CUA_CANCELLED');
       this.frame = null;
-      this.publish({ phase: failures.length ? 'cleanup-failed' : 'ready', cleanupComplete: !failures.length, releaseFailures: failures, error: failures.length ? 'CUA_RELEASE_FAILED' : null, dragStart: null });
-      if (failures.length) throw new Error('CUA_RELEASE_FAILED');
+      this.postInput.stage = 'released';
+      this.publish({ postInput: { ...tag, actionKind: request.action.kind, stage: 'released' }, cleanupComplete: true, dragStart: null });
+      let timer!: ReturnType<typeof setTimeout>;
+      let accepted: boolean;
+      try { accepted = await Promise.race([settled, new Promise<false>(resolve => { timer = setTimeout(() => resolve(false), 1000); })]); }
+      finally { clearTimeout(timer); }
+      if (!accepted || generation !== this.generation) {
+        if (this.receipt?.rendererSettlement === 'pending') this.updateReceipt({ rendererSettlement: 'timed-out', observationReady: false });
+        await this.cancel('CUA_POST_INPUT_SETTLEMENT_UNCONFIRMED');
+        return this.getState();
+      }
+      this.publish({ postInput: null, phase: 'ready', cleanupComplete: true, releaseFailures: [], error: null });
       return this.getState();
-    } catch (error) { await this.cancel(error instanceof Error ? error.message : 'error'); throw error; }
+    } catch (error) {
+      await this.cancel(error instanceof Error ? error.message : 'error');
+      if (this.receipt && this.receipt.attemptedEvents > 0) return this.getState();
+      throw error;
+    }
     finally { signal?.removeEventListener('abort', abort); }
   }
   private release(): string[] {
+    let resolveRelease!: () => void;
+    this.physicalRelease = new Promise(resolve => { resolveRelease = resolve; });
+    try {
     const failures: string[] = [];
     if (this.heldMouse) { try { this.mouse('mouseUp', this.heldMouse); this.heldMouse = null; this.heldZoom = null; } catch { failures.push('left'); } }
     if (this.heldKey) { const key = this.heldKey; try { this.input({ ...key, type: 'keyUp' }); this.heldKey = null; } catch { failures.push(key.keyCode); } }
+    if (this.receipt) {
+      const safeFailures: CuaReleaseFailure[] = failures.map(value => value === 'left' ? 'mouse-release-failed' : 'key-release-failed');
+      this.updateReceipt({ release: { ...this.receipt.release, heldInputCount: this.getHeldInputCount(),
+        failures: [...new Set([...this.receipt.release.failures, ...safeFailures])] } });
+    }
     return failures;
+    } finally { this.physicalRelease = null; resolveRelease(); }
   }
   cancel(reason = 'stopped'): Promise<CuaState> {
     if (this.cancellation) return this.cancellation;
     const lease = this.observationLease;
     const leaseSettlement = lease?.settled;
     this.generation++; this.frame = null; this.executionBlocked = true;
+    const postInput = this.postInput; this.postInput = null; postInput?.resolve(false);
     const pendingPrepare = this.prepareAck; this.prepareAck = null; pendingPrepare?.resolve(false);
     // Assign the promise before callbacks so recursive cancellation is idempotent.
     let settle!: (state: CuaState) => void;
     this.cancellation = new Promise(resolve => { settle = resolve; });
+    if (this.receipt) this.updateReceipt({ observationReady: false,
+      rendererSettlement: this.receipt.rendererSettlement === 'pending' ? 'cancelled' : this.receipt.rendererSettlement });
     lease?.controller.abort();
     const needsAck = this.heldMouse !== null && this.state.dragStart !== null && this.state.runId !== null;
     let ackReceived = false;
@@ -419,7 +540,7 @@ export class CuaDriver {
     let revokeFailed = false;
     try { this.dependencies.onCancel?.({ sessionId: this.state.sessionId, runId: this.state.runId, reason }); }
     catch { reason += ':authority-revoke-failed'; revokeFailed = true; }
-    this.publish({ phase: 'stopping', prepareToken: null, error: reason, cleanupComplete: false, cancelToken: token });
+    this.publish({ postInput: null, phase: 'stopping', prepareToken: null, error: reason, cleanupComplete: false, cancelToken: token });
     void (async () => {
       if (needsAck) {
         let timeout!: ReturnType<typeof setTimeout>;
@@ -427,6 +548,7 @@ export class CuaDriver {
         clearTimeout(timeout);
       }
       this.cancelAck = null;
+      if (this.physicalRelease) await this.physicalRelease;
       const hadHeldInput = this.heldMouse !== null || this.heldKey !== null;
       const failures = this.release(); // Always attempt physical release, even without rollback ack.
       if (needsAck && !ackReceived) failures.push('renderer-rollback-unconfirmed');
@@ -434,6 +556,14 @@ export class CuaDriver {
       const targetGone = this.state.targetGone || this.window.isDestroyed() || this.window.webContents.isDestroyed();
       if (targetGone && hadHeldInput) failures.push('target-gone-release-unconfirmed');
       if (failures.length) this.cleanupFailureLatched = true;
+      if (this.receipt) {
+        const codes: CuaReleaseFailure[] = [];
+        if (failures.includes('renderer-rollback-unconfirmed')) codes.push('rollback-unconfirmed');
+        if (failures.includes('authority-revoke')) codes.push('authority-revoke-failed');
+        if (failures.includes('target-gone-release-unconfirmed')) codes.push('target-gone');
+        this.updateReceipt({ release: { ...this.receipt.release, heldInputCount: this.getHeldInputCount(),
+          failures: [...new Set([...this.receipt.release.failures, ...codes])] } });
+      }
       if (leaseSettlement) await leaseSettlement; // Never claim stopped while transport is live.
       this.publish({ phase: this.cleanupFailureLatched ? 'cleanup-failed' : 'stopped', targetGone, error: reason, cleanupComplete: !this.cleanupFailureLatched, releaseFailures: failures.length ? failures : this.state.releaseFailures, dragStart: null, cancelToken: null });
       settle(this.getState());

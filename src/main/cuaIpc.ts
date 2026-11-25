@@ -1,6 +1,6 @@
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron';
 import { IPC_CHANNELS } from '../shared/ipc';
-import type { CuaCancelAck, CuaPrepareAck, CuaSurfaceSnapshot } from '../shared/cua';
+import type { CuaActionSettlementAck, CuaActionSettlementTag, CuaCancelAck, CuaPrepareAck, CuaSurfaceSnapshot } from '../shared/cua';
 import { fail, ok } from './ipcResponses';
 import type { CuaDriver } from './cuaDriver';
 
@@ -18,13 +18,16 @@ export function registerCuaIpc(ipc: IpcMain, getTarget: () => { window: BrowserW
   ipc.handle(IPC_CHANNELS.cuaAckCancel, (event, ack: CuaCancelAck) => {
     try { return ok({ accepted: own(event).acknowledgeCancel(ack) }); } catch (e) { return fail('UNKNOWN_ERROR', String(e)); }
   });
+  ipc.handle(IPC_CHANNELS.cuaAckActionSettlement, (event, ack: CuaActionSettlementAck) => {
+    try { return ok({ accepted: own(event).acknowledgeActionSettlement(ack) }); } catch { return fail('UNKNOWN_ERROR', 'CUA_ACTION_SETTLEMENT_REJECTED'); }
+  });
   ipc.handle(IPC_CHANNELS.cuaAckPrepare, (event, ack: CuaPrepareAck) => {
     try { return ok({ accepted: own(event).acknowledgePrepare(ack) }); } catch (e) { return fail('UNKNOWN_ERROR', String(e)); }
   });
   ipc.handle(IPC_CHANNELS.cuaStop, event => {
     try { void own(event).cancel('user-stop'); return ok({ accepted: true }); } catch (e) { return fail('UNKNOWN_ERROR', String(e)); }
   });
-  ipc.handle(IPC_CHANNELS.cuaReportSurfaceSnapshot, (event, snapshot: CuaSurfaceSnapshot) => {
-    try { own(event).reportSurface(snapshot); return ok({ accepted: true }); } catch (e) { return fail('UNKNOWN_ERROR', String(e)); }
+  ipc.handle(IPC_CHANNELS.cuaReportSurfaceSnapshot, (event, snapshot: CuaSurfaceSnapshot, settlement?: CuaActionSettlementTag) => {
+    try { return ok({ accepted: own(event).reportSurface(snapshot, settlement) }); } catch (e) { return fail('UNKNOWN_ERROR', String(e)); }
   });
 }
