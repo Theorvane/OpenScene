@@ -23,17 +23,23 @@ interface CuaActionSettlementCoordinatorInstance {
     readonly actionKind: CuaAction['kind'];
     readonly stage: CuaPostInputState['stage'];
     readonly baseContentRevision: number;
-    readonly attribution: { readonly expectCommit: boolean } | null;
+    readonly baseContentFingerprint: string | null;
+    readonly attribution: {
+      readonly expectCommit: boolean;
+      readonly expectedContentFingerprint: string | null;
+    } | null;
+    readonly tainted: boolean;
     readonly consumed: boolean;
   }> | null;
   clear(): void;
-  syncFromCuaState(state: CuaState, currentContentRevision: number): void;
-  notifyTimelineMutationScheduled(): void;
+  syncFromCuaState(state: CuaState, currentContentRevision: number, currentContentFingerprint?: string | null): void;
+  notifyTimelineMutationScheduled(expectedFingerprint?: string): void;
+  notifyExternalTimelineMutation(): void;
   runWithAttribution<T>(actionKind: CuaAction['kind'], fn: () => T): T;
   beginClickAttribution(): boolean;
   completeClickAttribution(): boolean;
-  shouldDeferAttributedContentReport(currentContentRevision: number): boolean;
-  takeReadySettlement(currentContentRevision: number): ReadyCuaActionSettlement | null;
+  shouldDeferAttributedContentReport(currentContentRevision: number, currentContentFingerprint?: string | null): boolean;
+  takeReadySettlement(currentContentRevision: number, currentContentFingerprint?: string | null): ReadyCuaActionSettlement | null;
 }
 
 interface CuaSettlementModule {
@@ -404,7 +410,244 @@ describe('CuaActionSettlementCoordinator (renderer post-input action attribution
     expect(overlaySrc).toContain('api.cuaReportSurfaceSnapshot(nextSnapshot, settlement)');
     expect(overlaySrc).toContain('api.cuaAckActionSettlement({');
     expect(canvasSrc).toContain("runWithCuaActionAttribution('drag'");
-    expect(editorSrc).toContain('notifyCuaTimelineMutationScheduled()');
+    expect(editorSrc).toContain('computeTimelineContentFingerprint(');
+    expect(editorSrc).toContain('notifyCuaTimelineMutationScheduled(');
+    expect(editorSrc).toContain('notifyExternalCuaTimelineMutation()');
     expect(shortcutsSrc).toContain("runWithCuaActionAttribution('key'");
+  });
+
+  it('blocks Backend repro: out-of-scope external mutation after drag attribution taints tracker and cancels CuaDriver with content-changed', async () => {
+    const { CuaActionSettlementCoordinator } = await loadSettlementModule();
+    const f = createDriverFixture();
+    const coordinator = new CuaActionSettlementCoordinator();
+    const fp1 = '["p1",{"clip":0},[]]';
+    const fp2 = '["p1",{"clip":115},[]]';
+    const fp3 = '["p1",{"clip":115,"ext":true},[]]';
+    let currentContentRevision = 1;
+    let currentFingerprint = fp1;
+    let reportedUntagged = 0;
+
+    const flush = (): void => {
+      const ready = coordinator.takeReadySettlement(currentContentRevision, currentFingerprint);
+      if (ready !== null) {
+        const nextSurface: CuaSurfaceSnapshot = { ...f.surface, contentRevision: currentContentRevision };
+        if (f.driver.reportSurface(nextSurface, ready.tag)) {
+          f.driver.acknowledgeActionSettlement({
+            ...ready.tag,
+            layoutRevision: nextSurface.layoutRevision,
+            contentRevision: nextSurface.contentRevision,
+            outcome: ready.outcome
+          });
+        }
+        return;
+      }
+      if (!coordinator.shouldDeferAttributedContentReport(currentContentRevision, currentFingerprint)) {
+        reportedUntagged += 1;
+        f.driver.reportSurface({ ...f.surface, contentRevision: currentContentRevision });
+      }
+    };
+
+    f.setOnStateHook((nextState) => {
+      coordinator.syncFromCuaState(nextState, currentContentRevision, currentFingerprint);
+      if (nextState.phase === 'preparing' && nextState.prepareToken !== null && nextState.runId !== null) {
+        queueMicrotask(() => {
+          f.driver.acknowledgePrepare({ runId: nextState.runId!, prepareToken: nextState.prepareToken! });
+        });
+      }
+    });
+
+    f.sendInputEvent.mockImplementation((event: { type?: string }) => {
+      if (event.type === 'mouseUp') {
+        // 1. Real attributed CUA drag schedules rev 1 -> 2 (fp2).
+        coordinator.runWithAttribution('drag', () => {
+          coordinator.notifyTimelineMutationScheduled(fp2);
+        });
+        // 2. External unattributed edit runs OUTSIDE attribution scope -> rev becomes 3 (fp3)!
+        coordinator.notifyTimelineMutationScheduled(fp3);
+        currentContentRevision = 3;
+        currentFingerprint = fp3;
+
+        expect(coordinator.getTracker()?.tainted).toBe(true);
+        expect(coordinator.shouldDeferAttributedContentReport(3, fp3)).toBe(false);
+        expect(coordinator.takeReadySettlement(3, fp3)).toBeNull();
+
+        queueMicrotask(() => flush());
+      }
+    });
+
+    const initialFrame = await f.driver.observe({ sessionId: 'sess-1', runId: 'run-1' });
+    const endState = await f.driver.execute(
+      {
+        sessionId: 'sess-1',
+        runId: 'run-1',
+        windowId: 7,
+        frameId: initialFrame.frameId,
+        layoutRevision: initialFrame.layoutRevision,
+        contentRevision: initialFrame.contentRevision,
+        action: { kind: 'drag', from: { x: 200, y: 600 }, to: { x: 265, y: 600 }, durationMs: 100 }
+      },
+      'approved-permit'
+    );
+
+    expect(reportedUntagged).toBeGreaterThanOrEqual(1);
+    expect(f.onCancel).toHaveBeenCalledWith(expect.objectContaining({ reason: 'content-changed' }));
+    expect(endState.phase).toBe('stopped');
+    expect(endState.lastDispatchReceipt?.rendererSettlement).toBe('cancelled');
+  });
+
+  it('catches same-React-commit batching (Layer 2 fingerprint mismatch even when contentRevision increments 1 -> 2 only once)', async () => {
+    const { CuaActionSettlementCoordinator } = await loadSettlementModule();
+    const f = createDriverFixture();
+    const coordinator = new CuaActionSettlementCoordinator();
+    const fpBase = '["p1",{"clip":0},[]]';
+    const fpAttributedOnly = '["p1",{"clip":115},[]]';
+    const fpCombinedWithExternal = '["p1",{"clip":115,"externalMcpTitle":"injected"},[]]';
+    let currentContentRevision = 1;
+    let currentFingerprint = fpBase;
+    let sentTagged = 0;
+    let releaseChecked = false;
+    let taintedObserved = false;
+
+    f.setOnStateHook((nextState) => {
+      coordinator.syncFromCuaState(nextState, currentContentRevision, currentFingerprint);
+      if (nextState.phase === 'preparing' && nextState.prepareToken !== null && nextState.runId !== null) {
+        queueMicrotask(() => {
+          f.driver.acknowledgePrepare({ runId: nextState.runId!, prepareToken: nextState.prepareToken! });
+        });
+      }
+      if (nextState.postInput?.stage === 'released' && !releaseChecked) {
+        releaseChecked = true;
+        queueMicrotask(() => {
+          // Even if an external mutation bypassed Layer 1 and batched into the exact same React
+          // commit (so contentRevision only bumped once from 1 -> 2), Layer 2 sees
+          // fpCombinedWithExternal !== fpAttributedOnly and rejects attribution!
+          const deferred = coordinator.shouldDeferAttributedContentReport(2, fpCombinedWithExternal);
+          const ready = coordinator.takeReadySettlement(2, fpCombinedWithExternal);
+          taintedObserved = !deferred && ready === null && coordinator.getTracker()?.tainted === true;
+          if (ready !== null) {
+            sentTagged += 1;
+          } else {
+            f.driver.reportSurface({ ...f.surface, contentRevision: 2 });
+          }
+        });
+      }
+    });
+
+    f.sendInputEvent.mockImplementation((event: { type?: string }) => {
+      if (event.type === 'mouseUp') {
+        coordinator.runWithAttribution('drag', () => {
+          coordinator.notifyTimelineMutationScheduled(fpAttributedOnly);
+        });
+        currentContentRevision = 2;
+        currentFingerprint = fpCombinedWithExternal;
+      }
+    });
+
+    const initialFrame = await f.driver.observe({ sessionId: 'sess-1', runId: 'run-1' });
+    const endState = await f.driver.execute(
+      {
+        sessionId: 'sess-1',
+        runId: 'run-1',
+        windowId: 7,
+        frameId: initialFrame.frameId,
+        layoutRevision: initialFrame.layoutRevision,
+        contentRevision: initialFrame.contentRevision,
+        action: { kind: 'drag', from: { x: 200, y: 600 }, to: { x: 265, y: 600 }, durationMs: 100 }
+      },
+      'approved-permit'
+    );
+
+    expect(taintedObserved).toBe(true);
+    expect(sentTagged).toBe(0);
+    expect(f.onCancel).toHaveBeenCalledWith(expect.objectContaining({ reason: 'content-changed' }));
+    expect(endState.phase).toBe('stopped');
+  });
+
+  it('taints tracker permanently on external edit BEFORE runWithAttribution (prepared/armed) and AFTER noop attribution before ACK', async () => {
+    const { CuaActionSettlementCoordinator } = await loadSettlementModule();
+
+    // Case A: external edit while stage === 'prepared' before handler runs
+    const preCoord = new CuaActionSettlementCoordinator();
+    preCoord.syncFromCuaState(makeState({ phase: 'preparing', postInput: makePostInput({ stage: 'prepared' }) }), 1, 'fp-1');
+    preCoord.notifyExternalTimelineMutation();
+    expect(preCoord.getTracker()?.tainted).toBe(true);
+
+    preCoord.syncFromCuaState(makeState({ phase: 'acting', postInput: makePostInput({ stage: 'armed' }) }), 2, 'fp-ext');
+    preCoord.runWithAttribution('drag', () => {
+      preCoord.notifyTimelineMutationScheduled('fp-drag');
+    });
+    preCoord.syncFromCuaState(makeState({ phase: 'acting', postInput: makePostInput({ stage: 'released' }) }), 3, 'fp-drag');
+    expect(preCoord.shouldDeferAttributedContentReport(3, 'fp-drag')).toBe(false);
+    expect(preCoord.takeReadySettlement(3, 'fp-drag')).toBeNull();
+
+    // Case B: external edit while stage === 'armed' before handler runs
+    const armedCoord = new CuaActionSettlementCoordinator();
+    armedCoord.syncFromCuaState(makeState({ phase: 'preparing', postInput: makePostInput({ actionId: 'act-2', stage: 'prepared' }) }), 1, 'fp-1');
+    armedCoord.syncFromCuaState(makeState({ phase: 'acting', postInput: makePostInput({ actionId: 'act-2', stage: 'armed' }) }), 1, 'fp-1');
+    armedCoord.notifyTimelineMutationScheduled('fp-ext'); // outside runWithAttribution -> taints immediately!
+    expect(armedCoord.getTracker()?.tainted).toBe(true);
+    armedCoord.runWithAttribution('drag', () => {
+      armedCoord.notifyTimelineMutationScheduled('fp-drag');
+    });
+    armedCoord.syncFromCuaState(makeState({ phase: 'acting', postInput: makePostInput({ actionId: 'act-2', stage: 'released' }) }), 2, 'fp-drag');
+    expect(armedCoord.takeReadySettlement(2, 'fp-drag')).toBeNull();
+
+    // Case C: external edit AFTER noop attribution before ACK
+    const noopCoord = new CuaActionSettlementCoordinator();
+    noopCoord.syncFromCuaState(
+      makeState({ phase: 'preparing', postInput: makePostInput({ actionId: 'act-noop', actionKind: 'click', stage: 'prepared' }) }),
+      5,
+      'fp-5'
+    );
+    noopCoord.syncFromCuaState(
+      makeState({ phase: 'acting', postInput: makePostInput({ actionId: 'act-noop', actionKind: 'click', stage: 'armed' }) }),
+      5,
+      'fp-5'
+    );
+    expect(noopCoord.beginClickAttribution()).toBe(true);
+    expect(noopCoord.completeClickAttribution()).toBe(true);
+    // External edit lands before stage='released' / ACK:
+    noopCoord.notifyTimelineMutationScheduled('fp-6');
+    expect(noopCoord.getTracker()?.tainted).toBe(true);
+    noopCoord.syncFromCuaState(
+      makeState({ phase: 'acting', postInput: makePostInput({ actionId: 'act-noop', actionKind: 'click', stage: 'released' }) }),
+      6,
+      'fp-6'
+    );
+    expect(noopCoord.takeReadySettlement(6, 'fp-6')).toBeNull();
+    expect(noopCoord.takeReadySettlement(5, 'fp-5')).toBeNull();
+  });
+
+  it('strictly rejects multi-step revision jump (base=1 -> rev=3) even without explicit Layer 1 taint call, while allowing clean base=1 -> rev=2 with matching fingerprint', async () => {
+    const { CuaActionSettlementCoordinator } = await loadSettlementModule();
+
+    // Multi-step rev jump without Layer 1 call (defense-in-depth Layer 2 check):
+    const jumpCoord = new CuaActionSettlementCoordinator();
+    jumpCoord.syncFromCuaState(makeState({ phase: 'preparing', postInput: makePostInput({ stage: 'prepared' }) }), 1, 'fp-1');
+    jumpCoord.syncFromCuaState(makeState({ phase: 'acting', postInput: makePostInput({ stage: 'armed' }) }), 1, 'fp-1');
+    jumpCoord.runWithAttribution('drag', () => {
+      jumpCoord.notifyTimelineMutationScheduled('fp-2');
+    });
+    expect(jumpCoord.shouldDeferAttributedContentReport(3, 'fp-3')).toBe(false);
+    expect(jumpCoord.getTracker()?.tainted).toBe(true);
+    jumpCoord.syncFromCuaState(makeState({ phase: 'acting', postInput: makePostInput({ stage: 'released' }) }), 3, 'fp-3');
+    expect(jumpCoord.takeReadySettlement(3, 'fp-3')).toBeNull();
+
+    // Clean single attributed drag (base=1 -> rev=2, exact fp-2 match):
+    const cleanCoord = new CuaActionSettlementCoordinator();
+    cleanCoord.syncFromCuaState(makeState({ phase: 'preparing', postInput: makePostInput({ actionId: 'act-clean', stage: 'prepared' }) }), 1, 'fp-1');
+    cleanCoord.syncFromCuaState(makeState({ phase: 'acting', postInput: makePostInput({ actionId: 'act-clean', stage: 'armed' }) }), 1, 'fp-1');
+    cleanCoord.runWithAttribution('drag', () => {
+      cleanCoord.notifyTimelineMutationScheduled('fp-2');
+    });
+    expect(cleanCoord.shouldDeferAttributedContentReport(2, 'fp-2')).toBe(true);
+    cleanCoord.syncFromCuaState(makeState({ phase: 'acting', postInput: makePostInput({ actionId: 'act-clean', stage: 'released' }) }), 2, 'fp-2');
+    expect(cleanCoord.takeReadySettlement(2, 'fp-2')).toMatchObject({
+      outcome: 'committed',
+      baseContentRevision: 1,
+      tag: { actionId: 'act-clean' }
+    });
+    // Permanently consumed after one use:
+    expect(cleanCoord.takeReadySettlement(2, 'fp-2')).toBeNull();
   });
 });

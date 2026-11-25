@@ -233,6 +233,7 @@ export function App(): ReactElement {
         activeProjectContext={activeProjectContext}
         hasUnsavedTimeline={editor.hasUnsavedTimeline}
         contentRevision={editor.contentRevision}
+        contentFingerprint={editor.contentFingerprint}
         prepareAgentProject={() => editor.hasUnsavedTimeline ? editor.saveTimeline() : Promise.resolve(true)}
         studioLayout={false}
         projectTabs={projectTabs}

@@ -332,6 +332,7 @@ const CuaOverlayContext = createContext<CuaOverlayController | null>(null);
 
 export function useCuaOverlayState(options: {
   readonly contentRevision: number;
+  readonly contentFingerprint?: string | null;
   readonly isAgentBusy: boolean;
   readonly hasPendingApproval: boolean;
   readonly activePageId: string;
@@ -393,7 +394,7 @@ export function useCuaOverlayState(options: {
     const geometryKey = buildSurfaceGeometryKey(measured);
     if (
       flushOptions?.settlement === undefined &&
-      shouldDeferAttributedCuaContentReport(currentOpts.contentRevision) &&
+      shouldDeferAttributedCuaContentReport(currentOpts.contentRevision, currentOpts.contentFingerprint ?? null) &&
       !measured.hasBlockingOverlay &&
       !measured.executionBlocked &&
       measured.safeSurface !== null &&
@@ -510,7 +511,11 @@ export function useCuaOverlayState(options: {
           // acknowledge cancelToken via cuaAckCancel, and register/advance any
           // post-input settlement tracker before cuaAckPrepare can fire.
           handleCuaStateRollbackAndAckSync(nextState, api.cuaAckCancel);
-          syncCuaActionSettlementFromState(nextState, optionsRef.current.contentRevision);
+          syncCuaActionSettlementFromState(
+            nextState,
+            optionsRef.current.contentRevision,
+            optionsRef.current.contentFingerprint ?? null
+          );
           if (active) applyCuaState(nextState);
         })
       : undefined;
@@ -520,7 +525,11 @@ export function useCuaOverlayState(options: {
         .then((response) => {
           if (active && response.ok) {
             handleCuaStateRollbackAndAckSync(response.value, api.cuaAckCancel);
-            syncCuaActionSettlementFromState(response.value, optionsRef.current.contentRevision);
+            syncCuaActionSettlementFromState(
+              response.value,
+              optionsRef.current.contentRevision,
+              optionsRef.current.contentFingerprint ?? null
+            );
             applyCuaState(response.value);
           }
         })
@@ -730,7 +739,7 @@ export function useCuaOverlayState(options: {
   // emit ONE tagged surface report followed (only if accepted) by cuaAckActionSettlement.
   useLayoutEffect(() => {
     if (typeof window === 'undefined' || typeof document === 'undefined') return;
-    const ready = takeReadyCuaActionSettlement(options.contentRevision);
+    const ready = takeReadyCuaActionSettlement(options.contentRevision, options.contentFingerprint ?? null);
     if (ready === null) return;
 
     void (async () => {
@@ -749,7 +758,7 @@ export function useCuaOverlayState(options: {
         // Main process enforces fail-closed settlement timeouts.
       }
     })();
-  }, [flushSnapshotAsync, options.contentRevision, settlementTick, state.postInput?.stage]);
+  }, [flushSnapshotAsync, options.contentFingerprint, options.contentRevision, settlementTick, state.postInput?.stage]);
 
   // Re-measure whenever page, committed contentRevision, busy/approval flags, or CUA phase changes.
   useEffect(() => {
