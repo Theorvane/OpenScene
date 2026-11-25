@@ -2,6 +2,7 @@ export {
   cn,
   composeCuaSafeEscapeHandler,
   isEditableElement,
+  isolateMenuKeyDown,
   isolateModalKeyDown,
   OS_Z_INDEX
 } from './cn';

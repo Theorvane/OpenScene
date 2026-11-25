@@ -847,6 +847,34 @@ describe('Phase 0 Portal Primitives + Nested Layering & CUA Safety Invariants', 
       dispatchKey(sheetTextarea, 's', { ctrlKey: true });
 
       expect(leakedShortcuts).toEqual([]);
+
+      // Verify DropdownMenu blocks Cmd+S / Ctrl+S from leaking to window Save listener
+      for (const entry of activeRoots.splice(0)) {
+        act(() => entry.root.unmount());
+        entry.container.remove();
+      }
+
+      mount(
+        createElement(
+          UI.DropdownMenu,
+          { defaultOpen: true },
+          createElement(UI.DropdownMenuTrigger, { asChild: true }, createElement(UI.Button, null, 'Actions')),
+          createElement(
+            UI.DropdownMenuContent,
+            null,
+            createElement(UI.DropdownMenuItem, { 'data-testid': 'menu-save-guard-item' }, 'Duplicate')
+          )
+        )
+      );
+
+      const menuContent = doc.querySelector('[data-os-portal="dropdown-menu"][role="menu"]') as DomEl;
+      const menuItem = doc.querySelector('[data-testid="menu-save-guard-item"]') as DomEl;
+      dispatchKey(menuContent, 's', { metaKey: true });
+      dispatchKey(menuContent, 's', { ctrlKey: true });
+      dispatchKey(menuItem, 's', { metaKey: true });
+      dispatchKey(menuItem, 's', { ctrlKey: true });
+
+      expect(leakedShortcuts).toEqual([]);
     } finally {
       win.removeEventListener('keydown', globalShortcutListener);
     }
