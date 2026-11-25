@@ -370,6 +370,33 @@ try {
       assert.equal(evidence.saveRequests.length, legacyBefore, 'Opening a CUA proposal must not perform legacy Save');
       assert.equal(productDowns(), downs);
       const conversation = kind === 'duplicate' ? (await bridge('agentChatHistoryList')).find((entry) => entry.projectId === projectId && entry.title.includes('duplicate')) : null;
+      if (kind === 'remap-key') {
+        const readSafeReturn = async () => ({
+          state: await bridge('cuaGetState'), live: await liveClip(),
+          dom: await js(`(() => {const active=document.activeElement;return {
+            activeTag:active?.tagName,safeFocus:!!active?.closest('[data-cua-safe-surface]'),
+            dirty:document.querySelector('[data-testid=timeline-canvas]')?.dataset.dirty,
+            approval:document.querySelector('.agent-chat-approval')?.textContent??null};})()`),
+          inputCount: evidence.inputs.length, productDowns: productDowns()
+        });
+        const beforeReturn = await readSafeReturn();
+        // Explicit harness-user pointer action, not an agent action or a human
+        // window selection. It receives no permit and cannot rebind a frame.
+        await click('.timeline-clip');
+        const afterReturn = await readSafeReturn();
+        evidence.scenarios.push({ kind: 'explicit-harness-user-safe-return', actor: 'harness-ui',
+          actualHumanSelection: false, before: beforeReturn, after: afterReturn });
+        await capture('remap-key-explicit-user-safe-return');
+        assert.equal(afterReturn.live.timelineStartMs, beforeReturn.live.timelineStartMs, 'Safe return must not mutate content');
+        assert.equal(afterReturn.dom.dirty, beforeReturn.dom.dirty);
+        assert.equal(afterReturn.productDowns, beforeReturn.productDowns, 'Safe return is not guarded product input');
+        assert.ok(afterReturn.dom.safeFocus, 'Explicit user pointer must establish real safe focus');
+        assert.equal(afterReturn.state.phase, 'ready', 'User input cancellation invalidates this approval; fail without retry/rebind');
+        assert.equal(afterReturn.state.sessionId, beforeReturn.state.sessionId);
+        assert.equal(afterReturn.state.runId, beforeReturn.state.runId);
+        assert.equal(afterReturn.dom.approval, beforeReturn.dom.approval, 'Never reuse a replaced approval');
+        // Final main frame/layout/content checks remain authoritative at Run once.
+      }
       if (kind === 'remap-cancel') await click('[data-testid="cua-stop-btn"]');
       else await click('.agent-chat-approval button', ['deny', 'remap-deny'].includes(kind) ? 'Deny' : 'Run once');
       if (kind === 'duplicate') {
