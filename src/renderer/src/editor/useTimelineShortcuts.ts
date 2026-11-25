@@ -9,6 +9,7 @@ import {
   type EditorShortcutPreferences
 } from './editorShortcuts';
 import { isTextEditingShortcutTarget } from './editorTimelineView';
+import { runWithCuaActionAttribution } from '../cua/cuaActionSettlement';
 
 /** One step is a coarse frame: fine enough to trim by, coarse enough to hold. */
 const PLAYHEAD_STEP_MS = 100;
@@ -70,29 +71,37 @@ export function useTimelineShortcuts(latestInput: TimelineShortcutInput): void {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       const input = inputRef.current;
-      if (event.defaultPrevented || (event.target instanceof Element && event.target.closest('[role="menu"], [role="menubar"]'))) return;
-      if (input.cuaActing !== true) {
-        if (input.isLocked) return;
-      }
-      const formTarget = isTextEditingShortcutTarget(event.target as { tagName?: string; isContentEditable?: boolean } | null);
-      const sliderUndo = event.target instanceof HTMLInputElement && event.target.type === 'range'
-        && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z';
-      if (formTarget && !sliderUndo) return;
-      // During CUA preparing/acting, ignore user custom shortcutPreferences (localStorage
-      // remaps) completely and match strictly against the fixed safe-editing keymap.
-      const bindings = input.cuaActing === true
-        ? getCuaFixedSafeShortcutBindings()
-        : getEditorShortcutBindings(input.shortcutPreferences);
-      const matchedBinding = bindings.find((binding) => isEditorShortcutBindingMatch(event, binding));
-      if (matchedBinding === undefined) return;
-      if (input.cuaActing === true && !isShortcutActionAllowedDuringCua(matchedBinding.actionId)) {
+      const dispatchKey = (): void => {
+        if (event.defaultPrevented || (event.target instanceof Element && event.target.closest('[role="menu"], [role="menubar"]'))) return;
+        if (input.cuaActing !== true) {
+          if (input.isLocked) return;
+        }
+        const formTarget = isTextEditingShortcutTarget(event.target as { tagName?: string; isContentEditable?: boolean } | null);
+        const sliderUndo = event.target instanceof HTMLInputElement && event.target.type === 'range'
+          && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z';
+        if (formTarget && !sliderUndo) return;
+        // During CUA preparing/acting, ignore user custom shortcutPreferences (localStorage
+        // remaps) completely and match strictly against the fixed safe-editing keymap.
+        const bindings = input.cuaActing === true
+          ? getCuaFixedSafeShortcutBindings()
+          : getEditorShortcutBindings(input.shortcutPreferences);
+        const matchedBinding = bindings.find((binding) => isEditorShortcutBindingMatch(event, binding));
+        if (matchedBinding === undefined) return;
+        if (input.cuaActing === true && !isShortcutActionAllowedDuringCua(matchedBinding.actionId)) {
+          return;
+        }
+
+        if (matchedBinding.actionId !== 'splitSelection' || input.canSplit) {
+          event.preventDefault();
+          actionHandlers[matchedBinding.actionId](input);
+        }
+      };
+
+      if (input.cuaActing === true) {
+        runWithCuaActionAttribution('key', dispatchKey);
         return;
       }
-
-      if (matchedBinding.actionId !== 'splitSelection' || input.canSplit) {
-        event.preventDefault();
-        actionHandlers[matchedBinding.actionId](input);
-      }
+      dispatchKey();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);

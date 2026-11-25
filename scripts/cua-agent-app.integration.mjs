@@ -65,10 +65,10 @@ ipcMain.handle = (channel, handler) => {
       pendingApproval: response?.value?.pendingApproval, cuaSaveResult: response?.value?.cuaSaveResult };
     return response;
   });
-  return originalHandle(channel, channel !== 'cua:report-surface-snapshot' ? handler : (event, snapshot) => {
+  return originalHandle(channel, channel !== 'cua:report-surface-snapshot' ? handler : (event, snapshot, ...rest) => {
   // Passive evidence tap: original sender, payload, handler and return value.
   evidence.surfaceReports.push({ at: performance.now(), snapshot: structuredClone(snapshot) });
-  return handler(event, snapshot);
+  return handler(event, snapshot, ...rest);
   });
 };
 
