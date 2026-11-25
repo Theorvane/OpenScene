@@ -158,6 +158,7 @@ async function run() {
         assert.equal(record.controls.nodeOverlaps.length, 0, 'node controls do not overlap');
         if (tab === 'natural') assert.equal(record.layout.safe.length, 0);
         if (tab === 'node' && width === 1280 && zoom === 1.5) {
+          assert.equal(await js('getComputedStyle(document.querySelector(".os-ws-node__body")).overflowY'), 'auto', 'compact node body supports user scrolling');
           const beforeRevision = evidence.snapshots.at(-1).layoutRevision;
           await js('document.querySelector(".os-ws-node__body").scrollTop=100');
           await until('compact node scroll invalidates old scope', async () => evidence.snapshots.at(-1)?.layoutRevision > beforeRevision && await js('document.querySelector(".os-ws-node__body").scrollTop>0'));

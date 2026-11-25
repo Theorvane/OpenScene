@@ -449,8 +449,8 @@
 }
 @container (max-width: 600px) {
   .os-ws-live-natural .shorts-body { grid-template-columns: minmax(0, 1fr); }
-  .os-ws-node__body { flex-direction: column; overflow: auto; }
-  .os-ws-node__viewport { flex: 0 0 660px; }
+  .os-ws-shell .os-ws-node__body { flex-direction: column; overflow: auto; }
+  .os-ws-shell .os-ws-node__viewport { flex: 0 0 660px; }
   .os-ws-node__viewport > .video-canvas.canvas-workbench { grid-template-columns: minmax(0, 1fr); grid-template-rows: 130px minmax(0, 1fr); }
   .os-ws-node__body > .os-ws-node__impact { width: 100%; flex: 0 0 auto; }
 }
