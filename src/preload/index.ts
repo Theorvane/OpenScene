@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
-import type { CuaCancelAck, CuaPrepareAck, CuaState, CuaStopResult, CuaSurfaceSnapshot } from '../shared/cua';
+import type { CuaActionSettlementAck, CuaActionSettlementTag, CuaCancelAck, CuaPrepareAck, CuaState, CuaStopResult, CuaSurfaceSnapshot } from '../shared/cua';
 import type { CuaSaveCommitAck, CuaSaveReadyAck, CuaSaveReadyRequest, CuaSaveResult, CuaSaveSnapshotReport, CuaSaveSnapshotRequest } from '../shared/cuaSave';
 
 import type {
@@ -76,10 +76,11 @@ export interface VideoToolApi extends JevCredentialApi, JevConfigApi {
   onCuaSaveFinished(listener: (result: CuaSaveResult) => void): () => void;
   cuaAckSaveCommit(ack: CuaSaveCommitAck): Promise<ApiResponse<{ accepted: boolean }>>;
   cuaAckCancel(ack: CuaCancelAck): Promise<ApiResponse<{ accepted: boolean }>>;
+  cuaAckActionSettlement(ack: CuaActionSettlementAck): Promise<ApiResponse<{ accepted: boolean }>>;
   cuaAckPrepare(ack: CuaPrepareAck): Promise<ApiResponse<{ accepted: boolean }>>;
   cuaGetState(): Promise<ApiResponse<CuaState>>;
   cuaStop(): Promise<ApiResponse<CuaStopResult>>;
-  cuaReportSurfaceSnapshot(snapshot: CuaSurfaceSnapshot): Promise<ApiResponse<{ accepted: boolean }>>;
+  cuaReportSurfaceSnapshot(snapshot: CuaSurfaceSnapshot, settlement?: CuaActionSettlementTag): Promise<ApiResponse<{ accepted: boolean }>>;
   onCuaStateChanged(listener: (state: CuaState) => void): () => void;
   shortsStart(input: ShortsStartInput): Promise<ApiResponse<ShortsJob>>;
   shortsGet(input: ShortsJobInput): Promise<ApiResponse<ShortsJob>>;
@@ -190,10 +191,11 @@ const videoTool: VideoToolApi = {
   },
   cuaAckSaveCommit: ack => ipcRenderer.invoke(IPC_CHANNELS.cuaAckSaveCommit, ack) as Promise<ApiResponse<{ accepted: boolean }>>,
   cuaAckCancel: ack => ipcRenderer.invoke(IPC_CHANNELS.cuaAckCancel, ack) as Promise<ApiResponse<{ accepted: boolean }>>,
+  cuaAckActionSettlement: ack => ipcRenderer.invoke(IPC_CHANNELS.cuaAckActionSettlement, ack) as Promise<ApiResponse<{ accepted: boolean }>>,
   cuaAckPrepare: ack => ipcRenderer.invoke(IPC_CHANNELS.cuaAckPrepare, ack) as Promise<ApiResponse<{ accepted: boolean }>>,
   cuaGetState: () => ipcRenderer.invoke(IPC_CHANNELS.cuaGetState) as Promise<ApiResponse<CuaState>>,
   cuaStop: () => ipcRenderer.invoke(IPC_CHANNELS.cuaStop) as Promise<ApiResponse<CuaStopResult>>,
-  cuaReportSurfaceSnapshot: snapshot => ipcRenderer.invoke(IPC_CHANNELS.cuaReportSurfaceSnapshot, snapshot) as Promise<ApiResponse<{ accepted: boolean }>>,
+  cuaReportSurfaceSnapshot: (snapshot, settlement) => ipcRenderer.invoke(IPC_CHANNELS.cuaReportSurfaceSnapshot, snapshot, settlement) as Promise<ApiResponse<{ accepted: boolean }>>,
   onCuaStateChanged: listener => {
     const subscription = (_event: IpcRendererEvent, state: CuaState): void => listener(state);
     ipcRenderer.on(IPC_CHANNELS.cuaStateChanged, subscription);

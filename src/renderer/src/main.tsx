@@ -7,6 +7,8 @@ import { ChatGptAuthProvider } from './ChatGptAuthContext';
 import { LlmProvider } from './LlmProviderContext';
 import { ModelVisibilityProvider } from './ModelVisibilityContext';
 import './styles.css';
+import '../styles/ui-tokens.css';
+import '../styles/ui-primitives.css';
 import { bootstrapRendererTheme, ThemeProvider } from './ThemeProvider';
 
 const rootElement = document.getElementById('root');
