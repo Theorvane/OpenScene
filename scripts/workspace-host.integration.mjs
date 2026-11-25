@@ -13,18 +13,26 @@ const dir = resolve(process.env.WORKSPACE_QA_DIR);
 mkdirSync(dir, { recursive: true });
 const profile = mkdtempSync(join(dir, 'profile-'));
 app.setPath('userData', profile);
-const id = randomUUID(), assetId = randomUUID(), timestamp = new Date().toISOString();
+const id = randomUUID(), emptyId = randomUUID(), assetId = randomUUID(), timestamp = new Date().toISOString();
+const projectName = '합성 QA 원본 · 긴 한국어 프로젝트 이름과 수동 정밀 편집 보존 확인';
 const assetDirectory = join(profile, 'projects', id, 'assets', assetId);
 mkdirSync(assetDirectory, { recursive: true });
 const source = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==', 'base64');
 const sourcePath = join(assetDirectory, 'original.png');
 writeFileSync(sourcePath, source);
 const projectPath = join(profile, 'projects', id, 'project.json');
-writeFileSync(projectPath, JSON.stringify({ schemaVersion: 4, id, name: '합성 QA 원본 · 긴 한국어 프로젝트 이름과 수동 정밀 편집 보존 확인', projectType: 'editing', createdAt: timestamp, updatedAt: timestamp,
+writeFileSync(projectPath, JSON.stringify({ schemaVersion: 4, id, name: projectName, projectType: 'editing', createdAt: timestamp, updatedAt: timestamp,
   assets: [{ id: assetId, displayName: '합성 QA 원본.png', projectRelativePath: `assets/${assetId}/original.png`, kind: 'image', mimeType: 'image/png', byteLength: source.length, metadata: { durationMs: 60000, width: 1, height: 1 }, createdAt: timestamp, updatedAt: timestamp }],
   timeline: { schemaVersion: 3, tracks: [{ id: 'video-track-1', name: 'Video 1', kind: 'video', clips: [{ id: 'clip-qa', assetId, timelineStartMs: 0, sourceStartMs: 0, sourceEndMs: 60000, sourceDurationMs: 60000, effects: { opacity: 1, scale: 1, positionX: 0, positionY: 0, rotation: 0, volume: 1 }, keyframes: [] }] }, { id: 'audio-track-1', name: 'Audio 1', kind: 'audio', clips: [], mix: { gainDb: 0, pan: 0, muted: false } }], transitions: [] },
   ai: { schemaVersion: 1, scripts: [], scenes: [], shots: [], characters: [], styleBible: { palette: [], lighting: '', cameraGrammar: '', texture: '', forbiddenChanges: [] }, referenceAssets: [], generations: [], provenance: [] }
 }));
+// An actual empty local fixture exercises intake and explicit deletion without
+// creating a fake completed job/media result or touching the source image.
+const emptyDirectory = join(profile, 'projects', emptyId);
+mkdirSync(join(emptyDirectory, 'assets'), { recursive: true });
+const originalProject = JSON.parse(readFileSync(projectPath, 'utf8'));
+writeFileSync(join(emptyDirectory, 'project.json'), JSON.stringify({ ...originalProject, id: emptyId, name: '합성 QA 빈 프로젝트', assets: [],
+  timeline: { ...originalProject.timeline, tracks: originalProject.timeline.tracks.map(track => ({ ...track, clips: [] })) } }));
 const evidence = { head: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), baseline, profile, syntheticUserRole: true, actualHumanSelection: false, noOsActivation: true, liveModelCalls: false, captures: [], console: [], snapshots: [], ipc: [], checks: [] };
 const networkGuard = installWorkspaceQaNetworkGuard();
 await networkGuard.verifyBeforeStartup();
@@ -40,7 +48,7 @@ const originalHandle = ipcMain.handle.bind(ipcMain);
 ipcMain.handle = (channel, handler) => originalHandle(channel, async (event, ...args) => {
   if (channel === 'cua:report-surface-snapshot') evidence.snapshots.push(args[0]);
   const observed = ['shorts:list', 'project-timeline:save', 'agent-chat:send', 'agent-chat:approve', 'agent-chat:cancel'].includes(channel);
-  const record = observed ? { channel, startedAt: performance.now() } : null;
+  const record = observed ? { channel, projectId: args[0]?.projectId, startedAt: performance.now() } : null;
   if (record) evidence.ipc.push(record);
   const result = await handler(event, ...args);
   if (record) Object.assign(record, { ok: result?.ok, value: channel === 'shorts:list' ? result?.value : undefined, error: result?.value?.error ?? result?.error?.message });
@@ -110,7 +118,7 @@ async function run() {
     await resize(1440, 900, 1);
     evidence.nativeFocusObserved = { window: target.isFocused(), contents: target.webContents.isFocused() };
     if (await point('button', 'Skip setup')) await click('button', 'Skip setup');
-    await click('.projects-home__project');
+    await click('.projects-home__project-name', projectName);
     await until('project open', () => js('!!document.querySelector(".timeline-clip")'));
     await capture(baseline ? 'before-1440-100' : 'after-default-natural-1440-100');
     if (baseline) { code = 0; return; }
@@ -146,7 +154,27 @@ async function run() {
     await mode('natural'); await mode('node'); await mode('precision');
     await until('playback still running', () => point('[aria-label="Pause timeline playback"]'));
     await click('[aria-label="Pause timeline playback"]'); evidence.checks.push('Playback survived tab changes');
-    for (const [width, height] of [[1280,800], [1440,900], [1920,1080]]) for (const zoom of [1,1.25,1.5]) {
+    await mode('natural');
+    const reviewRequestsBeforeIntake = evidence.ipc.filter(r=>r.channel==='shorts:list').length;
+    await click(`[data-testid="sidebar-project-${emptyId}"]`);
+    await until('real empty project intake', () => point('[data-testid="workspace-intake-view"]'));
+    await capture('after-empty-project-intake');
+    assert.equal(await js('document.querySelectorAll("[data-testid=shorts-review-workspace]").length'), 0);
+    assert.equal(evidence.ipc.filter(r=>r.channel==='shorts:list').length, reviewRequestsBeforeIntake);
+    await click('summary', 'Project'); await click('button', 'Project settings');
+    await click('.project-settings__danger button', 'Delete');
+    await click('.project-settings__confirm button', 'Delete');
+    await until('empty fixture deletion returns to projectless Projects', () => js('!document.querySelector("#app-page-panel-projects").hidden'));
+    await capture('after-empty-fixture-deleted');
+    assert.equal(evidence.ipc.filter(r=>r.channel==='shorts:list').length, reviewRequestsBeforeIntake);
+    await click('.projects-home__project-name', projectName);
+    await until('source review restored after intake/projectless', () => point('[data-testid="shorts-review-workspace"]'));
+    assert.equal(await liveStart(), editedStart);
+    evidence.checks.push('Actual empty intake and explicit empty-fixture deletion made zero review requests; original source restored with saved position');
+    const layoutCases = process.env.WORKSPACE_QA_IMPACT_ONLY === '1'
+      ? [[1280,800,1.5], [1440,900,1]]
+      : [[1280,800], [1440,900], [1920,1080]].flatMap(([width,height])=>[1,1.25,1.5].map(zoom=>[width,height,zoom]));
+    for (const [width, height, zoom] of layoutCases) {
       await resize(width,height,zoom);
       for (const tab of ['natural','precision','node']) {
         await mode(tab); const record = await capture(`after-${width}-${Math.round(zoom*100)}-${tab}`);

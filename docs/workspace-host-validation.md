@@ -79,6 +79,33 @@ Original failed artifacts remain and are excluded from the passing evidence belo
 
 ## Completed VM203 evidence
 
+### Final host lifetime audit
+
+The evidence at 98c0f75 below predates a final audit finding: the host still
+unmounted the entire registry when an empty project entered intake or the editor
+became projectless. Two real mounted host/controller regressions reproduced
+edited/dirty→original/clean without a save. The host now keeps that registry in
+a stable stage, disables it synchronously during intake/projectless or inactive
+workspace pages, and does not use an effect-delayed initial intake decision.
+Inactive controllers render no UI, schedule no polls and cannot launch a queued
+poll after deactivation. Their in-flight responses may settle only into their
+own cache. Project-tab/page closure hides the persistent editor rather than
+discarding its drafts; explicit source deletion prunes its controller. Actual
+host unmount cleans up old requests so they cannot resurrect a job in a new host.
+
+Three real host regressions cover empty-project intake, projectless and hidden
+workspace round trips with dirty result drafts and no implicit saves/review
+requests. The deferred external-unmount regression and prior source A/B/deletion
+tests remain. Fresh local verification after this fix passed root typecheck,
+254 files / 1,679 tests, build and mobile typecheck. The guarded impact harness
+now uses a second real empty fixture, explicit deletion of only that empty
+fixture, projectless return and six affected size/zoom/view cases. Final exact
+pin/CI and affected runtime receipts are recorded on
+[PR576](https://github.com/Theorvane/OpenScene/pull/576); do not substitute the
+earlier matrix pin below for validation of the final lifetime fix.
+
+### Earlier complete layout and CUA matrix
+
 Product and harness pin: `98c0f750e58df414fb2cb1bd3ff66f0903c7040a`.
 The before screenshot was captured from reviewed foundation `1067e142` (the tree
 used by merged dev d448); all after evidence below comes from the product pin.

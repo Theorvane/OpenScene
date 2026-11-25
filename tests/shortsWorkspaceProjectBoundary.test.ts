@@ -54,6 +54,18 @@ async function setup(api: Record<string, unknown>) {
 }
 
 describe('real mounted Shorts controller project boundary', () => {
+  it('cannot resurrect a late job after the old host is externally unmounted', async () => {
+    const start = deferred();
+    const shortsStart = vi.fn(() => start.promise);
+    const api = { shortsList: async () => ({ ok: true, value: [] }), shortsStart };
+    const first = await setup(api);
+    await first.draw('A'); await first.click('shorts-start-btn');
+    act(() => cleanup?.()); cleanup = undefined;
+    const reopened = await setup(api); await reopened.draw('B');
+    await act(async () => start.resolve({ ok: true, value: job('A') }));
+    expect((reopened.container.querySelector('[data-testid="shorts-run-history-select"]') as Dom | null)?.value).not.toBe('job-A');
+    expect(shortsStart).toHaveBeenCalledOnce();
+  });
   // Regression found independently on PR576: A start resolved after B list and
   // displayed job-A next to B.mp4 in the retained controller.
   it.each(['success', 'failure', 'return-A', 'delete'] as const)('isolates late A start across %s boundary', async (scenario) => {

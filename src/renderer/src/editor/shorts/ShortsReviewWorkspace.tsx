@@ -55,6 +55,7 @@ export type ShortsOpenEditorRequest = {
 };
 
 type ShortsReviewWorkspaceProps = {
+  readonly active?: boolean;
   readonly editor: TimelineEditorController;
   readonly initialJobId?: string | null;
   readonly initialCandidateId?: string | null;
@@ -83,8 +84,8 @@ export function ShortsReviewWorkspace(props: ShortsReviewWorkspaceProps): ReactE
   }, [props]);
   return <>
     {[...next].map(([id, sourceProps]) => <ProjectShortsReviewWorkspace key={id} {...sourceProps}
-      active={id === projectId} onDraftStateChange={(state) => { draftState.current.set(id, state); }} />)}
-    {projectId === null && <ProjectShortsReviewWorkspace {...props} active onDraftStateChange={() => {}} />}
+      active={id === projectId && props.active !== false} onDraftStateChange={(state) => { draftState.current.set(id, state); }} />)}
+    {projectId === null && <ProjectShortsReviewWorkspace {...props} active={props.active !== false} onDraftStateChange={() => {}} />}
   </>;
 }
 
@@ -327,13 +328,14 @@ function ProjectShortsReviewWorkspace({
     const jobId = activeReviewJob.id;
     const prevStage = activeReviewJob.stage;
     const timer = window.setTimeout(() => {
+      if (!mountedRef.current || !activeRef.current) return;
       void window.videoTool.shortsGet({ jobId }).then((response) => {
         if (!mountedRef.current || !response.ok) return;
         upsertJob(response.value);
         if (response.value.cleanupComplete && cancelAcceptedJobId === jobId) {
           setCancelAcceptedJobId(null);
         }
-        if (prevStage === 'creating' && response.value.stage !== 'creating') {
+        if (activeRef.current && prevStage === 'creating' && response.value.stage !== 'creating') {
           void editor.refreshProjects();
         }
       });
@@ -347,6 +349,7 @@ function ProjectShortsReviewWorkspace({
     if (!active || !shouldPollShortsJob(latestExportRun) || latestExportRun === null) return;
     const jobId = latestExportRun.id;
     const timer = window.setTimeout(() => {
+      if (!mountedRef.current || !activeRef.current) return;
       void window.videoTool.shortsGet({ jobId }).then((response) => {
         if (!mountedRef.current || !response.ok) return;
         upsertJob(response.value);
@@ -379,6 +382,7 @@ function ProjectShortsReviewWorkspace({
   useEffect(() => {
     if (!active || pollableExportJobIds.length === 0) return;
     const timer = window.setTimeout(() => {
+      if (!mountedRef.current || !activeRef.current) return;
       void Promise.all(
         pollableExportJobIds.map(async (jobId) => {
           const response = await window.videoTool.getExportJob({ jobId });

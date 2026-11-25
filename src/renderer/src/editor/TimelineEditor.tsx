@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties, type ReactElement, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties, type ReactElement, type ReactNode } from 'react';
 import { EditorWorkspace } from '../../../../external/opencut/apps/web/src/components/editor/editor-workspace';
 import { EditorHeader } from './EditorWorkbenchHeader';
 
@@ -54,6 +54,7 @@ export type InspectorTabId = (typeof EDITOR_INSPECTOR_DOCK_TAB_IDS)[number];
 type EditorViewMode = 'timeline' | 'canvas' | 'shorts';
 
 type TimelineEditorProps = {
+  readonly active?: boolean;
   readonly editor: TimelineEditorController;
   readonly onProjectSettings?: () => void;
   readonly onOpenSettings?: () => void;
@@ -109,7 +110,7 @@ function getDefaultInspectorTabId({ selectedAssetId, selectedClipId }: Inspector
   return 'selection';
 }
 
-export function TimelineEditor({ editor, onProjectSettings, onOpenSettings, onProjects, onSelectProject }: TimelineEditorProps): ReactElement {
+export function TimelineEditor({ active = true, editor, onProjectSettings, onOpenSettings, onProjects, onSelectProject }: TimelineEditorProps): ReactElement {
   const [editorView, setEditorView] = useState<EditorViewMode>('shorts');
   const [shortsReturnContext, setShortsReturnContext] = useState<ShortsOpenEditorRequest | null>(null);
   const [restoredShortsTarget, setRestoredShortsTarget] = useState<{
@@ -142,8 +143,12 @@ export function TimelineEditor({ editor, onProjectSettings, onOpenSettings, onPr
   }, []);
   const chat = useAgentChat();
   const { isBusy: isAgentBusy, pendingApproval } = chat;
-  const [intakeComplete, setIntakeComplete] = useState(false);
-  useEffect(() => { setIntakeComplete((editor.project?.assets.length ?? 0) > 0); }, [editor.project?.id]);
+  // Decide synchronously at project entry so an empty project never briefly
+  // activates its review effects before intake is shown. Imports stay in intake
+  // until the user's explicit Start; the review registry itself stays mounted.
+  const hadMediaOnEntry = useMemo(() => (editor.project?.assets.length ?? 0) > 0, [editor.project?.id]);
+  const [completedIntakeProjectId, setCompletedIntakeProjectId] = useState<string | null>(null);
+  const intakeComplete = editor.project !== null && (hadMediaOnEntry || completedIntakeProjectId === editor.project.id);
   const cua = useCuaOverlay();
   const isCuaActing = useCuaActing();
   const { mode: themeMode, preset, setPreset, toggleTheme } = useTheme();
@@ -414,14 +419,17 @@ export function TimelineEditor({ editor, onProjectSettings, onOpenSettings, onPr
             locked={(isAgentBusy && !isCuaActing) || editor.isBusy} onPreview={() => selectEditorView('timeline')} />}
         </div>
         <div className="editor-view" hidden={!shortsMode}>
-          <NaturalStudioView liveReviewSlot={editor.project !== null && (!intakeComplete ? (
+          <NaturalStudioView liveReviewSlot={<>
+          <div className="os-ws-live-stage" hidden={intakeComplete || editor.project === null}>
             <WorkspaceIntakeView pickerOnly prompt={chat.input} onPromptChange={chat.setInput} presets={[]}
-              recentProjects={workspaceProjects} selectedFileName={editor.project.assets[0]?.displayName ?? null}
+              recentProjects={workspaceProjects} selectedFileName={editor.project?.assets[0]?.displayName ?? null}
               starting={editor.isBusy} errorMessage={editor.statusMessage.tone === 'danger' ? editor.statusMessage.text : null}
-              onPickMedia={() => { void editor.importAssets(); }} onStart={() => setIntakeComplete(true)}
+              onPickMedia={() => { void editor.importAssets(); }} onStart={() => setCompletedIntakeProjectId(editor.project?.id ?? null)}
               onOpenRecentProject={(id) => onSelectProject?.(id)} />
-          ) : (
+          </div>
+          <div className="os-ws-live-stage" hidden={!intakeComplete}>
             <ShortsReviewWorkspace
+              active={intakeComplete && active}
               editor={editor}
               initialJobId={restoredShortsTarget?.jobId ?? null}
               initialCandidateId={restoredShortsTarget?.candidateId ?? null}
@@ -429,7 +437,8 @@ export function TimelineEditor({ editor, onProjectSettings, onOpenSettings, onPr
               onOpenSettings={onOpenSettings}
               onOpenMaterializedProject={openMaterializedShortInEditor}
             />
-          ))} />
+          </div>
+          </>} />
         </div>
         <div className="editor-view" hidden={fullStageMode}>
             {floatingProgramVisible ? <div className="empty-slate">Program Monitor is floating above the workspace.</div> : <ProgramMonitor editor={editor} />}
