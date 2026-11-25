@@ -1,6 +1,6 @@
 import { createContext, createElement, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react';
 
-import type { CuaPhase, CuaState, CuaSurfaceSnapshot } from '../../../shared/cua';
+import type { CuaPhase, CuaRect, CuaState, CuaSurfaceSnapshot } from '../../../shared/cua';
 import {
   abortActiveTimelineDragSync,
   handleCuaStateRollbackAndAckSync
@@ -32,6 +32,69 @@ export {
   isCuaStopSettled,
   isCuaStoppablePhase
 } from './cuaSurfaceSnapshot';
+
+const OVERFLOW_CLIP_VALUES = new Set(['hidden', 'clip', 'scroll', 'auto']);
+
+function isOverflowClipValue(value: string | null | undefined): boolean {
+  return typeof value === 'string' && OVERFLOW_CLIP_VALUES.has(value);
+}
+
+/**
+ * Intersects a measured DOM rect with the viewport and every overflow-clipping
+ * ancestor up to `document.documentElement` so scrolled descendants (such as an
+ * `approval-ui` card inside `.agent-chat-log` / `agent-panel`) report their
+ * true visible clipped bounds instead of spilling outside their scroll container.
+ */
+export function clipRectToOverflowAncestors(
+  element: Element,
+  rect: CuaRect,
+  viewport: { readonly width: number; readonly height: number }
+): CuaRect | null {
+  const initial = clipRectToViewport(rect, viewport);
+  if (initial === null) return null;
+
+  const elementStyle = window.getComputedStyle(element);
+  if (elementStyle.position === 'fixed') {
+    return initial;
+  }
+
+  let left = initial.x;
+  let top = initial.y;
+  let right = initial.x + initial.width;
+  let bottom = initial.y + initial.height;
+
+  const root = document.documentElement;
+  for (let ancestor = element.parentElement; ancestor !== null && ancestor !== root; ancestor = ancestor.parentElement) {
+    const style = window.getComputedStyle(ancestor);
+    const clipsX = isOverflowClipValue(style.overflowX || style.overflow);
+    const clipsY = isOverflowClipValue(style.overflowY || style.overflow);
+    if (!clipsX && !clipsY) continue;
+
+    const ancestorRect = roundRect(ancestor.getBoundingClientRect());
+    if (clipsX) {
+      left = Math.max(left, ancestorRect.x);
+      right = Math.min(right, ancestorRect.x + ancestorRect.width);
+    }
+    if (clipsY) {
+      top = Math.max(top, ancestorRect.y);
+      bottom = Math.min(bottom, ancestorRect.y + ancestorRect.height);
+    }
+    if (right <= left || bottom <= top) return null;
+  }
+
+  const x = Math.round(left * 100) / 100;
+  const y = Math.round(top * 100) / 100;
+  let width = Math.round((right - left) * 100) / 100;
+  let height = Math.round((bottom - top) * 100) / 100;
+  if (x + width > right) {
+    width = Math.max(0, Math.round((width - 0.01) * 100) / 100);
+  }
+  if (y + height > bottom) {
+    height = Math.max(0, Math.round((height - 0.01) * 100) / 100);
+  }
+  if (width <= 0 || height <= 0) return null;
+  return { x, y, width, height };
+}
 
 function isElementVisible(element: Element, allowOpacityZero = false): boolean {
   if (!(element instanceof HTMLElement)) return false;
@@ -88,7 +151,7 @@ export function collectDomSurfaceState(options: CollectDomSurfaceOptions): Measu
     // Always keep the fixed-footprint stop-button in protectedRects even when
     // visually idle (opacity: 0) so idle -> ready -> acting never alters protectedRects.
     if (seenElements.has(element) || !isElementVisible(element, kind === 'stop-button')) return;
-    const clipped = clipRectToViewport(roundRect(element.getBoundingClientRect()), viewport);
+    const clipped = clipRectToOverflowAncestors(element, roundRect(element.getBoundingClientRect()), viewport);
     if (clipped === null) return;
     seenElements.add(element);
     const prefix = fallbackId ?? kind;
