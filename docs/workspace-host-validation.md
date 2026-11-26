@@ -163,6 +163,21 @@ warnings were not suppressed or treated as fixes.
 
 ## Remaining validation and scope
 
+A later final-readback audit found a further result-draft loss on `54a0e28`:
+returning explicitly from A's materialized timeline incremented a global reload
+token, then visiting B force-loaded B from disk and cleared its dirty draft.
+The former approval was withdrawn; it is not evidence that this case passed.
+Return requests now carry source/result identity, restore job/candidate only for
+that source, and consume the reload token once only for the requested result.
+Actual mounted TimelineEditor plus real Shorts controllers reproduce the old
+failure and pass immediate/deferred/deleted-source cases after the fix, including
+another dirty candidate in A and repeat visits after token consumption. Opening
+A explicitly saves A's edited result once through its existing behavior; B is
+never saved or implicitly discarded. Registry lifetime/cache/active epochs and
+main/shared/preload contracts are unchanged. Fresh verification passes all 254
+test files / 1,682 tests, root typecheck/build and mobile typecheck. New exact-pin
+guarded runtime evidence, CI and independent reapproval are recorded on PR576.
+
 Linux VM203 checks above do not establish
 macOS focus/permissions, actual human selection or live-model quality. No live
 model/API calls are authorized for QA; the incident above is an explicit failure,

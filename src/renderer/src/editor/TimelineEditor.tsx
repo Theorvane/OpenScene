@@ -114,6 +114,8 @@ export function TimelineEditor({ active = true, editor, onProjectSettings, onOpe
   const [editorView, setEditorView] = useState<EditorViewMode>('shorts');
   const [shortsReturnContext, setShortsReturnContext] = useState<ShortsOpenEditorRequest | null>(null);
   const [restoredShortsTarget, setRestoredShortsTarget] = useState<{
+    readonly sourceProjectId: string;
+    readonly resultProjectId: string;
     readonly jobId: string;
     readonly candidateId: string;
     readonly token: number;
@@ -183,6 +185,8 @@ export function TimelineEditor({ active = true, editor, onProjectSettings, onOpe
     if (!opened) return;
     setShortsReturnContext(null);
     setRestoredShortsTarget((current) => ({
+      sourceProjectId: context.sourceProjectId,
+      resultProjectId: context.resultProjectId,
       jobId: context.jobId,
       candidateId: context.candidateId,
       token: (current?.token ?? 0) + 1
@@ -431,9 +435,10 @@ export function TimelineEditor({ active = true, editor, onProjectSettings, onOpe
             <ShortsReviewWorkspace
               active={intakeComplete && active}
               editor={editor}
-              initialJobId={restoredShortsTarget?.jobId ?? null}
-              initialCandidateId={restoredShortsTarget?.candidateId ?? null}
-              returnReloadToken={restoredShortsTarget?.token ?? 0}
+              initialJobId={restoredShortsTarget !== null && restoredShortsTarget.sourceProjectId === editor.project?.id ? restoredShortsTarget.jobId : null}
+              initialCandidateId={restoredShortsTarget !== null && restoredShortsTarget.sourceProjectId === editor.project?.id ? restoredShortsTarget.candidateId : null}
+              returnReloadToken={restoredShortsTarget !== null && restoredShortsTarget.sourceProjectId === editor.project?.id ? restoredShortsTarget.token : 0}
+              returnReloadProjectId={restoredShortsTarget !== null && restoredShortsTarget.sourceProjectId === editor.project?.id ? restoredShortsTarget.resultProjectId : null}
               onOpenSettings={onOpenSettings}
               onOpenMaterializedProject={openMaterializedShortInEditor}
             />

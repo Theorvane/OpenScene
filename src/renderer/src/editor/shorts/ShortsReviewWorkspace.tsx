@@ -60,6 +60,7 @@ type ShortsReviewWorkspaceProps = {
   readonly initialJobId?: string | null;
   readonly initialCandidateId?: string | null;
   readonly returnReloadToken?: number;
+  readonly returnReloadProjectId?: string | null;
   readonly onOpenSettings?: (() => void) | undefined;
   readonly onOpenMaterializedProject: (request: ShortsOpenEditorRequest) => Promise<void>;
 };
@@ -94,6 +95,7 @@ function ProjectShortsReviewWorkspace({
   initialJobId = null,
   initialCandidateId = null,
   returnReloadToken = 0,
+  returnReloadProjectId = null,
   onOpenSettings,
   onOpenMaterializedProject,
   active,
@@ -449,10 +451,10 @@ function ProjectShortsReviewWorkspace({
 
   useEffect(() => {
     if (!active || activeResultProjectId === undefined) return;
-    const force = returnReloadToken > lastReloadTokenRef.current;
+    const force = returnReloadProjectId === activeResultProjectId && returnReloadToken > lastReloadTokenRef.current;
     if (force) lastReloadTokenRef.current = returnReloadToken;
     void loadResultProject(activeResultProjectId, force);
-  }, [active, activeResultProjectId, loadResultProject, returnReloadToken]);
+  }, [active, activeResultProjectId, loadResultProject, returnReloadToken, returnReloadProjectId]);
 
   const updateInlineTimeline = useCallback(
     (resultProjectId: string, updater: (timeline: TimelineDocument) => TimelineDocument | null): void => {
