@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createServer } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
 import { discoverFfmpeg } from '../src/main/ffmpegDiscovery';
 import { runReaProcess } from '../src/main/reaVideoAnalysisProcess';
@@ -110,4 +111,17 @@ describe('measured local shot plans', () => {
     const corrupt = new ReaVideoAnalysisService(async () => ({ path: source, kind: 'video' }));
     expect((await settled(corrupt, corrupt.start(input).id)).error).toBe('invalid-media'); await corrupt.dispose();
   }, 20_000);
+  it('refuses a remote playlist without opening its network URL', async () => {
+    const ffmpeg = await discoverFfmpeg(); if (ffmpeg.kind === 'unavailable') return;
+    const root = await mkdtemp(join(tmpdir(), 'rea-playlist-')); roots.push(root);
+    let requests = 0;
+    const server = createServer((_request, response) => { requests++; response.end('unexpected'); });
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address(); if (!address || typeof address === 'string') throw new Error('Fixture server unavailable.');
+    const path = join(root, 'source.m3u8');
+    await writeFile(path, `#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:1,\nhttp://127.0.0.1:${address.port}/must-not-request.ts\n#EXT-X-ENDLIST\n`);
+    const service = new ReaVideoAnalysisService(async () => ({ path, kind: 'video' }));
+    try { expect((await settled(service, service.start(input).id)).status).toBe('failed'); expect(requests).toBe(0); }
+    finally { await service.dispose(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); }
+  });
 });

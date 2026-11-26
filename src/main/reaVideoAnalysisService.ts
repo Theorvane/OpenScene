@@ -75,7 +75,8 @@ export class ReaVideoAnalysisService {
       const metadata = JSON.parse(probe.stdout) as { format?: { duration?: string }; streams?: { codec_type: string; width: number; height: number }[] };
       const video = metadata.streams?.[0];
       const durationMs = Math.round(Number(metadata.format?.duration) * 1000);
-      if (!video || video.codec_type !== 'video' || !video.width || !video.height || video.width * video.height > 3840 * 2160) throw new ReaProcessError('resource-limit');
+      if (!video || video.codec_type !== 'video' || !video.width || !video.height) throw new ReaProcessError('invalid-media');
+      if (video.width > 3840 || video.height > 3840 || video.width * video.height > 3840 * 2160) throw new ReaProcessError('resource-limit');
       try { measuredReaPlan({ projectId: job.projectId, assetId: job.assetId }, durationMs, []); } catch { throw new ReaProcessError('resource-limit'); }
       const measured = await runReaProcess(tools.ffmpeg, ['-nostdin', '-hide_banner', '-v', 'info', '-max_alloc', '67108864', '-threads', '1', '-filter_threads', '1', '-format_whitelist', 'mov,matroska,webm,avi,mpegts,flv,ogg', '-protocol_whitelist', 'file', '-i', source.path, '-t', String(durationMs / 1000), '-map', '0:v:0', '-an', '-sn', '-dn', '-vf', "scale=320:-2,select='gt(scene,0.35)',showinfo", '-f', 'null', '-'], signal);
       const cuts = [...measured.stderr.matchAll(/pts_time:([0-9]+(?:\.[0-9]+)?)/g)].map(match => Math.round(Number(match[1]) * 1000));

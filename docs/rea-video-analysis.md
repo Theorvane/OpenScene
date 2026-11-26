@@ -62,7 +62,8 @@ when Python is compatible. Local measured analysis works without Python.
 ## Resource and trust boundaries
 
 One concurrent job; eight retained jobs per app process; no automatic resume. Input
-must be an imported video, <=10 minutes and <=3840x2160 pixels. Analysis scales to
+must be an imported video, <=2 GiB, <=10 minutes, <=3840x2160 pixels in area and
+<=3840 pixels on either dimension (portrait included). Analysis scales to
 320px width, uses one decoder/filter thread, a fixed 0.35 scene threshold and at
 most 60 ranges. A larger/too-busy input fails rather than silently truncating.
 Buffers are capped at 256 KiB combined stdout/stderr; probe timeout is 15 seconds,
