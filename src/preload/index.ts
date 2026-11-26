@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
+import { REA_ANALYSIS_CHANNELS, type ReaAnalysisInput, type ReaAnalysisJob, type ReaAnalysisRuntime, type ReaPrepareImportInput } from '../shared/reaVideoAnalysis';
 import type { CuaActionSettlementAck, CuaActionSettlementTag, CuaCancelAck, CuaPrepareAck, CuaState, CuaStopResult, CuaSurfaceSnapshot } from '../shared/cua';
 import type { CuaSaveCommitAck, CuaSaveReadyAck, CuaSaveReadyRequest, CuaSaveResult, CuaSaveSnapshotReport, CuaSaveSnapshotRequest } from '../shared/cuaSave';
 
@@ -69,6 +70,11 @@ type AssetPlaybackUrl = {
 };
 
 export interface VideoToolApi extends JevCredentialApi, JevConfigApi {
+  reaAnalysisRuntime(): Promise<ApiResponse<ReaAnalysisRuntime>>;
+  reaAnalysisStart(input: ReaAnalysisInput): Promise<ApiResponse<ReaAnalysisJob>>;
+  reaAnalysisGet(input: { readonly jobId: string }): Promise<ApiResponse<ReaAnalysisJob>>;
+  reaAnalysisCancel(input: { readonly jobId: string }): Promise<ApiResponse<ReaAnalysisJob>>;
+  reaAnalysisPrepareImport(input: ReaPrepareImportInput): Promise<ApiResponse<readonly unknown[]>>;
   onCuaSaveSnapshotRequested(listener: (request: CuaSaveSnapshotRequest) => void): () => void;
   cuaReportSaveSnapshot(report: CuaSaveSnapshotReport): Promise<ApiResponse<{ accepted: boolean }>>;
   onCuaSaveRequested(listener: (request: CuaSaveReadyRequest) => void): () => void;
@@ -172,6 +178,11 @@ function parseUpdaterSnapshot(payload: unknown): UpdaterSnapshot | null {
 }
 
 const videoTool: VideoToolApi = {
+  reaAnalysisRuntime: () => ipcRenderer.invoke(REA_ANALYSIS_CHANNELS.runtime),
+  reaAnalysisStart: input => ipcRenderer.invoke(REA_ANALYSIS_CHANNELS.start, input),
+  reaAnalysisGet: input => ipcRenderer.invoke(REA_ANALYSIS_CHANNELS.get, input),
+  reaAnalysisCancel: input => ipcRenderer.invoke(REA_ANALYSIS_CHANNELS.cancel, input),
+  reaAnalysisPrepareImport: input => ipcRenderer.invoke(REA_ANALYSIS_CHANNELS.prepareImport, input),
   onCuaSaveSnapshotRequested: listener => {
     const subscription = (_event: IpcRendererEvent, request: CuaSaveSnapshotRequest): void => listener(request);
     ipcRenderer.on(IPC_CHANNELS.cuaSaveSnapshotRequested, subscription);

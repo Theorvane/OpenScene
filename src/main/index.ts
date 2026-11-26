@@ -4,6 +4,8 @@ import { performance } from 'node:perf_hooks';
 import { join } from 'node:path';
 
 import { IPC_CHANNELS } from '../shared/ipc';
+import { ReaVideoAnalysisService } from './reaVideoAnalysisService';
+import { registerReaAnalysisIpc } from './reaVideoAnalysisIpc';
 import type { AppSettings, CaptureSource } from '../shared/models';
 import { SourceCatalog, type RawCaptureSource } from '../shared/sourceCatalog';
 import type { MediaKind } from '../shared/timelineTypes';
@@ -83,6 +85,12 @@ const recordingStore = new RecordingFileStore(resolveRecordingsDirectory());
 const projectLocations = new ProjectLocationRegistry(join(app.getPath('userData'), 'project-locations.json'));
 const projectStore = new ProjectStore(join(app.getPath('userData'), 'projects'), projectLocations);
 const assetLibraryStore = new AssetLibraryStore(join(app.getPath('userData'), 'projects'), projectStore);
+const reaAnalysis = new ReaVideoAnalysisService(async ({ projectId, assetId }) => {
+  const asset = await projectStore.getAsset(projectId, assetId);
+  const source = await assetLibraryStore.getPlaybackSource(projectId, assetId);
+  if (!asset || !source) throw new Error('Imported source unavailable.');
+  return { kind: asset.kind, path: source.filePath };
+});
 const audioDetachService = new AudioDetachService({ projects: projectStore, assets: assetLibraryStore });
 const exportJobStore = new ExportJobStore();
 const credentialStore = new CredentialStore(app.getPath('userData'));
@@ -419,6 +427,7 @@ async function installIpcHandlers(): Promise<void> {
     listWindows: () => BrowserWindow.getAllWindows()
   });
   registerExportIpcHandlers(ipcMain, exportIpcService);
+  registerReaAnalysisIpc(reaAnalysis, (channel, handler) => ipcMain.handle(channel, (_event, payload: unknown) => handler(payload)));
   ipcMain.handle(IPC_CHANNELS.shortsStart, (_event, payload: unknown) => shortsService.start(payload));
   ipcMain.handle(IPC_CHANNELS.shortsGet, (_event, payload: unknown) => shortsService.get(payload));
   ipcMain.handle(IPC_CHANNELS.shortsList, (_event, payload: unknown) => shortsService.list(payload));
@@ -568,7 +577,7 @@ app.on('before-quit', event => {
   if (shortsShutdownComplete) return;
   event.preventDefault();
   exportIpcService.cancelAll();
-  void Promise.allSettled([cuaTarget?.driver.cancel('app-quit'), cuaTarget?.save.settleWrites(), shortsService.shutdown()]).finally(() => {
+  void Promise.allSettled([cuaTarget?.driver.cancel('app-quit'), cuaTarget?.save.settleWrites(), shortsService.shutdown(), reaAnalysis.dispose()]).finally(() => {
     shortsShutdownComplete = true;
     app.quit();
   });

@@ -22,6 +22,8 @@ files:
   - out/**
   - package.json
 extraResources:
+  - from: resources/rea-video
+    to: licenses/rea-video
   # The window icon is read from resources/ at runtime on platforms that take one.
   - from: resources/icon.png
     to: icon.png
