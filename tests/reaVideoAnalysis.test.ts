@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:http';
+import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron';
 import { afterEach, describe, expect, it } from 'vitest';
 import { discoverFfmpeg } from '../src/main/ffmpegDiscovery';
 import { runReaProcess } from '../src/main/reaVideoAnalysisProcess';
@@ -68,9 +69,11 @@ describe('measured local shot plans', () => {
     expect((await service.runtime()).available).toBe(false);
     const job = await settled(service, service.start(input).id);
     expect(job.error).toBe('runtime-unavailable'); expect(JSON.stringify(job)).not.toContain('/secret');
-    const handlers = new Map<string, (payload: unknown) => Promise<unknown>>();
-    registerReaAnalysisIpc(service, (channel, handler) => handlers.set(channel, handler));
-    expect(await handlers.get('rea-analysis:get')!({ jobId: job.id, path: '/secret' })).toMatchObject({ ok: false });
+    const handlers = new Map<string, (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown>();
+    const frame = {}, contents = { mainFrame: frame, isDestroyed: () => false };
+    registerReaAnalysisIpc({ service, getOwnWindow: () => ({ isDestroyed: () => false, webContents: contents }) as unknown as BrowserWindow,
+      ipcMain: { handle: (channel: string, handler: (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown) => handlers.set(channel, handler) } as unknown as Pick<IpcMain, 'handle'> });
+    expect(await handlers.get('rea-analysis:get')!({ sender: contents, senderFrame: frame } as unknown as IpcMainInvokeEvent, { jobId: job.id, path: '/secret' })).toMatchObject({ ok: false });
     await service.dispose();
   });
   it('kills and settles cancelled, timed out and excessive-output children', async () => {

@@ -1,9 +1,22 @@
 import type { ReaVideoAnalysisService } from './reaVideoAnalysisService';
+import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron';
 import { fail, ok } from './ipcResponses';
 import { REA_ANALYSIS_CHANNELS } from '../shared/reaVideoAnalysis';
-export function registerReaAnalysisIpc(service: ReaVideoAnalysisService, register: (channel: string, handler: (payload: unknown) => Promise<unknown>) => void): void {
+export function registerReaAnalysisIpc({ service, ipcMain, getOwnWindow }: {
+  service: Pick<ReaVideoAnalysisService, 'runtime' | 'start' | 'get' | 'cancel' | 'prepareImport'>;
+  ipcMain: Pick<IpcMain, 'handle'>;
+  getOwnWindow: () => BrowserWindow | null;
+}): void {
   for (const action of ['runtime', 'start', 'get', 'cancel', 'prepareImport'] as const) {
-    register(REA_ANALYSIS_CHANNELS[action], async payload => {
+    ipcMain.handle(REA_ANALYSIS_CHANNELS[action], async (event: IpcMainInvokeEvent, payload: unknown) => {
+      // Authorize before parsing payloads, inspecting runtimes, resolving sources or touching jobs.
+      try {
+        const own = getOwnWindow();
+        if (!own || own.isDestroyed() || own.webContents.isDestroyed() || event.sender !== own.webContents
+          || !event.senderFrame || event.senderFrame !== own.webContents.mainFrame) {
+          return fail('PERMISSION_DENIED', 'Local analysis access denied.');
+        }
+      } catch { return fail('PERMISSION_DENIED', 'Local analysis access denied.'); }
       try {
         if (action === 'runtime') return ok(await service.runtime());
         if (action === 'start') return ok(service.start(payload));

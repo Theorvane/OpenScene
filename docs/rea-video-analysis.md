@@ -84,6 +84,13 @@ stages; current generation is `unavailable-implementation-missing` and
 approved provider using the existing `VideoGenerationProvider.createJob(request)`
 and `getJob(jobId)` contract only after official API/auth/upload/cost auditing.
 
+Every analysis IPC channel first checks the current owning BrowserWindow and live
+webContents identity and requires its exact mainFrame. Missing frames, subframes,
+foreign/destroyed/replaced windows are rejected with a sanitized `PERMISSION_DENIED`
+before reading payloads, inspecting runtimes, accessing jobs or resolving files.
+The main-window reference is refreshed on creation and cleared on its own close;
+closing a replaced window cannot clear the current owner.
+
 ## Verification
 
 `tests/reaVideoAnalysis.test.ts` checks strict input DTOs, resource bounds, sanitized

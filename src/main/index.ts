@@ -198,6 +198,7 @@ function getScreenPermissionStatus(): string {
  */
 const APP_NAME = 'OpenScene';
 let cuaTarget: { window: BrowserWindow; driver: CuaDriver; save: CuaSaveBridge } | null = null;
+let reaAnalysisWindow: BrowserWindow | null = null;
 let activeAgentChatSessions: AgentChatSessionManager | null = null;
 const cuaAuthority = new CuaApprovalAuthority({ permitTtlMs: 2000, maxActionsPerRun: 20, now: () => performance.now() });
 const cuaSaveAuthority = new CuaSaveApprovalAuthority({ permitTtlMs: 5000, proposalTtlMs: 120000, maxSavesPerRun: 5, now: () => performance.now() });
@@ -265,6 +266,8 @@ function createWindow(): void {
       allowRunningInsecureContent: false
     }
   });
+  reaAnalysisWindow = mainWindow;
+  mainWindow.once('closed', () => { if (reaAnalysisWindow === mainWindow) reaAnalysisWindow = null; });
   let cuaSave: CuaSaveBridge | undefined;
   const cuaDriver = new CuaDriver(mainWindow, {
     isObservationInFlight: scope => cuaAgent.isObservationInFlight(scope),
@@ -427,7 +430,7 @@ async function installIpcHandlers(): Promise<void> {
     listWindows: () => BrowserWindow.getAllWindows()
   });
   registerExportIpcHandlers(ipcMain, exportIpcService);
-  registerReaAnalysisIpc(reaAnalysis, (channel, handler) => ipcMain.handle(channel, (_event, payload: unknown) => handler(payload)));
+  registerReaAnalysisIpc({ service: reaAnalysis, ipcMain, getOwnWindow: () => reaAnalysisWindow });
   ipcMain.handle(IPC_CHANNELS.shortsStart, (_event, payload: unknown) => shortsService.start(payload));
   ipcMain.handle(IPC_CHANNELS.shortsGet, (_event, payload: unknown) => shortsService.get(payload));
   ipcMain.handle(IPC_CHANNELS.shortsList, (_event, payload: unknown) => shortsService.list(payload));
