@@ -42,7 +42,8 @@ describe('renderer shorts review UI source & CUA contract', () => {
   });
 
   it('refreshes project list before opening materialized resultProjectId and saves on return', () => {
-    expect(timelineEditorSource).toContain('data-testid="editor-mode-shorts"');
+    expect(timelineEditorSource).toContain("mode === 'natural' ? 'shorts' : 'timeline'");
+    expect(timelineEditorSource).not.toContain("'shorts-review' : undefined");
     expect(timelineEditorSource).toContain('await editor.refreshProjects()');
     expect(timelineEditorSource).toContain("writeExportFramePreference(request.resultProjectId, 'portrait')");
     expect(timelineEditorSource).toContain('data-testid="shorts-return-banner"');

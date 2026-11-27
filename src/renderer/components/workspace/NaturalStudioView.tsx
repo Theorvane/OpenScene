@@ -54,7 +54,14 @@ function stepDotClass(status: WorkspaceStepItem['status']): string {
   }
 }
 
-export function NaturalStudioView({
+export function NaturalStudioView(props: NaturalStudioViewProps | { readonly liveReviewSlot: ReactNode }): ReactElement {
+  // The desktop host retains the real Shorts job/review/export controller rather
+  // than translating it into demo candidates or synthetic progress.
+  if ('liveReviewSlot' in props) return <div className="os-ws-live-natural" data-testid="natural-studio-view">{props.liveReviewSlot}</div>;
+  return <NaturalStudioPanels {...props} />;
+}
+
+function NaturalStudioPanels({
   approval,
   candidates,
   composerDisabled = false,

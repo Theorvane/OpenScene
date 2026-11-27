@@ -39,6 +39,7 @@
 .canvas-stage .video-canvas__status { min-height: 38px; box-sizing: border-box; background: var(--card); font-size: 11px; }
 .canvas-stage .video-canvas__scroll { background-size: 24px 24px; }
 .video-function-node { box-shadow: 0 8px 24px #0002; }
+.os-ws-shell .video-function-node { box-shadow: none; }
 .app-shell .agent-workspace-lock { grid-template-rows: minmax(0, 1fr); }
 .app-shell .agent-workspace-lock__content { height: 100%; overflow: hidden; }
 .app-shell__body { gap: 0; padding: 0; }

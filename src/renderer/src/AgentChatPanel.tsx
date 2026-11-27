@@ -192,19 +192,24 @@ export function AgentChatPanel({ width, onCollapse }: AgentChatPanelProps): Reac
               role="status"
             >
               <p className="agent-chat-approval__tool">
-                Run <strong>{pendingApproval.toolName}</strong>?
+                작업을 승인할까요? <strong>{pendingApproval.toolName}</strong>
               </p>
               {pendingApproval.toolName === 'transcribeProjectVideoRange' && (
                 <p>OpenScene will transcribe this video range locally and send the timestamped text to the selected chat model.</p>
               )}
               {pendingApproval.cuaApproval !== undefined && (
-                <dl className="agent-chat-approval__cua" data-testid="agent-cua-approval-summary">
+                <div className="agent-chat-approval__cua" data-testid="agent-cua-approval-summary">
+                <dl>
                   <div>
-                    <dt>Action</dt>
+                    <dt>작업</dt>
                     <dd data-testid="agent-cua-approval-action">
                       <strong>{pendingApproval.cuaApproval.actionKind.toUpperCase()}</strong> · {pendingApproval.cuaApproval.actionLabel}
                     </dd>
                   </div>
+                </dl>
+                <details>
+                  <summary>기술 정보 보기</summary>
+                <dl>
                   <div>
                     <dt>Frame</dt>
                     <dd data-testid="agent-cua-approval-frame">{pendingApproval.cuaApproval.frameId}</dd>
@@ -239,8 +244,12 @@ export function AgentChatPanel({ width, onCollapse }: AgentChatPanelProps): Reac
                     </div>
                   )}
                 </dl>
+                </details>
+                </div>
               )}
-              <pre className="agent-chat-approval__args">{JSON.stringify(pendingApproval.args, null, 2)}</pre>
+              <details><summary>요청 상세 보기</summary>
+                <pre className="agent-chat-approval__args">{JSON.stringify(pendingApproval.args, null, 2)}</pre>
+              </details>
               <label className="agent-chat-approval__feedback">
                 <span className="visually-hidden">Why are you denying this action?</span>
                 <input
@@ -264,7 +273,7 @@ export function AgentChatPanel({ width, onCollapse }: AgentChatPanelProps): Reac
                   onMouseDown={(event) => { preserveSafeSurfaceFocusOnPrimaryMouseDown(event); }}
                   onClick={() => { setDenialFeedback(''); void respondToApproval('approve'); }}
                 >
-                  Run once
+                  한 번 승인
                 </Button>
                 <Button
                   variant="ghost"
@@ -275,7 +284,7 @@ export function AgentChatPanel({ width, onCollapse }: AgentChatPanelProps): Reac
                   onMouseDown={(event) => { preserveSafeSurfaceFocusOnPrimaryMouseDown(event); }}
                   onClick={() => { setDenialFeedback(''); void respondToApproval('always'); }}
                 >
-                  Always allow
+                  이 대화에서 허용
                 </Button>
                 <Button
                   variant="stop"
@@ -283,7 +292,7 @@ export function AgentChatPanel({ width, onCollapse }: AgentChatPanelProps): Reac
                   onMouseDown={(event) => { preserveSafeSurfaceFocusOnPrimaryMouseDown(event); }}
                   onClick={() => { const feedback = denialFeedback; setDenialFeedback(''); void respondToApproval('deny', feedback); }}
                 >
-                  Deny
+                  거절
                 </Button>
               </div>
             </div>
@@ -349,6 +358,7 @@ export function AgentChatPanel({ width, onCollapse }: AgentChatPanelProps): Reac
               value={input}
               onChange={(event) => setInput(event.target.value)}
               onKeyDown={(event) => {
+                if (event.nativeEvent.isComposing || event.keyCode === 229 || event.key === 'Process') return;
                 if (event.key === 'Enter' && !event.shiftKey) {
                   event.preventDefault();
                   if (!isBusy && modelReady && pendingApproval === null && input.trim().length > 0) {

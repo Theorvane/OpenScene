@@ -269,7 +269,7 @@ export function collectDomSurfaceState(options: CollectDomSurfaceOptions): Measu
       scrollLeft: safeSurfaceElement.scrollLeft,
       scrollTop: safeSurfaceElement.scrollTop
     });
-    const scrollSelectors = '.timeline-stack, .video-canvas__scroll, .shorts-workspace';
+    const scrollSelectors = '.timeline-stack, .video-canvas__scroll, .shorts-workspace, .os-ws-node__body';
     safeSurfaceElement.querySelectorAll(scrollSelectors).forEach((el, idx) => {
       if (el instanceof HTMLElement) {
         scrollStates.push({

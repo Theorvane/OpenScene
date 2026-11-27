@@ -68,6 +68,18 @@ function makeState(overrides: Partial<CuaState> = {}): CuaState {
 }
 
 describe('CuaOverlay', () => {
+  it('keeps startup navigation with no session quiet while retaining fixed Stop and real terminal/cleanup receipts', async () => {
+    const { CuaOverlay } = await loadCuaOverlayModule();
+    const startup = makeState({ phase: 'stopped', error: 'navigation', sessionId: null, runId: null, lastDispatchReceipt: null, cleanupComplete: true });
+    const render = (state: CuaState, stopPending = false) => renderToStaticMarkup(createElement(CuaOverlay, { state, stopPending, stopError: null, onStop: () => {} }));
+    const quiet = render(startup);
+    expect(quiet).toContain('data-testid="cua-stop-btn"');
+    expect(quiet).toContain('cua-stop-btn--idle');
+    expect(quiet).not.toContain('data-testid="cua-hud"');
+    expect(render({ ...startup, runId: 'real-run', sessionId: 'real-session' })).toContain('data-testid="cua-hud"');
+    expect(render({ ...startup, phase: 'cleanup-failed', cleanupComplete: false })).toContain('data-testid="cua-cleanup-failed-warning"');
+    expect(render(startup, true)).toContain('data-testid="cua-hud"');
+  });
   it('keeps the fixed-footprint stop button mounted but hidden/inert-disabled when phase is idle', async () => {
     const { CuaOverlay } = await loadCuaOverlayModule();
     const html = renderToStaticMarkup(
@@ -204,7 +216,7 @@ describe('CuaOverlay', () => {
       expect(html).toContain('data-testid="cua-stop-btn"');
       expect(html).toContain('data-cua-protected="stop-button"');
       expect(html).not.toContain('disabled=""');
-      expect(html).toContain('Stop (Esc)');
+      expect(html).toContain('중지 (Esc)');
 
       const children = (element.props as { children: unknown[] }).children;
       const stopButton = children.find(
@@ -228,7 +240,7 @@ describe('CuaOverlay', () => {
       })
     );
     expect(settledStoppedHtml).toContain('disabled=""');
-    expect(settledStoppedHtml).toContain('Stopped');
+    expect(settledStoppedHtml).toContain('중지됨');
   });
 
   it('maintains stopping progress until main pushes stopped with cleanupComplete: true', async () => {
@@ -261,7 +273,7 @@ describe('CuaOverlay', () => {
       })
     );
     expect(pendingHtml).toContain('Stopping CUA');
-    expect(pendingHtml).toContain('Stopping…');
+    expect(pendingHtml).toContain('중지 중…');
     expect(pendingHtml).toContain('aria-busy="true"');
     expect(getCuaCleanupStatusText(stoppedIncomplete, false)).toContain('finishing input cleanup');
     expect(getCuaCleanupStatusText(stoppedComplete, false)).toContain('all synthetic inputs released');
@@ -460,6 +472,22 @@ function withMockDom<T>(
 }
 
 describe('clipRectToOverflowAncestors and collectDomSurfaceState protected rect clipping', () => {
+  it('increments scope revision when the compact node body scrolls inside unchanged canvas geometry', async () => {
+    const { collectDomSurfaceState } = await loadUseCuaOverlayModule();
+    const canvas = new MockHtmlElement({ attrs: { 'data-cua-safe-surface': 'canvas' }, rect: { x: 140, y: 120, width: 400, height: 400 } });
+    const nodeBody = new MockHtmlElement({ className: 'os-ws-node__body', rect: { x: 140, y: 150, width: 400, height: 370 }, parentElement: canvas });
+    Object.defineProperty(canvas, 'querySelectorAll', { value: (selector: string) => selector.includes('.os-ws-node__body') ? [nodeBody] : [] });
+    const measure = () => withMockDom({ viewport: { width: 900, height: 600 }, protectedElements: [], safeSurfaceElements: [canvas] },
+      () => collectDomSurfaceState({ contentRevision: 1, isAgentBusy: false, hasPendingApproval: false, cuaPhase: 'ready' }));
+    const tracker = new CuaSurfaceRevisionTracker();
+    const before = tracker.next(measure());
+    Object.defineProperty(nodeBody, 'scrollTop', { value: 100 });
+    const measuredAfter = measure();
+    const after = tracker.next(measuredAfter);
+    expect(after.snapshot.safeSurface).toEqual(before.snapshot.safeSurface);
+    expect(measuredAfter.scrollStates).toContainEqual({ id: 'os-ws-node__body', scrollLeft: 0, scrollTop: 100 });
+    expect(after.snapshot.layoutRevision).toBe(before.snapshot.layoutRevision + 1);
+  });
   it('clips overflowing approval-ui inside scrollable .agent-chat-log to stay strictly inside agent-panel without spurious layoutRevision bump', async () => {
     const { collectDomSurfaceState } = await loadUseCuaOverlayModule();
     const viewport = { width: 1220, height: 793 };
@@ -745,8 +773,8 @@ describe('approval button mouse safe-surface focus preservation', () => {
     expect(panelSource).not.toContain('.focus(');
     // Keyboard activation (Tab + Enter/Space) remains intact: approval buttons are native <Button> without negative tabIndex.
     const approvalBlock = panelSource.slice(panelSource.indexOf('className="agent-chat-approval__actions"'), panelSource.indexOf('{status === \'thinking\'}'));
-    expect(approvalBlock).toContain('Run once');
-    expect(approvalBlock).toContain('Deny');
+    expect(approvalBlock).toContain('한 번 승인');
+    expect(approvalBlock).toContain('거절');
     expect(approvalBlock).not.toContain('tabIndex={-1}');
   });
 });

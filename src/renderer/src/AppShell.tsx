@@ -162,7 +162,7 @@ function AppShellContent({ activePage, children, hasActiveProject, onPageChange,
 
   return (
     <CuaOverlayProvider controller={cua}>
-    <main className="app-shell">
+    <main className={`app-shell${showChatPanel ? ' app-shell--workspace' : ''}`}>
       <AppShellBackground />
       {/* Draggable window titlebar: the native frame is hidden on macOS, so this
           bar owns window dragging; interactive controls opt out via no-drag. */}

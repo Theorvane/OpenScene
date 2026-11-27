@@ -47,7 +47,14 @@ export function getCuaCleanupStatusText(state: CuaState, stopPending: boolean): 
 }
 
 export function CuaOverlay({ state, stopPending, stopError, agentBusy = false, onStop }: CuaOverlayProps): ReactElement {
-  const isActive = state.phase !== 'idle' || stopPending || agentBusy;
+  // Initial window navigation can produce a stopped state before any CUA
+  // session exists. Keep that no-run receipt from covering the workspace tabs;
+  // real session receipts, cleanup failures and active Stop remain visible.
+  const initialNavigationOnly = state.phase === 'stopped' && state.error === 'navigation' &&
+    state.sessionId === null && state.runId === null && state.lastDispatchReceipt === null &&
+    state.cleanupComplete && state.releaseFailures.length === 0 && !state.targetGone &&
+    !stopPending && stopError === null && !agentBusy;
+  const isActive = (state.phase !== 'idle' || stopPending || agentBusy) && !initialNavigationOnly;
   const cursorMode = getCuaCursorMode(state, stopPending);
   const isStoppingDisplay = stopPending || state.phase === 'stopping';
   const isCleanupFailed = state.phase === 'cleanup-failed';
@@ -57,14 +64,14 @@ export function CuaOverlay({ state, stopPending, stopError, agentBusy = false, o
   // mouseDown before mouseUp/click fires, so onStop -> agent-chat:cancel still runs.
   const stopButtonBusy = stopPending || (state.phase === 'stopping' && !agentBusy);
   const stopButtonDisabled = !isActive || !canClickStop || stopButtonBusy;
-  const showHudBanner = state.phase !== 'idle' || stopPending;
+  const showHudBanner = (state.phase !== 'idle' || stopPending) && !initialNavigationOnly;
   const stopButtonLabel = stopButtonBusy
-    ? 'Stopping…'
+    ? '중지 중…'
     : isCleanupFailed && !agentBusy
-      ? 'Locked'
+      ? '잠김'
       : state.phase === 'stopped' && state.cleanupComplete && !agentBusy
-        ? 'Stopped'
-        : 'Stop (Esc)';
+        ? '중지됨'
+        : '중지 (Esc)';
   const cleanupStatus = getCuaCleanupStatusText(state, stopPending);
   const effectiveError = stopError ?? state.error;
 

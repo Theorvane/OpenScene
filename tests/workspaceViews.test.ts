@@ -168,6 +168,31 @@ describe('Phase 1A Workspace Stylesheet & Helpers', () => {
 });
 
 describe('WorkspaceShell', () => {
+  it('keeps live child identity and unsent drafts across all three tab changes', () => {
+    function LiveEditor(): ReactElement {
+      const [edits, setEdits] = useState(0);
+      return createElement('button', { 'data-testid': 'live-editor', onClick: () => setEdits((n) => n + 1) }, String(edits));
+    }
+    function Harness(): ReactElement {
+      const [mode, setMode] = useState('natural');
+      return createElement(WS.WorkspaceShell, {
+        mode, onModeChange: setMode, persistentContent: true,
+        projects: [], activeProjectId: null, onSelectProject: vi.fn(), onNewVideo: vi.fn(), onStop: vi.fn(),
+        safety: { sourcePreserved: true, dirty: true, pendingApprovalCount: 0, cuaStatus: 'idle' }
+      }, createElement(LiveEditor));
+    }
+    const container = mount(createElement(Harness));
+    const child = container.querySelector('[data-testid="live-editor"]')!;
+    act(() => child.click());
+    for (const mode of ['precision', 'node', 'natural']) {
+      dispatchKey(container.querySelector(`[data-testid="mode-tab-${mode}"]`)!, 'Enter');
+      expect(container.querySelector('[data-testid="live-editor"]')).toBe(child);
+      expect(child.textContent).toBe('1');
+      const panelId = container.querySelector(`[data-testid="mode-tab-${mode}"]`)!.getAttribute('aria-controls')!;
+      expect(getDocument().getElementById(panelId)?.querySelector('[data-testid="live-editor"]')).toBe(child);
+    }
+    expect(container.textContent).toContain('저장되지 않은 변경 있음');
+  });
   it('switches across 3 top-level tabs, supports intake mode, exposes CUA Stop protected button, and opens Settings Sheet', async () => {
     const doc = getDocument();
     const onStop = vi.fn();

@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState, type PointerEvent } from 'react';
-import type { MediaAsset, PersistedTimelineClip } from '../../../shared/timelineTypes';
+import type { MediaAsset, PersistedTimelineClip, TimelineDocument } from '../../../shared/timelineTypes';
 import { clipDurationMs } from '../../../shared/timelineClipGeometry';
-import { evaluateCanvasBlock } from '../../../shared/videoCanvasBlocks';
+import { applyCanvasBlock, evaluateCanvasBlock } from '../../../shared/videoCanvasBlocks';
+import { NodeWorkflowImpactPanel } from '../../components/workspace';
+import { describeCanvasApplyImpact } from './canvasApplyImpact';
 import { CANVAS_BLOCK_CATALOG, canvasDefaultInputCount, canvasVariableInputs } from '../../../shared/canvasBlockCatalog';
 import { CANVAS_TEMPLATES, createCanvasTemplate, type CanvasTemplateId } from '../../../shared/canvasTemplates';
 import { CanvasBlockSettings } from './CanvasBlockSettings';
@@ -64,6 +66,7 @@ export function VideoConnectionCanvas({ editor, locked, onPreview }: {
   const [finalId, setFinalId] = useState('');
   const [search, setSearch] = useState('');
   const [notice, setNotice] = useState('');
+  const [pendingApply, setPendingApply] = useState<{ readonly blockId: string; readonly before: TimelineDocument; readonly after: TimelineDocument } | null>(null);
   const [draggingBlockId, setDraggingBlockId] = useState<string | null>(null);
   const viewport = useRef<HTMLDivElement>(null);
   const graph = project.timeline.canvas ?? EMPTY_CANVAS_GRAPH;
@@ -71,6 +74,12 @@ export function VideoConnectionCanvas({ editor, locked, onPreview }: {
   const roots = graph.blocks.filter(block => !graph.connections.some(edge => edge.fromId === block.id));
   const finalBlock = roots.find(block => block.id === finalId) ?? roots.at(-1);
   const finalResult = finalBlock ? evaluateCanvasBlock(project.timeline, graph, finalBlock.id) : null;
+  const requestApply = (blockId: string): void => {
+    const result = applyCanvasBlock(project.timeline, graph, blockId);
+    if (!result.success) { setNotice(result.error); return; }
+    setPendingApply({ blockId, before: project.timeline, after: result.timeline });
+  };
+  const pendingIsCurrent = pendingApply !== null && pendingApply.before === project.timeline;
   const blockHeight = canvasBlockHeight;
   useEffect(() => {
     // Keep source cards in place when applying a block moves clips between tracks.
@@ -206,7 +215,17 @@ export function VideoConnectionCanvas({ editor, locked, onPreview }: {
       (block === undefined ? 'Missing source' : CANVAS_BLOCK_LABELS[block.kind]);
   };
 
-  return <section className="video-canvas canvas-workbench" aria-label="Video connection canvas">
+  return <NodeWorkflowImpactPanel workflowTitle="프로젝트 워크플로"
+    impactSummary={pendingIsCurrent ? describeCanvasApplyImpact(pendingApply.before, pendingApply.after, sourceName(pendingApply.blockId)) : null}
+    onCancelApply={() => setPendingApply(null)}
+    {...(pendingIsCurrent && !locked ? { onConfirmApply: () => {
+      if (pendingApply.before !== editor.project?.timeline) return;
+      if (editor.applyCanvasBlock(pendingApply.blockId)) {
+        setFromId(null); setToId(null); setNotice('워크플로를 적용했습니다. 실행 취소로 직전 타임라인을 복원할 수 있습니다.');
+      } else setNotice('적용하지 못했습니다. 편집기 상태를 확인하세요.');
+      setPendingApply(null);
+    } } : {})}
+  ><section className="video-canvas canvas-workbench" aria-label="Video connection canvas">
     <aside className="canvas-library" aria-label="Workflow library">
       <div className="canvas-library__tabs" role="group" aria-label="Workflow library categories">
         <button type="button" aria-pressed={libraryTab === 'templates'} onClick={() => { setLibraryTab('templates'); setSearch(''); }}>Quick starts</button>
@@ -251,8 +270,8 @@ export function VideoConnectionCanvas({ editor, locked, onPreview }: {
         {roots.map(block => <option key={block.id} value={block.id}>{CANVAS_BLOCK_LABELS[block.kind]}</option>)}
       </select>
       <button type="button" disabled={locked || !finalBlock || !finalResult?.success} onClick={() => {
-        if (finalBlock && editor.applyEditingOperations([{ action: 'canvas.apply', id: finalBlock.id }])) { setFromId(null); setNotice('Workflow applied. Original inputs are preserved; adjust settings and apply again safely.'); }
-      }}>Apply workflow</button>
+        if (finalBlock) requestApply(finalBlock.id);
+      }}>적용 영향 확인</button>
       <button type="button" onClick={onPreview}>Review timeline</button>
       <button type="button" disabled={locked || !editor.canUndoTimeline} onClick={() => {
         editor.undoTimeline(); setFromId(null); setToId(null); setNotice('Canvas edit undone.');
@@ -377,11 +396,8 @@ export function VideoConnectionCanvas({ editor, locked, onPreview }: {
               <div className="video-function-node__result">
                 <span>{result.success ? formatDuration(result.output.durationMs) : result.error}</span>
                 <button type="button" disabled={locked || !result.success} onClick={() => {
-                  if (editor.applyCanvasBlock(block.id)) {
-                    setFromId(null); setToId(null);
-                    setNotice('Block applied. Connected clips now start at the beginning of their output tracks. Use Undo to restore the previous edit.');
-                  } else setNotice('The output could not be applied. Check the editor status.');
-                }}>Apply block</button>
+                  requestApply(block.id);
+                }}>적용 영향 확인</button>
               </div>
             </article>;
           })}
@@ -399,5 +415,5 @@ export function VideoConnectionCanvas({ editor, locked, onPreview }: {
       {fromId !== null && <button type="button" onClick={() => { setFromId(null); setToId(null); setNotice(''); }}>Cancel</button>}
     </div>
     </div>
-  </section>;
+  </section></NodeWorkflowImpactPanel>;
 }
