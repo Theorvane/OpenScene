@@ -39,7 +39,12 @@ export function ReaEditorAnalysisHost({ editor, locked }: { editor: TimelineEdit
           if (!current.open || current.locked || current.projectId !== expected.projectId || current.sourceEpoch !== expected.sourceEpoch || current.trackId !== expected.trackId || current.atMs !== expected.atMs) return;
           editor.applyEditingOperations(operations);
         }} />
-      <ReaGenerationPanel key={`${project.id}:${sourceEpoch}`} projectId={project.id} sourceEpoch={sourceEpoch} assets={project.assets} />
+      <ReaGenerationPanel key={`${project.id}:${sourceEpoch}`} projectId={project.id} sourceEpoch={sourceEpoch} assets={project.assets} trackId={trackId} atMs={editor.playheadMs}
+        onImport={prepared => {
+          const current = live.current, expected = prepared.scope;
+          if (!current.open || current.locked || current.projectId !== expected.projectId || current.sourceEpoch !== expected.sourceEpoch || current.trackId !== expected.trackId || current.atMs !== expected.atMs) return;
+          editor.applyGeneratedImport(prepared);
+        }} />
     </div>}
   </section>;
 }

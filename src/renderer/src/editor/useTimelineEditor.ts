@@ -43,6 +43,8 @@ import { connectVideoClips } from '../../../shared/videoCanvas';
 import { applyCanvasBlock } from '../../../shared/videoCanvasBlocks';
 import { EMPTY_CANVAS_GRAPH, parseVideoCanvasGraph, type VideoCanvasGraph } from '../../../shared/videoCanvasGraph';
 import { applyEditorOperations } from '../../../shared/editorOperations';
+import { applyVerifiedGenerationImport } from '../../../shared/reaGenerationImport';
+import type { PreparedGenerationImport } from '../../../shared/reaGenerationResults';
 import {
   notifyCuaTimelineMutationScheduled,
   notifyExternalCuaTimelineMutation
@@ -313,7 +315,7 @@ export function useTimelineEditor() {
   }, []);
   const { importAssets, importRecordingResult } = useProjectAssetImports({ project, setIsBusy, setProject: setProjectFromExternalImport, setSelectedAssetId, setStatusMessage });
 
-  const replaceTimeline = useCallback((update: TimelineUpdate, successText: string, rejectionText?: string): TimelineDocument | null => {
+  const replaceTimeline = useCallback((update: TimelineUpdate, successText: string, rejectionText?: string, importedAssets?: LocalProjectSnapshot['assets']): TimelineDocument | null => {
     if (project === null || cuaSaveFreezeTokenRef.current !== null) return null;
     const timeline = update(project.timeline);
     if (timeline === null) {
@@ -325,7 +327,7 @@ export function useTimelineEditor() {
       });
       return null;
     }
-    const nextProject = { ...project, timeline };
+    const nextProject = { ...project, timeline, assets: importedAssets ?? project.assets };
     const nextFingerprint = computeTimelineContentFingerprint(nextProject);
     const changed = nextFingerprint !== computeTimelineContentFingerprint(project);
     setProject(nextProject);
@@ -953,6 +955,11 @@ export function useTimelineEditor() {
   }, [project, refreshProjects]);
 
   return {
+    applyGeneratedImport: (prepared: PreparedGenerationImport): boolean => {
+      if (project === null) return false;
+      const applied = applyVerifiedGenerationImport(project, prepared);
+      return applied !== null && replaceTimeline(() => applied.timeline, 'Verified generated shot imported. Use Undo to restore.', undefined, applied.assets) !== null;
+    },
     applyEditingOperations: (operations: readonly unknown[]): boolean => {
       if (project === null) return false;
       const result = applyEditorOperations(project.timeline, operations, project.assets);

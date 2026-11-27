@@ -8,7 +8,7 @@ import type { ReaGenerationJobStore } from '../src/main/reaGenerationJobStore';
 describe('dedicated video credentials and caller authorization', () => {
   it('denies every foreign/subframe caller before touching any service or payload', async () => {
     const frame = {}, contents = { mainFrame: frame, isDestroyed: () => false }, own = { webContents: contents, isDestroyed: () => false };
-    const service = { status: vi.fn(), setCredential: vi.fn(), clearCredential: vi.fn(), prepare: vi.fn(), get: vi.fn(), cancel: vi.fn() };
+    const service = { status: vi.fn(), setCredential: vi.fn(), clearCredential: vi.fn(), prepare: vi.fn(), get: vi.fn(), cancel: vi.fn(), getResult: vi.fn(), assemble: vi.fn(), prepareImport: vi.fn(), reference: vi.fn() };
     const handlers = new Map<string, (event: IpcMainInvokeEvent, payload: unknown) => Promise<unknown>>();
     registerReaGenerationIpc({ service, getOwnWindow: () => own as unknown as BrowserWindow,
       ipcMain: { handle: (channel: string, fn: (event: IpcMainInvokeEvent, payload: unknown) => Promise<unknown>) => handlers.set(channel, fn) } as unknown as IpcMain });
