@@ -6,6 +6,10 @@ import { join } from 'node:path';
 import { IPC_CHANNELS } from '../shared/ipc';
 import { ReaVideoAnalysisService } from './reaVideoAnalysisService';
 import { registerReaAnalysisIpc } from './reaVideoAnalysisIpc';
+import { ReaGenerationJobStore } from './reaGenerationJobStore';
+import { ReaGenerationService } from './reaGenerationService';
+import { registerReaGenerationIpc } from './reaGenerationIpc';
+import { REA_VIDEO_CREDENTIAL_SLOT } from '../shared/reaGenerationApi';
 import type { AppSettings, CaptureSource } from '../shared/models';
 import { SourceCatalog, type RawCaptureSource } from '../shared/sourceCatalog';
 import type { MediaKind } from '../shared/timelineTypes';
@@ -94,6 +98,15 @@ const reaAnalysis = new ReaVideoAnalysisService(async ({ projectId, assetId }) =
 const audioDetachService = new AudioDetachService({ projects: projectStore, assets: assetLibraryStore });
 const exportJobStore = new ExportJobStore();
 const credentialStore = new CredentialStore(app.getPath('userData'));
+// No fixture transport is installed in the product. Every execution method fails closed.
+const generationDisabled = async (): Promise<never> => { throw new Error('PAID_EXECUTION_DISABLED'); };
+const reaGenerationJobs = new ReaGenerationJobStore(join(app.getPath('userData'), 'rea-generation'), {
+  submit: generationDisabled, query: generationDisabled, cancelQueued: generationDisabled
+});
+const reaGeneration = new ReaGenerationService(credentialStore, reaGenerationJobs, async (projectId, assetId) => {
+  const asset = await projectStore.getAsset(projectId, assetId);
+  return asset?.kind === 'video' && await assetLibraryStore.getPlaybackSource(projectId, assetId) !== null;
+});
 const jevService = createJevService({ store: credentialStore });
 const jevConfigStore = new JevConfigStore(app.getPath('userData'));
 let jevCredentialWindow: BrowserWindow | null = null;
@@ -431,6 +444,7 @@ async function installIpcHandlers(): Promise<void> {
   });
   registerExportIpcHandlers(ipcMain, exportIpcService);
   registerReaAnalysisIpc({ service: reaAnalysis, ipcMain, getOwnWindow: () => reaAnalysisWindow });
+  registerReaGenerationIpc({ service: reaGeneration, ipcMain, getOwnWindow: () => reaAnalysisWindow });
   ipcMain.handle(IPC_CHANNELS.shortsStart, (_event, payload: unknown) => shortsService.start(payload));
   ipcMain.handle(IPC_CHANNELS.shortsGet, (_event, payload: unknown) => shortsService.get(payload));
   ipcMain.handle(IPC_CHANNELS.shortsList, (_event, payload: unknown) => shortsService.list(payload));
@@ -453,6 +467,7 @@ async function installIpcHandlers(): Promise<void> {
   ipcMain.handle(IPC_CHANNELS.getProviderCredentials, async () => {
     try {
       const status = await credentialStore.getCredentialStatus();
+      delete status[REA_VIDEO_CREDENTIAL_SLOT];
       return ok(status);
     } catch (err) {
       return fail('UNKNOWN_ERROR', err instanceof Error ? err.message : 'Failed to retrieve credential status');
@@ -461,6 +476,7 @@ async function installIpcHandlers(): Promise<void> {
 
   ipcMain.handle(IPC_CHANNELS.setProviderCredential, async (_event, provider: any, apiKey: string) => {
     if (typeof provider !== 'string') return fail('INVALID_INPUT', 'Invalid credential provider.');
+    if (provider === REA_VIDEO_CREDENTIAL_SLOT) return fail('PERMISSION_DENIED', 'Use the dedicated video credential operation.');
     if (provider === 'typesafe-jev') return fail('PERMISSION_DENIED', 'Use the dedicated Jev credential operation.');
     try {
       await credentialStore.setCredential(provider, apiKey);
