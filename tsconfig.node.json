@@ -19,6 +19,8 @@
     "src/main/**/*.ts",
     "src/preload/**/*.ts",
     "src/renderer/src/editor/editorTimelineHistory.ts",
+    "src/renderer/src/editor/canvasApplyImpact.ts",
+    "src/renderer/components/workspace/workspaceTypes.ts",
     "src/renderer/src/editor/editorTimelineView.ts",
     "src/renderer/src/editor/dockTabs.ts",
     "src/renderer/src/editor/editorPanelLayout.ts",

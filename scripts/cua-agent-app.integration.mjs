@@ -355,6 +355,9 @@ try {
   evidence.fixtureClip = clip;
   evidence.fixtureTimeline = await mcp('getProjectTimeline', { projectId });
   await click('.projects-home__project');
+  // Phase 1B opens Natural by default. Explicit synthetic user-role selection
+  // enters the real precision surface before any observation or approval.
+  await click('[data-testid="mode-tab-precision"]');
   await until('MCP-created timeline clip', () => pointFor('.timeline-clip'));
   if (!await pointFor('[aria-label="Edit Agent prompt"]')) await click('button', 'Assistant');
   if (process.env.CUA_AGENT_ORDINARY_SAVE_PROBE !== '1') {
@@ -491,7 +494,7 @@ try {
         const pointerApproval = [...evidence.agentRequests].reverse().find(record => record.response?.pendingApproval?.toolName === 'executeCuaAction')?.response.pendingApproval;
         assert.equal(pointerApproval?.cuaApproval?.actionKind, 'click');
         evidence.scenarios.push({ kind: 'disclosed-separate-pointer-approval', actor: 'harness-ui', actualHumanSelection: false, approval: pointerApproval });
-        await click('.agent-chat-approval button', 'Run once');
+        await click('.agent-chat-approval button', '한 번 승인');
         await until('new separately approved key after pointer settlement and observation', () => js('document.querySelector(".agent-chat-approval")?.textContent.includes("Press ArrowUp")'));
         const state = await bridge('cuaGetState');
         assert.equal(state.phase, 'ready');
@@ -506,7 +509,7 @@ try {
         await capture('remap-key-separate-key-pending');
       }
       if (kind === 'remap-cancel') await click('[data-testid="cua-stop-btn"]');
-      else await click('.agent-chat-approval button', ['deny', 'remap-deny'].includes(kind) ? 'Deny' : 'Run once');
+      else await click('.agent-chat-approval button', ['deny', 'remap-deny'].includes(kind) ? '거절' : '한 번 승인');
       if (kind === 'duplicate') {
         assert.ok(conversation, 'Actual pending conversation was persisted');
         const duplicate = await bridge('agentChatApprove', { conversationId: conversation.conversationId, toolCallId: lastActionCallId, decision: 'approve' });
@@ -521,7 +524,7 @@ try {
         assert.equal(pending?.cuaApproval?.actionKind, 'save');
         assert.equal(pending.cuaApproval.dirty, true);
         assert.ok(pending.cuaApproval.snapshotId && pending.cuaApproval.timelineDigest, 'Main pinned the exact snapshot identity before approval');
-        await click('.agent-chat-approval button', kind === 'save-deny' ? 'Deny' : 'Run once');
+        await click('.agent-chat-approval button', kind === 'save-deny' ? '거절' : '한 번 승인');
       }
       if (kind === 'cancel') {
         await until('actual held drag', async () => (await bridge('cuaGetState')).phase === 'acting' && heldInputs().length > 0);

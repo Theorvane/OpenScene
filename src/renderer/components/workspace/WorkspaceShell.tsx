@@ -40,12 +40,14 @@ export interface WorkspaceShellProps {
   readonly onSelectProject: (projectId: string) => void;
   readonly onNewVideo: () => void;
   readonly candidates?: readonly WorkspaceCandidateItem[];
+  readonly showCandidateNavigation?: boolean;
   readonly activeCandidateId?: string | null;
   readonly onSelectCandidate?: (candidateId: string) => void;
   readonly safety: WorkspaceSafetyState;
   readonly canUndo?: boolean;
   readonly onUndo?: () => void;
   readonly onSave?: () => void;
+  readonly saveScopeLabel?: string;
   readonly onStop: () => void;
   readonly onOpenAssets?: () => void;
   readonly onOpenSettings?: () => void;
@@ -54,6 +56,8 @@ export interface WorkspaceShellProps {
   readonly onDuplicateProject?: () => void;
   readonly onRevealExports?: () => void;
   readonly children: ReactNode;
+  /** Keep a live editor mounted when only its presentation changes. */
+  readonly persistentContent?: boolean;
 }
 
 function BrandMark(): ReactElement {
@@ -146,7 +150,10 @@ export function WorkspaceShell({
   onStop,
   onUndo,
   projects,
+  persistentContent = false,
   safety,
+  saveScopeLabel,
+  showCandidateNavigation = true,
   settingsDrawerContent
 }: WorkspaceShellProps): ReactElement {
   const [assetsOpen, setAssetsOpen] = useState(false);
@@ -186,7 +193,7 @@ export function WorkspaceShell({
         className="os-ws-shell"
         data-workspace-mode={mode}
       >
-        <header className="os-ws-header">
+        <header className="os-ws-header" data-cua-protected="chrome-menu" data-cua-protected-id="workspace-header">
           <div className="os-ws-header__left">
             <span className="os-ws-brand">
               <BrandMark />
@@ -300,7 +307,7 @@ export function WorkspaceShell({
 
             <span className="os-ws-safety-item">
               <span className={safety.dirty ? 'os-ws-dot os-ws-dot--warn' : 'os-ws-dot os-ws-dot--ok'} aria-hidden="true" />
-              <span>{safety.saving === true ? '저장 중' : safety.dirty ? '저장되지 않은 변경 있음' : '모든 변경 저장됨'}</span>
+              <span>{safety.saving === true ? '저장 중' : safety.dirty ? `${saveScopeLabel === undefined ? '' : `${saveScopeLabel} · `}저장되지 않은 변경 있음` : saveScopeLabel === undefined ? '모든 변경 저장됨' : `${saveScopeLabel} 저장됨`}</span>
             </span>
 
             {safety.pendingApprovalCount > 0 && (
@@ -318,7 +325,7 @@ export function WorkspaceShell({
         </div>
 
         <div className="os-ws-body">
-          <aside className="os-ws-sidebar" aria-label="프로젝트 및 후보 탐색">
+          <aside className="os-ws-sidebar" aria-label="프로젝트 및 후보 탐색" data-cua-protected="chrome-menu" data-cua-protected-id="workspace-sidebar">
             <ScrollArea className="os-ws-sidebar__scroll">
               <div className="os-ws-sidebar__inner">
                 <section className="os-ws-sidebar__section">
@@ -355,7 +362,7 @@ export function WorkspaceShell({
                   )}
                 </section>
 
-                <section className="os-ws-sidebar__section">
+                {showCandidateNavigation && <section className="os-ws-sidebar__section">
                   <div className="os-ws-sidebar__section-header">
                     <span className="os-ws-sidebar__heading">쇼츠 후보</span>
                     <span className="os-ws-sidebar__meta">{candidates.length}</span>
@@ -380,7 +387,7 @@ export function WorkspaceShell({
                       </button>
                     ))
                   )}
-                </section>
+                </section>}
               </div>
             </ScrollArea>
 
@@ -410,7 +417,12 @@ export function WorkspaceShell({
 
           <main className="os-ws-main">
             {mode === 'intake' && children}
-            {(['natural', 'precision', 'node'] as const).map((tabMode) => (
+            {persistentContent && mode !== 'intake' && (
+              <TabsContent value={mode} forceMount className="os-ws-tabpanel" data-testid={`mode-tabpanel-${mode}`}>
+                {children}
+              </TabsContent>
+            )}
+            {(['natural', 'precision', 'node'] as const).filter((tabMode) => !persistentContent || mode !== tabMode).map((tabMode) => (
               <TabsContent
                 key={tabMode}
                 value={tabMode}
@@ -419,7 +431,7 @@ export function WorkspaceShell({
                 className="os-ws-tabpanel"
                 data-testid={`mode-tabpanel-${tabMode}`}
               >
-                {mode === tabMode ? children : null}
+                {!persistentContent && mode === tabMode ? children : null}
               </TabsContent>
             ))}
           </main>
