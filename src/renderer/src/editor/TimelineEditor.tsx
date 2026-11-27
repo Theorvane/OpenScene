@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type CSSProperties, type ReactElement, type ReactNode } from 'react';
+import { ReaEditorAnalysisHost } from "./ReaEditorAnalysisHost";
 import { EditorWorkspace } from '../../../../external/opencut/apps/web/src/components/editor/editor-workspace';
 import { EditorHeader } from './EditorWorkbenchHeader';
 
@@ -446,6 +447,7 @@ export function TimelineEditor({ active = true, editor, onProjectSettings, onOpe
           </>} />
         </div>
         <div className="editor-view" hidden={fullStageMode}>
+            {active && !fullStageMode && <ReaEditorAnalysisHost editor={editor} locked={isAgentBusy || editor.isBusy} />}
             {floatingProgramVisible ? <div className="empty-slate">Program Monitor is floating above the workspace.</div> : <ProgramMonitor editor={editor} />}
         </div>
       </main>}

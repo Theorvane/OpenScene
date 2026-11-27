@@ -55,6 +55,9 @@ export function ReaVideoAnalysisWorkspace({ projectId, assets, trackId, atMs, so
   };
   const cancel = async () => {
     if (!job) return;
+    // Retire pending preparation immediately, before main acknowledges cancellation.
+    generation.current++;
+    setSelected([]); setJob(undefined);
     try { await window.videoTool.reaAnalysisCancel({ jobId: job.id }); }
     catch { setError('Cancellation request failed.'); }
   };
@@ -85,7 +88,7 @@ export function ReaVideoAnalysisWorkspace({ projectId, assets, trackId, atMs, so
     {runtime && <p>Upstream Python pipeline unavailable: dependencies and model licenses require separate review. Python 3.10+: {runtime.python?.status ?? 'not inspected'}{runtime.python?.version ? ` (${runtime.python.version})` : ''}. Local timing analysis does not require Python.</p>}
     <label>Imported video <select value={assetId} disabled={starting || job?.status === 'running'} onChange={event => { setAssetId(event.target.value); setSelected([]); setJob(undefined); if (job) void window.videoTool.reaAnalysisCancel({ jobId: job.id }).catch(() => undefined); }}><option value="">Choose a video</option>{videos.map(asset => <option key={asset.id} value={asset.id}>{asset.displayName}</option>)}</select></label>
     <Button disabled={!runtime?.available || !videos.some(asset => asset.id === assetId) || starting || job?.status === 'running'} onClick={() => void start()}>Analyze locally</Button>
-    {job?.status === 'running' && <Button onClick={() => void cancel()}>Cancel analysis</Button>}
+    {(job?.status === 'running' || job?.status === 'review') && <Button onClick={() => void cancel()}>Cancel analysis</Button>}
     {job && <p role="status">{job.status}{job.error ? `: ${job.error}` : ''}{job.cleanupComplete ? ' · Local process settled; no temporary media retained.' : ''}</p>}
     {error && <p role="alert">{error}</p>}
     {job?.plan && <>
