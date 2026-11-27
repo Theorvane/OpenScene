@@ -10,9 +10,10 @@ const id = z.string().min(1).max(160).regex(/^[\w-]+$/);
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
 export const reaGenerationPlanSchema = z.strictObject({
   version: z.literal(1), projectId: id, sourceAssetId: id, sourceEpoch: z.string().min(1).max(512),
+  sourceIdentity: hash.optional(),
   reviewVersion: z.number().int().nonnegative(), shotId: id,
   sourceStartMs: z.number().int().nonnegative(), sourceEndMs: z.number().int().positive(),
-  prompt: z.string().min(1).max(12000).refine(value => value.trim().length > 0),
+  prompt: z.string().min(1).max(7000).refine(value => value.trim().length > 0),
   provider: z.literal('minimax-video-payg'), baseUrl: z.literal('https://api.minimax.io'),
   model: z.literal('MiniMax-H3'), resolution: z.literal('768P'), generateAudio: z.literal(false),
   durationSeconds: z.number().int().min(4).max(15),

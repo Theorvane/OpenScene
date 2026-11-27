@@ -9,7 +9,7 @@ import type { MinimaxVideoAdapter } from './minimaxVideoAdapter';
 const recordSchema = z.strictObject({ id: z.string().uuid(), plan: reaGenerationPlanSchema, planHash: z.string().regex(/^[a-f0-9]{64}$/),
   approvalHash: z.string(), expiresAt: z.number().int(), state: z.enum(['awaiting-approval', 'submitting', 'outcome-unknown', 'queued', 'running', 'remote-succeeded', 'failed', 'cancelled']),
   taskId: z.string().regex(/^[\w-]{1,160}$/).optional(), dispatchStarted: z.boolean().default(false), cancelRequested: z.boolean(), remoteAction: z.enum(['cancelled', 'deleted']).optional(),
-  pollCount: z.number().int().nonnegative(), nextPollAt: z.number().int(), deadline: z.number().int() });
+  pollCount: z.number().int().nonnegative(), collectionCount: z.number().int().nonnegative().default(0), nextPollAt: z.number().int(), deadline: z.number().int() });
 type Record = z.infer<typeof recordSchema>;
 const digest = (s: string) => createHash('sha256').update(s).digest('hex');
 
@@ -45,8 +45,12 @@ export class ReaGenerationJobStore {
     try {
       await f.writeFile(JSON.stringify(this.records)); await f.sync(); await f.close();
       await rename(temporary, join(this.directory, 'jobs.json'));
-      const dir = await open(this.directory, 'r');
-      try { await dir.sync(); } finally { await dir.close(); }
+      // Windows does not expose a usable directory fsync through Node. The file
+      // is still flushed before atomic replacement; POSIX also flushes the entry.
+      if (process.platform !== 'win32') {
+        const dir = await open(this.directory, 'r');
+        try { await dir.sync(); } finally { await dir.close(); }
+      }
     } catch (error) { await f.close().catch(() => undefined); await rm(temporary, { force: true }); throw error; }
   }
   private receipt(r: Record): ReaGenerationReceipt {
@@ -72,7 +76,7 @@ export class ReaGenerationJobStore {
         records.splice(index, 1);
       }
       const r: Record = { id: randomUUID(), plan, planHash: generationPlanHash(plan), approvalHash: digest(approval), expiresAt: now + 300000,
-        state: 'awaiting-approval', dispatchStarted: false, cancelRequested: false, pollCount: 0, nextPollAt: now, deadline: now + 1800000 };
+        state: 'awaiting-approval', dispatchStarted: false, cancelRequested: false, pollCount: 0, collectionCount: 0, nextPollAt: now, deadline: now + 1800000 };
       records.push(r); const previous = this.records; this.records = records;
       try { await this.persist(); } catch (error) { this.records = previous; throw error; }
       return { receipt: this.receipt(r), approval };
@@ -81,6 +85,13 @@ export class ReaGenerationJobStore {
   get(id: string, projectId: string): Promise<ReaGenerationReceipt> { return this.serialize(async () => this.receipt(this.find(id, projectId))); }
   /** Main-only approved context; no IPC exposes arbitrary persisted plans. */
   getPlan(id: string, projectId: string) { return this.serialize(async () => freezeGenerationPlan(this.find(id, projectId).plan)); }
+  claimResultCollection(id: string, projectId: string) {
+    return this.serialize(async () => {
+      const r = this.find(id, projectId);
+      if (r.state !== 'remote-succeeded' || r.cancelRequested || this.now() >= r.deadline || r.pollCount >= 120 || r.collectionCount >= 3) throw new Error('COLLECTION_BOUND');
+      r.pollCount++; r.collectionCount++; await this.persist();
+    });
+  }
   submit(id: string, approval: string, currentPlan: unknown, image?: Uint8Array): Promise<ReaGenerationReceipt> {
     // Capture caller-owned inputs before the first await.
     const plan = freezeGenerationPlan(currentPlan), bytes = image?.slice();

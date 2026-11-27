@@ -73,7 +73,7 @@ export function ReaGenerationPanel({ projectId, sourceEpoch, assets, trackId = '
   };
   return <section className="rea-analysis" aria-label="REA generation review">
     <h2>REA generation review</h2>
-    <p>Global MiniMax PAYG · MiniMax-H3 · 768P · silent · one shot. Paid execution: false. Production adapter unavailable; offline protocol tests are implemented.</p>
+    <p>Global MiniMax PAYG · MiniMax-H3 · 768P · silent · one shot. Paid execution: false. Provider adapter implemented; live account access and execution remain unverified.</p>
     <p>Account access: unverified. Documentation checked: 2026-11-27. Remote success alone is not a verified local result; originals remain kept-original.</p>
     <details><summary>Dedicated video credential</summary>
       <p>Use a global PAYG video API key. Chat, China, coding and M Plan credentials are never reused. Configuring a key does not authorize spending.</p>
@@ -87,7 +87,7 @@ export function ReaGenerationPanel({ projectId, sourceEpoch, assets, trackId = '
     </details>
     <label>Original video (kept local) <select value={sourceId} onChange={e => setSourceId(e.target.value)}><option value="">Choose a video</option>{assets.filter(a => a.kind === 'video').map(a => <option key={a.id} value={a.id}>{a.displayName}</option>)}</select></label>
     <label>Optional first frame <select value={imageId} onChange={e => setImageId(e.target.value)}><option value="">Text-to-video; no image</option>{assets.filter(a => a.kind === 'image' && ['image/png', 'image/jpeg'].includes(a.mimeType)).map(a => <option key={a.id} value={a.id}>{a.displayName}</option>)}</select></label>
-    <label>Final prompt <textarea value={prompt} onChange={e => setPrompt(e.target.value)} maxLength={12000} /></label>
+    <label>Final prompt <textarea value={prompt} onChange={e => setPrompt(e.target.value)} maxLength={7000} /></label>
     <label>Output seconds <input type="number" min={4} max={15} step={1} value={seconds} onChange={e => setSeconds(Number(e.target.value))} /></label>
     <label>Allowed budget (USD) <input inputMode="decimal" value={budget} onChange={e => setBudget(e.target.value)} /></label>
     <p>Estimate: ${(seconds * 0.08).toFixed(2)} at $0.08/output second (2026-11-27); this is not a guaranteed billing cap. Transmission manifest: final prompt{imageId ? ' and one verified first-frame image' : ' only'}; no original video/audio. Nothing is transmitted while paid execution is disabled.</p>

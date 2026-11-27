@@ -20,7 +20,10 @@ export function registerReaGenerationIpc({ service, ipcMain, getOwnWindow }: {
           return ok(await service[action]());
         }
         return ok(await service[action](payload));
-      } catch { return fail('INVALID_INPUT', 'Generation request rejected. No paid execution was authorized.'); }
+      } catch (error) {
+        if (action === 'submit' && error instanceof Error && error.message === 'PAID_EXECUTION_DISABLED') return fail('PERMISSION_DENIED', 'Paid video execution is disabled.');
+        return fail('INVALID_INPUT', 'Generation request rejected. No paid execution was authorized.');
+      }
     });
   }
 }

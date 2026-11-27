@@ -190,6 +190,7 @@ const videoTool: VideoToolApi = {
   reaGenerationAssemble: input => ipcRenderer.invoke(REA_GENERATION_CHANNELS.assemble, input),
   reaGenerationPrepareImport: input => ipcRenderer.invoke(REA_GENERATION_CHANNELS.prepareImport, input),
   reaGenerationReference: input => ipcRenderer.invoke(REA_GENERATION_CHANNELS.reference, input),
+  reaGenerationSubmit: input => ipcRenderer.invoke(REA_GENERATION_CHANNELS.submit, input),
   reaAnalysisStart: input => ipcRenderer.invoke(REA_ANALYSIS_CHANNELS.start, input),
   reaAnalysisGet: input => ipcRenderer.invoke(REA_ANALYSIS_CHANNELS.get, input),
   reaAnalysisCancel: input => ipcRenderer.invoke(REA_ANALYSIS_CHANNELS.cancel, input),

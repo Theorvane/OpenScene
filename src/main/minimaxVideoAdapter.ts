@@ -11,12 +11,13 @@ export interface OfflineVideoTransport {
   readonly kind: 'offline-fixture';
   request(input: { method: 'POST' | 'GET' | 'DELETE'; path: string; body?: string; signal: AbortSignal }): Promise<{ status: number; body: string }>;
 }
-/** No production network implementation exists in this dependency. Never accepts a key. */
+export type VideoTransport = OfflineVideoTransport | { readonly kind: 'global-payg'; request: OfflineVideoTransport['request'] };
+/** Auth remains in the main-only transport; the adapter never accepts a key. */
 export class MinimaxVideoAdapter {
-  constructor(private readonly transport: OfflineVideoTransport) {
-    if (transport.kind !== 'offline-fixture') throw new Error('PAID_EXECUTION_DISABLED');
-  }
+  constructor(private readonly transport: VideoTransport, private readonly paidExecutionAllowed = () => false) {}
+  get isOfflineFixture() { return this.transport.kind === 'offline-fixture'; }
   private async request(method: 'POST' | 'GET' | 'DELETE', path: string, body?: string): Promise<unknown> {
+    if (!this.isOfflineFixture && !this.paidExecutionAllowed()) throw new Error('PAID_EXECUTION_DISABLED');
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {

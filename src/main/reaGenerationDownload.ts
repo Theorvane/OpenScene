@@ -65,10 +65,11 @@ export async function downloadGenerationResult(rawUrl: string, destination: stri
     } finally { controller.signal.removeEventListener('abort', stop); }
   };
   try {
+    if (controller.signal.aborted) throw new Error('RESULT_ABORTED');
     const url = generationResultUrl(rawUrl);
     const addresses = await bounded(transport.resolve(url.hostname));
     const selected = addresses[0];
-    if (!selected || !addresses.every(publicGenerationAddress)) throw new Error('RESULT_DNS_REJECTED');
+    if (controller.signal.aborted || !selected || !addresses.every(publicGenerationAddress)) throw new Error('RESULT_DNS_REJECTED');
     const opening = transport.open(url, selected, controller.signal);
     // A non-cooperative injected transport cannot leak a late response/socket.
     void opening.then(value => { if (controller.signal.aborted) value.close(); }, () => undefined);
