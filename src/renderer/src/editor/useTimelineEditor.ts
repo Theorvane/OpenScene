@@ -685,7 +685,6 @@ export function useTimelineEditor() {
 
     const nextProject = { ...current, assets, timeline: transaction.timeline };
     notifyExternalCuaTimelineMutation();
-    projectRef.current = nextProject;
     setProject(nextProject);
     setTimelineHistory((history) => history === null
       ? createTimelineHistory(transaction.timeline)

@@ -2,11 +2,16 @@
 import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { LocalProjectSnapshot } from '../src/shared/timelineTypes';
+import type { LocalProjectSnapshot, MediaAsset } from '../src/shared/timelineTypes';
 import { DEFAULT_AUDIO_TRACK_MIX, DEFAULT_CLIP_EFFECTS } from '../src/shared/timelineTypes';
 
+function asset(kind: 'video' | 'audio'): MediaAsset {
+  return { id: kind === 'video' ? 'asset' : 'extracted', displayName: kind, kind,
+    projectRelativePath: `assets/${kind}`, mimeType: `${kind}/fixture`, byteLength: 1,
+    metadata: { durationMs: 5000 }, createdAt: 'original', updatedAt: 'original' };
+}
 function snapshot(id = 'A'): LocalProjectSnapshot {
-  return { schemaVersion: 4, id, name: id, createdAt: 'original', updatedAt: 'original', assets: [],
+  return { schemaVersion: 4, id, name: id, createdAt: 'original', updatedAt: 'original', assets: [asset('video')],
     ai: {} as LocalProjectSnapshot['ai'], timeline: { schemaVersion: 3, transitions: [], tracks:
       ['video', 'audio', 'audio'].map((kind, index) => (kind === 'video' ? { id: `track-${index}`, kind: 'video' as const, name: kind, clips: [{ id: 'clip', assetId: 'asset', timelineStartMs: 0, sourceStartMs: 0, sourceEndMs: 5000, sourceDurationMs: 5000, effects: DEFAULT_CLIP_EFFECTS, keyframes: [] }] } : { id: `track-${index}`, kind: 'audio' as const, name: kind, mix: DEFAULT_AUDIO_TRACK_MIX, clips: [] })) } };
 }
@@ -24,6 +29,7 @@ type EditorProbe = {
   addTitleAtPlayhead: () => string | null; setPlayheadMs: (ms: number) => void;
   playheadMs: number; selectedClipId: string; setSelectedClipId: (id: string) => void;
   undoTimeline: () => void; redoTimeline: () => void;
+  detachSelectedClipAudio: () => Promise<void>;
 };
 let editor: EditorProbe;
 let cleanup: () => void;
@@ -35,6 +41,7 @@ beforeEach(async () => {
     listProjects: async () => ({ ok: true, value: [] }),
     openProject: async ({ projectId }: { projectId: string }) => ({ ok: true, value: snapshot(projectId) }),
     deleteProject: async () => ({ ok: true, value: null }),
+    detachVideoAudio: async () => ({ ok: true, value: { asset: asset('audio') } }),
     onProjectTimelineChanged: () => () => {}, saveTimeline: save
   } });
   const hookPath = '../src/renderer/src/editor/useTimelineEditor';
@@ -48,6 +55,29 @@ beforeEach(async () => {
 afterEach(() => act(() => cleanup()));
 
 describe('manual Save ownership in the real timeline hook', () => {
+  it('preserves completed audio detachment when an older manual Save resolves', async () => {
+    act(() => { editor.setSelectedClipId('clip'); editor.setPlayheadMs(500); });
+    const submitted = editor.project!;
+    const pending = deferred(); save.mockReturnValueOnce(pending.promise);
+    let result!: Promise<boolean>; act(() => { result = editor.saveTimeline(); });
+    await act(async () => { await editor.detachSelectedClipAudio(); });
+    const detached = editor.project!;
+    const selection = editor.selectedClipId;
+    expect(detached.timeline.tracks[0]!.clips[0]!.effects.volume).toBe(0);
+    expect(detached.assets.some((item) => item.id === 'extracted')).toBe(true);
+    expect(detached.timeline.tracks[1]!.clips).toHaveLength(1);
+    expect(editor.hasUnsavedTimeline).toBe(true);
+    await act(async () => { pending.resolve({ ok: true, value: submitted }); await result; });
+    expect(await result).toBe(false); expect(editor.project).toBe(detached);
+    expect(editor.hasUnsavedTimeline).toBe(true); expect(editor.selectedClipId).toBe(selection);
+    expect(editor.playheadMs).toBe(500); expect(editor.isSavingTimeline).toBe(false);
+    act(() => editor.undoTimeline());
+    expect(editor.project!.timeline.tracks[0]!.clips[0]!.effects.volume).toBe(1);
+    expect(editor.project!.timeline.tracks[1]!.clips).toHaveLength(0);
+    act(() => editor.redoTimeline());
+    expect(editor.project!.timeline.tracks[0]!.clips[0]!.effects.volume).toBe(0);
+    expect(editor.project!.timeline.tracks[1]!.clips).toHaveLength(1);
+  });
   it('preserves a fourth track, history, selection and dirty state; navigation save returns false', async () => {
     act(() => { editor.addTitleAtPlayhead(); });
     act(() => { editor.setPlayheadMs(500); editor.setSelectedClipId('selection'); });
