@@ -1,5 +1,8 @@
 # REA fixed provider boundary (dependency 4)
 
+The [stage integration status](rea-generation-integration-status.md) records exact
+source pins, CI snapshots, resolved findings and remaining review/live gates.
+
 Issue #589 is stacked on #587 / PR #588. This completes the offline implementation
 chain's provider/submit/observation wiring. Earlier dependency documents describe
 their own PR scope; this document supersedes their unavailable-provider/no-submit
