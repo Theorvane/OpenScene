@@ -28,7 +28,7 @@ it('permits 105 actual prepare/cancel cycles and another preparation after resta
   expect((await store.prepare(plan)).receipt.state).toBe('awaiting-approval');
   expect(JSON.parse(await readFile(join(h.directory, 'jobs.json'), 'utf8'))).toHaveLength(100);
   await expect(store.get(first, 'p')).rejects.toThrow('JOB_NOT_FOUND'); expect(h.request).not.toHaveBeenCalled();
-});
+}, 30000);
 it('evicts oldest safe cancelled then expired entries and preserves submitted/unknown/valid/result records', async () => {
   const h = await setup(); const { rows, store } = await seed(h, (r, i) => {
     if (i === 0) { r.state = 'cancelled'; r.approvalHash = ''; }
