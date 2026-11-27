@@ -47,6 +47,12 @@
 .oc-editor-host { gap: 0; padding: 0; }
 .oc-editor-host > .oc-editor-host__header, .oc-editor-host > .oc-editor-host__left, .oc-editor-host > .oc-editor-host__program, .oc-editor-host > .oc-editor-host__timeline, .oc-editor-host > .oc-editor-host__inspector { border-radius: 0; }
 .editor-view > .program-monitor { display: grid; height: 100%; box-sizing: border-box; grid-template-rows: minmax(0, 1fr) auto; }
+.editor-view--precision { display: grid; grid-template-rows: auto minmax(0, 1fr); }
+.rea-editor-host { min-width: 0; min-height: 0; }
+.rea-editor-host[data-open='true'] { grid-row: 1 / -1; overflow: auto; overscroll-behavior: contain; }
+.rea-editor-host[data-open='true']:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+.rea-editor-host[data-open='true'] ~ .program-monitor,
+.rea-editor-host[data-open='true'] ~ .empty-slate { display: none; }
 .program-monitor .monitor-container { overflow: hidden; }
 .program-monitor .editor-preview-frame { aspect-ratio: auto; min-height: 0; height: 100%; grid-template-rows: minmax(0, 1fr); }
 .program-monitor .editor-preview-frame > video, .program-monitor .editor-preview-frame > img { min-height: 0; min-width: 0; }

@@ -71,6 +71,14 @@ it('imports through the mounted host into one real history transaction, preservi
   act(() => editor.setPlayheadMs(5000));
   const button = (text: string) => [...document.querySelectorAll('button')].find(item => item.textContent === text)!;
   await act(async () => button('Local shot analysis').click());
+  const region = document.querySelector<HTMLElement>('[aria-label="Local analysis tools"]')!;
+  expect(region.tabIndex).toBe(0);
+  expect(region.dataset.cuaProtected).toBe('chrome-menu');
+  const toggle = button('Local shot analysis');
+  expect(toggle.getAttribute('aria-expanded')).toBe('true');
+  expect(document.getElementById(toggle.getAttribute('aria-controls')!)).not.toBeNull();
+  region.focus();
+  expect(document.activeElement).toBe(region);
   await act(async () => { const select = document.querySelector('select')!; select.value = 'asset'; select.dispatchEvent(new Event('change', { bubbles: true })); });
   await act(async () => button('Analyze locally').click());
   await act(async () => document.querySelector<HTMLInputElement>('input[type=checkbox]')!.click());
@@ -85,6 +93,10 @@ it('imports through the mounted host into one real history transaction, preservi
   expect(editor.project!.timeline).toEqual(imported);
   expect(JSON.stringify(editor.project!.assets)).toBe(source);
   expect(save).not.toHaveBeenCalled();
+  await act(async () => toggle.click());
+  expect(region.tabIndex).toBe(-1);
+  expect(toggle.getAttribute('aria-expanded')).toBe('false');
+  expect(document.querySelector('.rea-analysis')).toBeNull();
 });
 
 it.each(['placement', 'placement-ABA', 'restart', 'project', 'reload', 'delete', 'cancel'] as const)('rejects delayed preparation after %s', async change => {

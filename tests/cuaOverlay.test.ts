@@ -472,6 +472,29 @@ function withMockDom<T>(
 }
 
 describe('clipRectToOverflowAncestors and collectDomSurfaceState protected rect clipping', () => {
+  it('protects the analysis pane while retaining timeline/Stop geometry and independent scroll scope', async () => {
+    const { collectDomSurfaceState } = await loadUseCuaOverlayModule();
+    const timeline = new MockHtmlElement({ attrs: { 'data-cua-safe-surface': 'timeline' }, rect: { x: 140, y: 300, width: 600, height: 300 } });
+    const stack = new MockHtmlElement({ className: 'timeline-stack', rect: { x: 140, y: 300, width: 600, height: 300 }, parentElement: timeline });
+    Object.defineProperty(timeline, 'querySelectorAll', { value: (selector: string) => selector.includes('.timeline-stack') ? [stack] : [] });
+    const stop = new MockHtmlElement({ attrs: { 'data-cua-protected': 'stop-button', 'data-testid': 'workspace-cua-stop-btn' }, rect: { x: 800, y: 20, width: 80, height: 30 } });
+    const panel = (height: number) => new MockHtmlElement({ id: 'rea-editor-analysis', attrs: { 'data-cua-protected': 'chrome-menu' }, rect: { x: 140, y: 80, width: 600, height }, style: { overflow: 'auto' } });
+    const measure = (analysis: MockHtmlElement) => withMockDom({ viewport: { width: 900, height: 600 }, protectedElements: [analysis, stop], safeSurfaceElements: [timeline] },
+      () => collectDomSurfaceState({ contentRevision: 1, isAgentBusy: false, hasPendingApproval: false, cuaPhase: 'ready' }));
+    const tracker = new CuaSurfaceRevisionTracker();
+    const closed = tracker.next(measure(panel(30)));
+    const expandedPanel = panel(210);
+    const expanded = tracker.next(measure(expandedPanel));
+    expect(expanded.snapshot.safeSurface).toEqual(closed.snapshot.safeSurface);
+    expect(expanded.snapshot.layoutRevision).toBe(closed.snapshot.layoutRevision + 1);
+    expect(expanded.snapshot.protectedRects).toContainEqual(expect.objectContaining({ kind: 'stop-button', rect: { x: 800, y: 20, width: 80, height: 30 } }));
+    Object.defineProperty(expandedPanel, 'scrollTop', { value: 120 });
+    const panelScrolled = tracker.next(measure(expandedPanel));
+    expect(panelScrolled.snapshot.layoutRevision).toBe(expanded.snapshot.layoutRevision);
+    Object.defineProperty(stack, 'scrollTop', { value: 80 });
+    const timelineScrolled = tracker.next(measure(expandedPanel));
+    expect(timelineScrolled.snapshot.layoutRevision).toBe(panelScrolled.snapshot.layoutRevision + 1);
+  });
   it('increments scope revision when the compact node body scrolls inside unchanged canvas geometry', async () => {
     const { collectDomSurfaceState } = await loadUseCuaOverlayModule();
     const canvas = new MockHtmlElement({ attrs: { 'data-cua-safe-surface': 'canvas' }, rect: { x: 140, y: 120, width: 400, height: 400 } });
