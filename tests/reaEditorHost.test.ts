@@ -68,6 +68,7 @@ it('imports through the mounted host into one real history transaction, preservi
   act(() => { editor.addTimelineTrack('audio'); editor.setPlayheadMs(5000); });
   const prior = editor.project!.timeline;
   const source = JSON.stringify(editor.project!.assets);
+  act(() => editor.setPlayheadMs(5000));
   const button = (text: string) => [...document.querySelectorAll('button')].find(item => item.textContent === text)!;
   await act(async () => button('Local shot analysis').click());
   await act(async () => { const select = document.querySelector('select')!; select.value = 'asset'; select.dispatchEvent(new Event('change', { bubbles: true })); });
@@ -86,7 +87,7 @@ it('imports through the mounted host into one real history transaction, preservi
   expect(save).not.toHaveBeenCalled();
 });
 
-it.each(['placement', 'project', 'reload', 'delete', 'cancel'] as const)('rejects delayed preparation after %s', async change => {
+it.each(['placement', 'placement-ABA', 'restart', 'project', 'reload', 'delete', 'cancel'] as const)('rejects delayed preparation after %s', async change => {
   const plan = measuredReaPlan({ projectId: 'A', assetId: 'asset' }, 2000, [1000]);
   let finish!: (value: unknown) => void;
   const cancel = vi.fn(async () => ({ ok: true, value: null }));
@@ -96,6 +97,7 @@ it.each(['placement', 'project', 'reload', 'delete', 'cancel'] as const)('reject
     reaAnalysisCancel: cancel,
     reaAnalysisPrepareImport: () => new Promise(resolve => { finish = resolve; })
   });
+  act(() => editor.setPlayheadMs(5000));
   const button = (text: string) => [...document.querySelectorAll('button')].find(item => item.textContent === text)!;
   await act(async () => button('Local shot analysis').click());
   await act(async () => { const select = document.querySelector('select')!; select.value = 'asset'; select.dispatchEvent(new Event('change', { bubbles: true })); });
@@ -104,15 +106,18 @@ it.each(['placement', 'project', 'reload', 'delete', 'cancel'] as const)('reject
   await act(async () => button('Import reviewed original ranges').click());
   await act(async () => {
     if (change === 'placement') editor.setPlayheadMs(1000);
+    else if (change === 'placement-ABA') editor.setPlayheadMs(1000);
+    else if (change === 'restart') button('Analyze locally').click();
     else if (change === 'project') await editor.openProject('B');
     else if (change === 'reload') await editor.openProject('A');
     else if (change === 'delete') await editor.deleteCurrentProject();
     else button('Cancel analysis').click();
   });
+  if (change === 'placement-ABA') await act(async () => editor.setPlayheadMs(5000));
   const before = editor.project?.timeline;
-  await act(async () => finish({ ok: true, value: reaPlanImportOperations(plan, [plan.shots[0]!.id], 'track-0', 'late', 0) }));
+  await act(async () => finish({ ok: true, value: reaPlanImportOperations(plan, [plan.shots[0]!.id], 'track-0', 'late', 5000) }));
   expect(editor.project?.timeline).toEqual(before);
   expect(save).not.toHaveBeenCalled();
-  if (change !== 'placement') expect(cancel).toHaveBeenCalled();
+  if (change !== 'placement' && change !== 'placement-ABA') expect(cancel).toHaveBeenCalled();
 });
 
