@@ -1,5 +1,12 @@
 # Upstream pins
 
+## rea-video audit resources
+
+https://github.com/JuneYaooo/rea-video at exact commit
+`c11f1bd8fd3edd26a40e8f45be828be685417700`. Included LICENSE/NOTICE/pyproject
+bytes and SHA-256 are recorded in `resources/rea-video/UPSTREAM.json`.
+This is an attribution/dependency snapshot, not an installed upstream Python runtime.
+
 ## OpenCut
 
 The editor presentation submodule is external/opencut from https://github.com/Theorvane/OpenCut.git at commit 56fd309f648b129db3348728ba90a825cbaebc04.

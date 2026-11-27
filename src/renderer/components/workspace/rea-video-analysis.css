@@ -1,0 +1,7 @@
+.rea-analysis { padding: 20px; overflow: auto; color: var(--os-text-primary, inherit); }
+.rea-analysis p { max-width: 80ch; line-height: 1.5; }
+.rea-analysis select { margin: 0 12px 12px 8px; max-width: 280px; }
+.rea-analysis table { border-collapse: collapse; width: 100%; margin: 16px 0; }
+.rea-analysis th, .rea-analysis td { text-align: left; padding: 8px; border-bottom: 1px solid currentColor; }
+.rea-analysis pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.rea-analysis button { margin: 4px; }

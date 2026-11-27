@@ -4,6 +4,8 @@ import { performance } from 'node:perf_hooks';
 import { join } from 'node:path';
 
 import { IPC_CHANNELS } from '../shared/ipc';
+import { ReaVideoAnalysisService } from './reaVideoAnalysisService';
+import { registerReaAnalysisIpc } from './reaVideoAnalysisIpc';
 import type { AppSettings, CaptureSource } from '../shared/models';
 import { SourceCatalog, type RawCaptureSource } from '../shared/sourceCatalog';
 import type { MediaKind } from '../shared/timelineTypes';
@@ -83,6 +85,12 @@ const recordingStore = new RecordingFileStore(resolveRecordingsDirectory());
 const projectLocations = new ProjectLocationRegistry(join(app.getPath('userData'), 'project-locations.json'));
 const projectStore = new ProjectStore(join(app.getPath('userData'), 'projects'), projectLocations);
 const assetLibraryStore = new AssetLibraryStore(join(app.getPath('userData'), 'projects'), projectStore);
+const reaAnalysis = new ReaVideoAnalysisService(async ({ projectId, assetId }) => {
+  const asset = await projectStore.getAsset(projectId, assetId);
+  const source = await assetLibraryStore.getPlaybackSource(projectId, assetId);
+  if (!asset || !source) throw new Error('Imported source unavailable.');
+  return { kind: asset.kind, path: source.filePath };
+});
 const audioDetachService = new AudioDetachService({ projects: projectStore, assets: assetLibraryStore });
 const exportJobStore = new ExportJobStore();
 const credentialStore = new CredentialStore(app.getPath('userData'));
@@ -190,6 +198,7 @@ function getScreenPermissionStatus(): string {
  */
 const APP_NAME = 'OpenScene';
 let cuaTarget: { window: BrowserWindow; driver: CuaDriver; save: CuaSaveBridge } | null = null;
+let reaAnalysisWindow: BrowserWindow | null = null;
 let activeAgentChatSessions: AgentChatSessionManager | null = null;
 const cuaAuthority = new CuaApprovalAuthority({ permitTtlMs: 2000, maxActionsPerRun: 20, now: () => performance.now() });
 const cuaSaveAuthority = new CuaSaveApprovalAuthority({ permitTtlMs: 5000, proposalTtlMs: 120000, maxSavesPerRun: 5, now: () => performance.now() });
@@ -257,6 +266,8 @@ function createWindow(): void {
       allowRunningInsecureContent: false
     }
   });
+  reaAnalysisWindow = mainWindow;
+  mainWindow.once('closed', () => { if (reaAnalysisWindow === mainWindow) reaAnalysisWindow = null; });
   let cuaSave: CuaSaveBridge | undefined;
   const cuaDriver = new CuaDriver(mainWindow, {
     isObservationInFlight: scope => cuaAgent.isObservationInFlight(scope),
@@ -419,6 +430,7 @@ async function installIpcHandlers(): Promise<void> {
     listWindows: () => BrowserWindow.getAllWindows()
   });
   registerExportIpcHandlers(ipcMain, exportIpcService);
+  registerReaAnalysisIpc({ service: reaAnalysis, ipcMain, getOwnWindow: () => reaAnalysisWindow });
   ipcMain.handle(IPC_CHANNELS.shortsStart, (_event, payload: unknown) => shortsService.start(payload));
   ipcMain.handle(IPC_CHANNELS.shortsGet, (_event, payload: unknown) => shortsService.get(payload));
   ipcMain.handle(IPC_CHANNELS.shortsList, (_event, payload: unknown) => shortsService.list(payload));
@@ -568,7 +580,7 @@ app.on('before-quit', event => {
   if (shortsShutdownComplete) return;
   event.preventDefault();
   exportIpcService.cancelAll();
-  void Promise.allSettled([cuaTarget?.driver.cancel('app-quit'), cuaTarget?.save.settleWrites(), shortsService.shutdown()]).finally(() => {
+  void Promise.allSettled([cuaTarget?.driver.cancel('app-quit'), cuaTarget?.save.settleWrites(), shortsService.shutdown(), reaAnalysis.dispose()]).finally(() => {
     shortsShutdownComplete = true;
     app.quit();
   });

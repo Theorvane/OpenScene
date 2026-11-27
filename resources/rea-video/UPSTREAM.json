@@ -1,0 +1,19 @@
+{
+  "repository": "https://github.com/JuneYaooo/rea-video",
+  "commit": "c11f1bd8fd3edd26a40e8f45be828be685417700",
+  "scope": "Attribution and dependency-audit resources only; no upstream Python code executed or bundled",
+  "files": {
+    "LICENSE": {
+      "sha256": "2beb280b855389587b12dfda5f61a7baf09d1c4a20aac833b1c96f9569c5e458",
+      "bytes": 11340
+    },
+    "NOTICE": {
+      "sha256": "abffceeef67cb20d0fd6cf997eec7c7ac4b2de19f389a08b67a1f75bc7dd025b",
+      "bytes": 84
+    },
+    "pyproject.toml": {
+      "sha256": "488f397eb3bb42152e52154d4575a934e989005ce854dc3c4128eac76c2a5cf8",
+      "bytes": 1873
+    }
+  }
+}

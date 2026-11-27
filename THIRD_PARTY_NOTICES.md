@@ -1,5 +1,17 @@
 # Third-party notices and license inventory
 
+## rea-video audit resources
+
+Official source https://github.com/JuneYaooo/rea-video at
+`c11f1bd8fd3edd26a40e8f45be828be685417700`, Copyright 2026 JuneYaooo,
+Apache License 2.0. Byte-identical LICENSE, NOTICE and pyproject audit resources
+are preserved in `resources/rea-video/` with SHA-256 in `UPSTREAM.json` and
+packaged under `licenses/rea-video`. No upstream Python, models or sample media
+are included or executed. The local measured FFmpeg adapter is OpenScene code;
+it does not implement the upstream semantic pipeline. Transitive dependencies
+and model weights have separate, unreviewed distribution conditions; see
+`docs/rea-video-analysis.md`.
+
 This file records software deliberately used by this fork. It is an engineering inventory, not legal advice. Preserve the upstream `LICENSE` file and all required notices when redistributing the application.
 
 ## Application source
