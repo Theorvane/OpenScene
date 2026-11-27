@@ -24,6 +24,10 @@ export function ReaVideoAnalysisWorkspace({ projectId, assets, trackId, atMs, so
   const generation = useRef(0);
   const importing = useRef(false);
   const contextKey = JSON.stringify([projectId, sourceEpoch, assetId, trackId, atMs]);
+  // A -> B -> A is still a new placement/session. Comparing values alone
+  // would re-authorize a preparation that was retired while B was active.
+  const placement = useRef({ key: contextKey, revision: 0 });
+  if (placement.current.key !== contextKey) placement.current = { key: contextKey, revision: placement.current.revision + 1 };
   const latestContext = useRef(contextKey); latestContext.current = contextKey;
   const latestJob = useRef(job); latestJob.current = job;
   useEffect(() => {
@@ -44,7 +48,7 @@ export function ReaVideoAnalysisWorkspace({ projectId, assets, trackId, atMs, so
     return () => { active = false; clearInterval(poll); };
   }, [job?.id, job?.status]);
   const start = async () => {
-    const token = generation.current; setStarting(true); setError(''); setSelected([]); setJob(undefined);
+    const token = ++generation.current; setStarting(true); setError(''); setSelected([]); setJob(undefined);
     if (job?.status === 'review') void window.videoTool.reaAnalysisCancel({ jobId: job.id }).catch(() => undefined);
     try {
       const result = await window.videoTool.reaAnalysisStart({ projectId, assetId });
@@ -55,6 +59,9 @@ export function ReaVideoAnalysisWorkspace({ projectId, assets, trackId, atMs, so
   };
   const cancel = async () => {
     if (!job) return;
+    // Retire pending preparation immediately, before main acknowledges cancellation.
+    generation.current++;
+    setSelected([]); setJob(undefined);
     try { await window.videoTool.reaAnalysisCancel({ jobId: job.id }); }
     catch { setError('Cancellation request failed.'); }
   };
@@ -68,11 +75,11 @@ export function ReaVideoAnalysisWorkspace({ projectId, assets, trackId, atMs, so
   const importReviewed = async () => {
     if (!job?.plan || importing.current) return;
     importing.current = true;
-    const token = generation.current, key = contextKey;
+    const token = generation.current, key = contextKey, placementRevision = placement.current.revision;
     const context = { projectId, sourceEpoch, trackId, atMs };
     try {
       const response = await window.videoTool.reaAnalysisPrepareImport({ projectId, assetId: job.assetId, jobId: job.id, shotIds: selected, trackId, prefix: `rea-${crypto.randomUUID()}`, atMs });
-      if (generation.current !== token || latestContext.current !== key) return;
+      if (generation.current !== token || latestContext.current !== key || placement.current.revision !== placementRevision || latestJob.current?.id !== job.id) return;
       if (response.ok) onImportOperations(response.value, context); else setError(response.error.message);
     } catch { if (generation.current === token) setError('Import failed. Check the source, target track and placement.'); }
     finally { importing.current = false; }
@@ -85,7 +92,7 @@ export function ReaVideoAnalysisWorkspace({ projectId, assets, trackId, atMs, so
     {runtime && <p>Upstream Python pipeline unavailable: dependencies and model licenses require separate review. Python 3.10+: {runtime.python?.status ?? 'not inspected'}{runtime.python?.version ? ` (${runtime.python.version})` : ''}. Local timing analysis does not require Python.</p>}
     <label>Imported video <select value={assetId} disabled={starting || job?.status === 'running'} onChange={event => { setAssetId(event.target.value); setSelected([]); setJob(undefined); if (job) void window.videoTool.reaAnalysisCancel({ jobId: job.id }).catch(() => undefined); }}><option value="">Choose a video</option>{videos.map(asset => <option key={asset.id} value={asset.id}>{asset.displayName}</option>)}</select></label>
     <Button disabled={!runtime?.available || !videos.some(asset => asset.id === assetId) || starting || job?.status === 'running'} onClick={() => void start()}>Analyze locally</Button>
-    {job?.status === 'running' && <Button onClick={() => void cancel()}>Cancel analysis</Button>}
+    {(job?.status === 'running' || job?.status === 'review') && <Button onClick={() => void cancel()}>Cancel analysis</Button>}
     {job && <p role="status">{job.status}{job.error ? `: ${job.error}` : ''}{job.cleanupComplete ? ' · Local process settled; no temporary media retained.' : ''}</p>}
     {error && <p role="alert">{error}</p>}
     {job?.plan && <>

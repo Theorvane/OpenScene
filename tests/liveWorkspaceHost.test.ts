@@ -70,6 +70,7 @@ describe('mounted desktop workspace host', () => {
       expect(shorts.textContent).toBe('1');
       expect(monitor.textContent).toBe('1234:true');
       expect(timeline.closest('[hidden]') === null).toBe(mode === 'precision');
+      expect(container.querySelector('[aria-label="Local analysis tools"]') !== null).toBe(mode === 'precision');
     }
     expect(editor.setIsPlaying).not.toHaveBeenCalled();
     const click = (id: string) => act(() => (button(id) as unknown as { click: () => void }).click());

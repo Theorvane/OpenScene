@@ -12,10 +12,15 @@ The dedicated desktop component `ReaVideoAnalysisWorkspace` takes the open proje
 assets, target video track, insertion position, `sourceEpoch`, and `onImportOperations`. That callback
 must use the normal editor transaction/history boundary, preserving dirty state and
 Undo; the component and analysis service never save a project. The existing asset
-library resolves the source in main. App/AppShell/TimelineEditor host mounting belongs
-to FE576 and is reserved for that owner after its merge. No mobile UI is added in this
-desktop backend scope, as explicitly directed by the coordinator. Mobile cannot spawn
-this desktop subprocess adapter. The component is not a navigation entry by itself.
+library resolves the source in main. The precision editor exposes a Local shot analysis
+button through `ReaEditorAnalysisHost`, importing at the live playhead on the first
+video track. Closing the panel, leaving precision mode, or leaving the active editor
+retires its pending work. Project/asset identity and committed content revision form
+the source epoch; reloads and edits invalidate prior review work conservatively.
+Mobile cannot spawn this desktop subprocess adapter; its existing unsupported capability
+disclosure remains applicable. This entry point completes local analysis and reviewed
+original-range import only: semantic analysis is not-run, generation unavailable and
+paid execution false. The broader video generation workflow remains separate work.
 
 ## Exact upstream audit
 
@@ -100,7 +105,10 @@ A tiny real FFmpeg black/white fixture verifies the measured 1-second cut, sourc
 preservation, corrupt input failure, and cancellation cleanup without external media.
 Renderer QA mounts the dedicated component with a mock bridge and exercises review,
 import callbacks and rejection of a delayed response after switching projects. Host
-navigation must be verified by its integration owner before claiming a shipped user entry point.
+navigation is checked by `liveWorkspaceHost.test.ts`; `reaEditorHost.test.ts` mounts the
+real analysis panel and editor hook to verify one import history transaction, Undo/Redo,
+prior dirty history, save-zero, unchanged source assets, and rejection after placement,
+project switch, reload, deletion and cancellation. Native GUI evidence is separate.
 
 ## Host integration contract
 
