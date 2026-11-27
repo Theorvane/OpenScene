@@ -18,7 +18,7 @@ export class ReaGenerationJobStore {
   private work: Promise<unknown> = Promise.resolve();
   private records: Record[] = [];
   private loaded = false;
-  constructor(private readonly directory: string, private readonly adapter: MinimaxVideoAdapter, private readonly now = Date.now) {}
+  constructor(private readonly directory: string, private readonly adapter: Pick<MinimaxVideoAdapter, 'submit' | 'query' | 'cancelQueued'>, private readonly now = Date.now) {}
   private serialize<T>(fn: () => Promise<T>): Promise<T> {
     const result = this.work.then(async () => { await this.load(); return fn(); });
     this.work = result.catch(() => undefined);

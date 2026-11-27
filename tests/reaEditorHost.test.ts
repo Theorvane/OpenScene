@@ -71,6 +71,7 @@ it('imports through the mounted host into one real history transaction, preservi
   act(() => editor.setPlayheadMs(5000));
   const button = (text: string) => [...document.querySelectorAll('button')].find(item => item.textContent === text)!;
   await act(async () => button('Local shot analysis').click());
+  expect(document.querySelector('[aria-label="REA generation review"]')).not.toBeNull();
   const region = document.querySelector<HTMLElement>('[aria-label="Local analysis tools"]')!;
   expect(region.tabIndex).toBe(0);
   expect(region.dataset.cuaProtected).toBe('chrome-menu');
