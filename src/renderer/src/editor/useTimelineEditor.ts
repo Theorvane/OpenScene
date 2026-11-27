@@ -74,7 +74,18 @@ function createOpaqueId(prefix: string): string {
 
 export function useTimelineEditor() {
   const [projects, setProjects] = useState<readonly LocalProjectSummary[]>([]);
-  const [project, setProject] = useState<LocalProjectSnapshot | null>(null);
+  const [project, setProjectState] = useState<LocalProjectSnapshot | null>(null);
+  const projectRef = useRef<LocalProjectSnapshot | null>(null);
+  const projectGenerationRef = useRef(0);
+  const projectLoadEpochRef = useRef(0);
+  const manualSaveRef = useRef<object | null>(null);
+  // Update request ownership synchronously, including edits batched before render.
+  const setProject: typeof setProjectState = useCallback((update) => {
+    const next = typeof update === 'function' ? update(projectRef.current) : update;
+    if (next !== projectRef.current) projectGenerationRef.current += 1;
+    projectRef.current = next;
+    setProjectState(next);
+  }, []);
   const [newProjectName, setNewProjectName] = useState('Untitled cutdown');
   const [selectedAssetId, setSelectedAssetId] = useState('');
   const [selectedClipId, setSelectedClipId] = useState('');
@@ -91,7 +102,6 @@ export function useTimelineEditor() {
   const [metadataProbeFailuresByAssetId, setMetadataProbeFailuresByAssetId] = useState<Readonly<Record<string, string>>>({});
   const [metadataProbeRetryRevisionsByAssetId, setMetadataProbeRetryRevisionsByAssetId] = useState<Readonly<Record<string, number>>>({});
   const [statusMessage, setStatusMessage] = useState<StatusMessage>({ tone: 'neutral', text: 'Create or open a project to start editing locally.' });
-  const projectRef = useRef<LocalProjectSnapshot | null>(null);
   const cuaSaveFreezeTokenRef = useRef<string | null>(null);
   const liveSaveStateRef = useRef<{
     project: LocalProjectSnapshot | null;
@@ -148,10 +158,6 @@ export function useTimelineEditor() {
     isSavingTimeline
   };
 
-  useEffect(() => {
-    projectRef.current = project;
-  }, [project]);
-
   const selectedAsset = useMemo(
     () => project?.assets.find((asset) => asset.id === selectedAssetId) ?? null,
     [project, selectedAssetId]
@@ -163,6 +169,9 @@ export function useTimelineEditor() {
   const playback = useTimelinePlayback(project);
 
   const setLoadedProject = useCallback((snapshot: LocalProjectSnapshot | null) => {
+    projectLoadEpochRef.current += 1;
+    manualSaveRef.current = null;
+    setIsSavingTimeline(false);
     notifyExternalCuaTimelineMutation();
     setProject(snapshot);
     setSelectedClipIds([]);
@@ -676,7 +685,6 @@ export function useTimelineEditor() {
 
     const nextProject = { ...current, assets, timeline: transaction.timeline };
     notifyExternalCuaTimelineMutation();
-    projectRef.current = nextProject;
     setProject(nextProject);
     setTimelineHistory((history) => history === null
       ? createTimelineHistory(transaction.timeline)
@@ -789,22 +797,24 @@ export function useTimelineEditor() {
   }, [project, refreshProjects]);
 
   const saveTimeline = useCallback(async (): Promise<boolean> => {
-    if (project === null || cuaSaveFreezeTokenRef.current !== null) return false;
+    const submitted = projectRef.current;
+    if (submitted === null || cuaSaveFreezeTokenRef.current !== null || manualSaveRef.current !== null) return false;
+    const request = {};
+    const epoch = projectLoadEpochRef.current;
+    const generation = projectGenerationRef.current;
+    const ownsRequest = () => manualSaveRef.current === request
+      && projectLoadEpochRef.current === epoch && projectRef.current?.id === submitted.id;
+    const matchesSubmission = () => ownsRequest() && projectGenerationRef.current === generation;
+    manualSaveRef.current = request;
     setIsSavingTimeline(true);
     setTimelineSaveError(null);
     try {
-      const response = await invokeWhileBusy(
-        () => window.videoTool.saveTimeline({ projectId: project.id, timeline: project.timeline }),
-        'The timeline could not be saved.'
-      );
-      if (response === null) {
-        setTimelineSaveError('The timeline could not be saved.');
-        return false;
-      }
+      const response = await window.videoTool.saveTimeline({ projectId: submitted.id, timeline: submitted.timeline });
+      // A successful write of an older snapshot does not make the live editor
+      // safe to navigate away from. Keep edits, undo history and playback intact.
+      if (!matchesSubmission()) return false;
       if (response.ok) {
-        // Saving before an Agent turn must not move the playhead or clear the
-        // current selection. The persisted timeline is the one already shown.
-        if (computeTimelineContentFingerprint(response.value) !== computeTimelineContentFingerprint(project)) {
+        if (computeTimelineContentFingerprint(response.value) !== computeTimelineContentFingerprint(submitted)) {
           notifyExternalCuaTimelineMutation();
         }
         setProject(response.value);
@@ -818,10 +828,20 @@ export function useTimelineEditor() {
       setTimelineSaveError(message);
       setStatusMessage({ tone: 'danger', text: message });
       return false;
+    } catch (error: unknown) {
+      if (matchesSubmission()) {
+        const message = error instanceof Error ? error.message : 'The timeline could not be saved.';
+        setTimelineSaveError(message);
+        setStatusMessage({ tone: 'danger', text: message });
+      }
+      return false;
     } finally {
-      setIsSavingTimeline(false);
+      if (ownsRequest()) {
+        manualSaveRef.current = null;
+        setIsSavingTimeline(false);
+      }
     }
-  }, [invokeWhileBusy, project]);
+  }, [setProject]);
 
   // Explicit live timeline Save bridge (`CuaSaveBridge` in main process):
   // 1) `onCuaSaveSnapshotRequested`: report readonly live timeline + dirty + contentRevision.
