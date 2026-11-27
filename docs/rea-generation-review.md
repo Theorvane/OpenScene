@@ -36,3 +36,14 @@ Tests use fake keys and injected services only. No real credential/status was
 queried, no external paid request/upload/download was executed, and no account
 access was verified. React tests mount the actual host and subpanel and test a
 project switch during pending preparation, with submit and save both zero.
+
+The store remains bounded to 100 records. At capacity, preparation can evict only
+the oldest record proven never dispatched: no task ID, no dispatch marker and no
+remote action, with either pre-submit cancellation or an expired unconsumed
+approval. A dispatch marker is persisted before POST. Active or valid approvals,
+submitting/submitted tasks, unknown outcomes and remote IDs/results are never
+evicted. Legacy ambiguous states stay protected even without the marker. Evicted
+IDs are never reused, and their tokens cannot resolve a job. If all records are
+protected, `JOB_LIMIT` honestly refuses new preparation. Failed replacement rolls
+back the in-memory candidate. There is no clear/reset, source deletion, automatic
+re-POST or renewal of an approval.

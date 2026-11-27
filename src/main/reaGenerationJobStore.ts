@@ -8,7 +8,7 @@ import type { MinimaxVideoAdapter } from './minimaxVideoAdapter';
 
 const recordSchema = z.strictObject({ id: z.string().uuid(), plan: reaGenerationPlanSchema, planHash: z.string().regex(/^[a-f0-9]{64}$/),
   approvalHash: z.string(), expiresAt: z.number().int(), state: z.enum(['awaiting-approval', 'submitting', 'outcome-unknown', 'queued', 'running', 'remote-succeeded', 'failed', 'cancelled']),
-  taskId: z.string().regex(/^[\w-]{1,160}$/).optional(), cancelRequested: z.boolean(), remoteAction: z.enum(['cancelled', 'deleted']).optional(),
+  taskId: z.string().regex(/^[\w-]{1,160}$/).optional(), dispatchStarted: z.boolean().default(false), cancelRequested: z.boolean(), remoteAction: z.enum(['cancelled', 'deleted']).optional(),
   pollCount: z.number().int().nonnegative(), nextPollAt: z.number().int(), deadline: z.number().int() });
 type Record = z.infer<typeof recordSchema>;
 const digest = (s: string) => createHash('sha256').update(s).digest('hex');
@@ -61,11 +61,21 @@ export class ReaGenerationJobStore {
   prepare(value: unknown): Promise<{ receipt: ReaGenerationReceipt; approval: string }> {
     const plan = freezeGenerationPlan(value);
     return this.serialize(async () => {
-      if (this.records.length >= 100) throw new Error('JOB_LIMIT');
       const now = this.now(), approval = randomUUID();
+      // Only records proven never dispatched can be retired. Array order is the
+      // persisted creation order; select the oldest eligible record deterministically.
+      const records = [...this.records];
+      if (records.length >= 100) {
+        const index = records.findIndex(r => !r.taskId && !r.dispatchStarted && !r.remoteAction &&
+          (r.state === 'cancelled' || r.state === 'awaiting-approval' && r.approvalHash.length === 64 && now >= r.expiresAt));
+        if (index < 0) throw new Error('JOB_LIMIT');
+        records.splice(index, 1);
+      }
       const r: Record = { id: randomUUID(), plan, planHash: generationPlanHash(plan), approvalHash: digest(approval), expiresAt: now + 300000,
-        state: 'awaiting-approval', cancelRequested: false, pollCount: 0, nextPollAt: now, deadline: now + 1800000 };
-      this.records.push(r); await this.persist(); return { receipt: this.receipt(r), approval };
+        state: 'awaiting-approval', dispatchStarted: false, cancelRequested: false, pollCount: 0, nextPollAt: now, deadline: now + 1800000 };
+      records.push(r); const previous = this.records; this.records = records;
+      try { await this.persist(); } catch (error) { this.records = previous; throw error; }
+      return { receipt: this.receipt(r), approval };
     });
   }
   get(id: string, projectId: string): Promise<ReaGenerationReceipt> { return this.serialize(async () => this.receipt(this.find(id, projectId))); }
@@ -75,7 +85,7 @@ export class ReaGenerationJobStore {
     return this.serialize(async () => {
       const r = this.find(id, plan.projectId);
       if (r.state !== 'awaiting-approval' || r.cancelRequested || this.now() >= r.expiresAt || digest(approval) !== r.approvalHash || generationPlanHash(plan) !== r.planHash) throw new Error('APPROVAL_REJECTED');
-      r.state = 'submitting'; r.approvalHash = ''; await this.persist();
+      r.state = 'submitting'; r.dispatchStarted = true; r.approvalHash = ''; await this.persist();
       try {
         r.taskId = await this.adapter.submit(plan, bytes);
         r.state = 'queued'; await this.persist();
