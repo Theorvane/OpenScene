@@ -53,7 +53,12 @@ the future app lifecycle must own exactly one instance.
 
 Writes use exclusive 0600 temporary files, file sync, atomic rename and directory
 sync. Persisted `submitting` recovers as `outcome-unknown`; it can never POST again.
-A returned task ID is retained even if a later persistence/observation fails.
+A returned task ID is retained in the current owner's memory if persistence or
+observation fails. It is durable only after a successful replacement of the job
+store. If both the queued write and the subsequent unknown-outcome write fail,
+restart sees the previous durable `submitting` record and recovers to
+`outcome-unknown` without a task ID. It still cannot POST again; recovery then
+requires explicit provider-side reconciliation outside this disabled workflow.
 GET attempts are persisted before observation, with exponential backoff capped at
 30 seconds, 120 requests and a 30-minute total deadline. Every fixture transport
 request has a 10-second timeout and 256 KiB response acceptance limit. Production

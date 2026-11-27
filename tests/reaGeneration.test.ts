@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -96,6 +96,30 @@ describe('REA offline generation failure boundaries', () => {
     const { store, adapter, request, directory } = await setup(); const a = await store.prepare(plan());
     const path = join(directory, 'jobs.json'), data = JSON.parse(await readFile(path, 'utf8')); data[0].state = 'submitting'; await writeFile(path, JSON.stringify(data));
     expect((await new ReaGenerationJobStore(directory, adapter).get(a.receipt.id, 'p')).state).toBe('outcome-unknown'); expect(request).not.toHaveBeenCalled();
+  });
+  it('distinguishes memory task ID from durable fact when both post-response writes fail', async () => {
+    let directory = '';
+    const h = await setup(async () => {
+      // The submitting record is already durable. Make both following mkdir/write
+      // attempts fail against a real filesystem path, leaving that checkpoint intact.
+      await rename(directory, `${directory}-checkpoint`);
+      await writeFile(directory, 'filesystem unavailable');
+      return { status: 200, body: '{"task_id":"remote-1"}' };
+    });
+    directory = h.directory;
+    const p = plan(), a = await h.store.prepare(p);
+    try {
+      await expect(h.store.submit(a.receipt.id, a.approval, p)).rejects.toThrow();
+      expect(await h.store.get(a.receipt.id, 'p')).toMatchObject({ state: 'outcome-unknown', taskId: 'remote-1' });
+      await rm(directory); await rename(`${directory}-checkpoint`, directory);
+      const restarted = new ReaGenerationJobStore(directory, h.adapter);
+      const recovered = await restarted.get(a.receipt.id, 'p');
+      expect(recovered.state).toBe('outcome-unknown'); expect(recovered.taskId).toBeUndefined();
+      await expect(restarted.submit(a.receipt.id, a.approval, p)).rejects.toThrow('APPROVAL_REJECTED');
+      expect(h.request).toHaveBeenCalledTimes(1);
+    } finally {
+      await rm(`${directory}-checkpoint`, { recursive: true, force: true });
+    }
   });
   it.each(['cancelled', 'deleted'] as const)('retains confirmed remote action %s without claiming deletion is cancellation', async action => {
     const { store, request } = await setup(async r => ({ status: 200, body: r.method === 'POST' ? '{"task_id":"remote-1"}' : JSON.stringify({ task_id: 'remote-1', action, status: action }) }));
