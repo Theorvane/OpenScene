@@ -16,7 +16,6 @@ export const FFMPEG_EDITING_WORKFLOW =
   'Prefer avoiding needless re-encoding, but do not promise lossless output or a codec/filter/preset the tool does not expose. ' +
   'The external ffmpeg-skill Python scripts and its 42 tools are NOT registered in-app tools. ' +
   'Never invent shell, Python, MCP or raw FFmpeg execution, or pass paths/argv to the renderer. ' +
-  'On mobile, if an edit or export is unavailable to the assistant, explain the limitation and name the Edit tab or Export control; do not claim to execute it.\n' +
   '4. Check then verify. An export job ID means started, not completed or verified. ' +
   'Only report completion from an explicit completed result, and only claim duration, dimensions, frame rate, audio or visual quality that a result or actual inspection establishes. ' +
   'If no result-inspection tool exists, say output verification is unavailable and direct the user to the export result/preview. ' +

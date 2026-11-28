@@ -1,129 +1,88 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactElement, type ReactNode } from 'react';
-import {
-  DEFAULT_LLM_MODELS,
-  LLM_STORAGE_CONFIG_KEY,
-  LLM_STORAGE_MODEL_KEY,
-  parseSelectedLlmModelId,
-  type LlmModelConfig,
-  type LlmProviderApiConfig
-} from '../../shared/llmModels';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react';
+import { DEFAULT_LLM_MODELS, LLM_STORAGE_CONFIG_KEY, LLM_STORAGE_MODEL_KEY, UNSELECTED_LLM_MODEL, parseSelectedLlmModelId, type LlmModelConfig, type LlmProviderApiConfig } from '../../shared/llmModels';
+import { normalizeOllamaEndpoint, ollamaLlmModel, type OllamaDiscoveredModel } from '../../shared/ollamaModels';
 
-/** Any provider credential slot: legacy named keys plus catalog provider ids. */
 export type LlmCredentialKey = string;
-
+export type OllamaConnection = { readonly status: 'disconnected' | 'connecting' | 'connected' | 'error'; readonly models: readonly OllamaDiscoveredModel[]; readonly error?: string };
 type LlmContextValue = {
-  readonly selectedModelId: string;
-  readonly selectedModel: LlmModelConfig;
-  readonly providerConfig: LlmProviderApiConfig;
-  readonly credentialStatus: Record<string, boolean>;
+  readonly selectedModelId: string; readonly selectedModel: LlmModelConfig;
+  readonly providerConfig: LlmProviderApiConfig; readonly credentialStatus: Record<string, boolean>;
+  readonly ollama: OllamaConnection;
   readonly setSelectedModelId: (id: string) => void;
   readonly updateProviderConfig: (updates: Partial<LlmProviderApiConfig>) => void;
   readonly saveProviderCredential: (key: LlmCredentialKey, value: string) => Promise<boolean>;
+  readonly connectOllama: () => Promise<void>; readonly disconnectOllama: () => void;
 };
-
-type LlmProviderProps = {
-  readonly children: ReactNode;
-};
-
 const LlmContext = createContext<LlmContextValue | null>(null);
-
 function getStoredModelId(): string {
-  if (typeof window === 'undefined') return DEFAULT_LLM_MODELS[0]!.id;
-  try {
-    return parseSelectedLlmModelId(window.localStorage.getItem(LLM_STORAGE_MODEL_KEY));
-  } catch {
-    return DEFAULT_LLM_MODELS[0]!.id;
-  }
+  try { return typeof window === 'undefined' ? '' : parseSelectedLlmModelId(window.localStorage.getItem(LLM_STORAGE_MODEL_KEY)); } catch { return ''; }
 }
-
 function getStoredProviderConfig(): LlmProviderApiConfig {
-  if (typeof window === 'undefined') return { ollamaBaseUrl: 'http://localhost:11434' };
   try {
-    const raw = window.localStorage.getItem(LLM_STORAGE_CONFIG_KEY);
-    if (!raw) return { ollamaBaseUrl: 'http://localhost:11434' };
-    const parsed = JSON.parse(raw) as { ollamaBaseUrl?: string };
-    return {
-      ollamaBaseUrl: parsed.ollamaBaseUrl || 'http://localhost:11434'
-    };
-  } catch {
-    return { ollamaBaseUrl: 'http://localhost:11434' };
-  }
+    const parsed = JSON.parse(window.localStorage.getItem(LLM_STORAGE_CONFIG_KEY) ?? '{}') as LlmProviderApiConfig;
+    const endpoint = normalizeOllamaEndpoint(parsed.ollamaBaseUrl);
+    return { ollamaBaseUrl: endpoint ?? '', ollamaEnabled: endpoint !== null && parsed.ollamaEnabled === true };
+  } catch { return { ollamaBaseUrl: '', ollamaEnabled: false }; }
 }
-
-export function LlmProvider({ children }: LlmProviderProps): ReactElement {
-  const [selectedModelId, setSelectedModelIdState] = useState<string>(() => getStoredModelId());
-  const [providerConfig, setProviderConfigState] = useState<LlmProviderApiConfig>(() => getStoredProviderConfig());
-  const [credentialStatus, setCredentialStatus] = useState<Record<string, boolean>>({});
-
-  // Query credential status from main process without pulling secrets into renderer JS.
+function persistConfig(value: LlmProviderApiConfig): void {
+  const endpoint = normalizeOllamaEndpoint(value.ollamaBaseUrl);
+  try { window.localStorage.setItem(LLM_STORAGE_CONFIG_KEY, JSON.stringify({ ollamaBaseUrl: endpoint ?? '', ollamaEnabled: endpoint !== null && value.ollamaEnabled === true })); } catch { /* Current connection still works without storage. */ }
+}
+export function LlmProvider({ children }: { readonly children: ReactNode }): ReactElement {
+  const [selectedModelId, setSelectedModelIdState] = useState(getStoredModelId);
+  const [providerConfig, setProviderConfigState] = useState(getStoredProviderConfig);
+  const [storedCredentials, setStoredCredentials] = useState<Record<string, boolean>>({});
+  const [ollama, setOllama] = useState<OllamaConnection>({ status: 'disconnected', models: [] });
+  const generation = useRef(0);
+  const configRef = useRef(providerConfig); configRef.current = providerConfig;
   useEffect(() => {
-    let isMounted = true;
-    if (typeof window !== 'undefined' && window.videoTool?.getProviderCredentialStatus) {
-      window.videoTool
-        .getProviderCredentialStatus()
-        .then((response) => {
-          if (isMounted && response.ok && response.value) {
-            setCredentialStatus(response.value);
-          }
-        })
-        .catch(() => undefined);
-    }
-    return () => {
-      isMounted = false;
-    };
+    let live = true;
+    void window.videoTool?.getProviderCredentialStatus?.().then(response => { if (live && response.ok) setStoredCredentials(response.value); }).catch(() => undefined);
+    return () => { live = false; };
   }, []);
-
-  const selectedModel = useMemo<LlmModelConfig>(() => {
-    const match = DEFAULT_LLM_MODELS.find((m) => m.id === selectedModelId);
-    return match !== undefined ? match : DEFAULT_LLM_MODELS[0]!;
-  }, [selectedModelId]);
-
+  const connectOllama = useCallback(async (): Promise<void> => {
+    const request = ++generation.current;
+    const baseUrl = configRef.current.ollamaBaseUrl ?? '';
+    setOllama({ status: 'connecting', models: [] });
+    try {
+      const response = await window.videoTool.discoverOllama({ baseUrl });
+      if (generation.current !== request) return;
+      if (!response.ok) { setOllama({ status: 'error', models: [], error: response.error.message }); return; }
+      setOllama({ status: 'connected', models: response.value.models });
+      const config = { ...configRef.current, ollamaEnabled: true };
+      configRef.current = config; setProviderConfigState(config); persistConfig(config);
+    } catch { if (generation.current === request) setOllama({ status: 'error', models: [], error: 'Ollama 연결을 확인하지 못했습니다. 서버 주소를 확인하세요.' }); }
+  }, []);
+  useEffect(() => {
+    if (configRef.current.ollamaEnabled === true) void connectOllama();
+    return () => { generation.current++; };
+  }, [connectOllama]);
+  const updateProviderConfig = useCallback((updates: Partial<LlmProviderApiConfig>): void => {
+    generation.current++;
+    setOllama({ status: 'disconnected', models: [] });
+    const next = { ...configRef.current, ...updates, ollamaEnabled: false };
+    configRef.current = next; setProviderConfigState(next); persistConfig(next);
+  }, []);
+  const disconnectOllama = useCallback(() => updateProviderConfig({ ollamaEnabled: false }), [updateProviderConfig]);
+  const credentialStatus = useMemo(() => ({ ...storedCredentials, local_ollama: ollama.status === 'connected' }), [storedCredentials, ollama.status]);
+  const selectedModel = useMemo(() => [...DEFAULT_LLM_MODELS, ...ollama.models.map(ollamaLlmModel)].find(model => model.id === selectedModelId) ?? UNSELECTED_LLM_MODEL, [selectedModelId, ollama.models]);
   const setSelectedModelId = useCallback((id: string): void => {
+    if (id && ![...DEFAULT_LLM_MODELS, ...ollama.models.map(ollamaLlmModel)].some(model => model.id === id)) return;
     setSelectedModelIdState(id);
-    if (typeof window !== 'undefined') {
-      try {
-        window.localStorage.setItem(LLM_STORAGE_MODEL_KEY, id);
-      } catch {
-        // storage fallback
-      }
-    }
-  }, []);
-
+    try { window.localStorage.setItem(LLM_STORAGE_MODEL_KEY, id); } catch { /* Keep explicit in-memory selection. */ }
+  }, [ollama.models]);
   const saveProviderCredential = useCallback(async (key: LlmCredentialKey, value: string): Promise<boolean> => {
-    if (typeof window === 'undefined') return false;
     const response = await window.videoTool.setProviderCredential(key, value);
     if (!response.ok) return false;
-
-    setCredentialStatus((current) => ({ ...current, [key]: value.trim().length > 0 }));
+    setStoredCredentials(current => ({ ...current, [key]: value.trim().length > 0 }));
     return response.value.updated;
   }, []);
-
-  const updateProviderConfig = useCallback((updates: Partial<LlmProviderApiConfig>): void => {
-    setProviderConfigState((prev) => {
-      const next = { ...prev, ...updates };
-      if (typeof window !== 'undefined') {
-        try {
-          window.localStorage.setItem(LLM_STORAGE_CONFIG_KEY, JSON.stringify({ ollamaBaseUrl: next.ollamaBaseUrl }));
-        } catch {
-          // storage fallback
-        }
-      }
-      return next.ollamaBaseUrl === undefined ? {} : { ollamaBaseUrl: next.ollamaBaseUrl };
-    });
-  }, []);
-
-  const value = useMemo<LlmContextValue>(
-    () => ({ selectedModelId, selectedModel, providerConfig, credentialStatus, setSelectedModelId, updateProviderConfig, saveProviderCredential }),
-    [selectedModelId, selectedModel, providerConfig, credentialStatus, setSelectedModelId, updateProviderConfig, saveProviderCredential]
-  );
-
+  const value = useMemo<LlmContextValue>(() => ({ selectedModelId, selectedModel, providerConfig, credentialStatus, ollama, connectOllama, disconnectOllama, setSelectedModelId, updateProviderConfig, saveProviderCredential }),
+    [selectedModelId, selectedModel, providerConfig, credentialStatus, ollama, connectOllama, disconnectOllama, setSelectedModelId, updateProviderConfig, saveProviderCredential]);
   return <LlmContext.Provider value={value}>{children}</LlmContext.Provider>;
 }
-
 export function useLlmModel(): LlmContextValue {
-  const context = useContext(LlmContext);
-  if (context === null) {
-    throw new Error('useLlmModel must be used within LlmProvider.');
-  }
-  return context;
+  const value = useContext(LlmContext);
+  if (!value) throw new Error('useLlmModel must be used within LlmProvider.');
+  return value;
 }

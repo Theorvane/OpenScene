@@ -10,6 +10,7 @@ import {
 
 import type { LocalExportJob } from '../../../../shared/exportTypes';
 import { resolveOpenAiAuthMode } from '../../../../shared/openAiAuth';
+import type { SourceCaptionSnapshot } from '../../../../shared/sourcePreviewTimeline';
 import type { ShortsJob } from '../../../../shared/shortsTypes';
 import type { ClipEffects, LocalProjectSnapshot, TimelineDocument } from '../../../../shared/timelineTypes';
 import { useAgentChat } from '../../AgentChatContext';
@@ -62,6 +63,7 @@ type ShortsReviewWorkspaceProps = {
   readonly returnReloadToken?: number;
   readonly returnReloadProjectId?: string | null;
   readonly onOpenSettings?: (() => void) | undefined;
+  readonly onSourceCaptionsChange?: (snapshot: SourceCaptionSnapshot | null) => void;
   readonly onOpenMaterializedProject: (request: ShortsOpenEditorRequest) => Promise<void>;
 };
 
@@ -98,6 +100,7 @@ function ProjectShortsReviewWorkspace({
   returnReloadProjectId = null,
   onOpenSettings,
   onOpenMaterializedProject,
+  onSourceCaptionsChange,
   active,
   onDraftStateChange
 }: ShortsReviewWorkspaceProps & { readonly active: boolean; readonly onDraftStateChange: (state: { dirty: boolean; busy: boolean }) => void }): ReactElement | null {
@@ -247,6 +250,13 @@ function ProjectShortsReviewWorkspace({
     () => groupedRuns.reviewRuns.find((run) => run.id === activeReviewJobId) ?? groupedRuns.reviewRuns[0] ?? null,
     [activeReviewJobId, groupedRuns.reviewRuns]
   );
+  useEffect(() => {
+    if (!active || projectId === null) return;
+    onSourceCaptionsChange?.(activeReviewJob === null ? null : {
+      projectId, assetId: activeReviewJob.sourceAssetId, captions: activeReviewJob.captions ?? []
+    });
+  }, [active, projectId, activeReviewJob?.sourceAssetId, activeReviewJob?.captions, onSourceCaptionsChange]);
+
   const activeExportRuns = useMemo(
     () => (activeReviewJob === null ? [] : groupedRuns.exportRunsByRootId[activeReviewJob.id] ?? []),
     [activeReviewJob, groupedRuns.exportRunsByRootId]

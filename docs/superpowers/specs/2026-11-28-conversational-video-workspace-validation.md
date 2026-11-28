@@ -1,0 +1,18 @@
+# #595 local validation
+
+Local stacked implementation on 5fd4190; no remote integration or merge. User requested this session as sole implementer; independent team review remains required before merge.
+
+- Root suite: `npm test -- --maxWorkers=2`: 255 files passed, one optional integration file skipped; 1572 tests passed, one skipped. Previous default parallel full runs had an existing assetLibraryConcurrency timing failure; worker cap keeps this machine's validation stable.
+- `npm run build`: passed, including both TypeScript checks and Electron main/preload/renderer builds.
+- Explicit real rendering: `OPENSCENE_VERIFY_SHORTS_EXPORT=1 VIDEO_TOOL_FFMPEG_PATH=/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg npx vitest run tests/shortsRealExport.test.ts`: passed. Two actual 1080×1920 MP4s with audio/captions, source hash unchanged; completed outputs reopened through a fresh export service. Uses synthetic footage, approved fixture transcript and deterministic evidence selector; does not establish ASR/model selection quality.
+- Regression tests observed failing then passing: shared preview/source inspection; agent refresh playhead/history and stale project response; registered shorts tools/read-only classification; durable result deduplication; completed export receipt/checksum recovery; tool completion/cancellation and pre-cancel start rejection.
+- Headless Chrome used the actual renderer with a synthetic typed bridge and generated local test video. Natural/precision playback decoded actual video, shared controls retained the same media time, and screenshots confirmed top preview, visible track timeline and bottom chat. This is renderer/layout verification, not Electron IPC/provider end-to-end validation.
+- Native Electron GUI inspection was unavailable because the Mac screen was locked. No claim of a fresh native GUI run or live configured-provider completion.
+- Follow-up whole-window UI request: removed the nested workbench header, duplicate project identity/selector and sidebar Settings shortcut; export moved into the one project toolbar. Native menu keyboard access remains available. Fixed the actual theme failure: `--os-*` tokens are aliases of document theme values, and the workspace no longer overrides the canonical palette. Headless computed-style checks confirmed outer header, inner editor and app titlebar all equal the selected theme card color: Command Desk/light `rgb(253,250,242)` and Midnight Neon/dark `rgb(14,15,22)`.
+- Mode round trip natural → precision → node → natural retained the same draft prompt and video position (0.3 seconds); one composer, one transport and zero default ShortsReviewWorkspace instances.
+
+Local-only environment: Homebrew FFmpeg 9.1 lacked drawtext. Installed ffmpeg-full 9.1 (drawtext/libass verified) and added its executable path to ignored `.env`; no installer/product auto-download behavior added. A running app needs its next main-process launch to load this override.
+
+Review decisions: source and edited-project clocks remain distinct inspection contexts, with the timeline playhead retained when returning; node workflows retain explicit Apply to protect authored graph/source ranges. The app shell owns one protected emergency automation stop. The project toolbar owns save and history controls. MP4 playback uses existing main-process Open action (system video player); editable results open in the shared project editor. New #596 provider connection/model selection work is a separate user-authorized follow-up.
+
+Sanitized local browser proof and temporary logs are ignored under `.local-runtimes/595-visual` and `/tmp/openscene-595-*`; user media and credentials are excluded from handoff artifacts.

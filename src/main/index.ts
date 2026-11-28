@@ -38,23 +38,13 @@ import { AgentChatHistoryStore } from './agentChatHistoryStore';
 import { registerAgentChatIpcHandlers } from './agentChatIpcHandlers';
 import { createAgentChatModel } from './agentChatModel';
 import { AgentChatSessionManager } from './agentChatSession';
-import { AGENT_CHAT_CUA_PER_CALL_TOOL_NAMES, AGENT_CHAT_SPEND_TOOL_NAMES, agentChatMutatingToolNames, createAgentChatTools } from './agentChatTools';
-import { CuaDriver } from './cuaDriver';
-import { registerCuaIpc } from './cuaIpc';
-import { CuaAgentOrchestrator, CuaApprovalAuthority, type CuaAgentDriver } from './cuaAgentOrchestration';
-import { CuaSaveBridge } from './cuaSaveBridge';
-import { registerCuaSaveIpc } from './cuaSaveIpc';
-import { CuaSaveApprovalAuthority } from './cuaSaveApprovalAuthority';
-import { CuaAgentSaveOrchestrator } from './cuaAgentSaveOrchestration';
-import { settleCuaCancellation } from './cuaApprovalGate';
+import { AGENT_CHAT_SPEND_TOOL_NAMES, agentChatMutatingToolNames, createAgentChatTools } from './agentChatTools';
 import { ChatGptCodexAdapter } from './chatGptCodexAdapter';
 import { ChatGptOAuthService } from './chatGptOAuthService';
 import { CredentialStore } from './credentialStore';
 import { createJevService, registerJevCredentialIpc } from './jevCredentialService';
 import { JevConfigStore } from './jevConfigStore';
 import { registerJevConfigIpc } from './jevConfigIpc';
-import { createJevRuntime } from './jevRuntime';
-import { createMainJevObservationHook } from './jevMainObservation';
 import { LlmExecutionAdapter } from './llmAdapter';
 import { LlmPromptRouter } from './llmPromptRouter';
 import { getOpenVideoMcpDefinition, OpenVideoMcpServer } from './openVideoMcpServer';
@@ -65,6 +55,7 @@ import { TranscriptionService } from './transcriptionService';
 import { ShortsService } from './shortsService';
 import { createShortsCandidateProvider } from './shortsCandidateProvider';
 import { discoverFfmpeg } from './ffmpegDiscovery';
+import { discoverOllama } from './ollamaDiscovery';
 import { measureExportedFile } from './exportMeasurement';
 
 try {
@@ -197,43 +188,8 @@ function getScreenPermissionStatus(): string {
  * still shows Electron; this is what a packaged build and the About panel use.
  */
 const APP_NAME = 'OpenScene';
-let cuaTarget: { window: BrowserWindow; driver: CuaDriver; save: CuaSaveBridge } | null = null;
 let reaAnalysisWindow: BrowserWindow | null = null;
 let activeAgentChatSessions: AgentChatSessionManager | null = null;
-const cuaAuthority = new CuaApprovalAuthority({ permitTtlMs: 2000, maxActionsPerRun: 20, now: () => performance.now() });
-const cuaSaveAuthority = new CuaSaveApprovalAuthority({ permitTtlMs: 5000, proposalTtlMs: 120000, maxSavesPerRun: 5, now: () => performance.now() });
-const requireCuaDriver = (): CuaDriver => {
-  if (!cuaTarget || cuaTarget.window.isDestroyed()) throw new Error('CUA_TARGET_GONE');
-  return cuaTarget.driver;
-};
-const cuaDriverAdapter: CuaAgentDriver = {
-  observe: context => requireCuaDriver().observe(context),
-  execute: (request, permit, signal) => requireCuaDriver().execute(request, permit, signal),
-  cancel: reason => requireCuaDriver().cancel(reason),
-  getState: () => requireCuaDriver().getState(),
-  setExecutionBlocked: blocked => requireCuaDriver().setExecutionBlocked(blocked)
-};
-const cuaAgent = new CuaAgentOrchestrator(cuaAuthority, {
-  driver: cuaDriverAdapter,
-  onAbortConversation: id => activeAgentChatSessions?.abortConversation(id)
-});
-const requireCuaSave = (): CuaSaveBridge => {
-  if (!cuaTarget || cuaTarget.window.isDestroyed()) throw new Error('CUA_TARGET_GONE');
-  return cuaTarget.save;
-};
-const cuaSaveAdapter: Pick<CuaSaveBridge, 'prepareSaveSnapshot' | 'saveApproved' | 'cancelRun' | 'settleWrites' | 'discardProposal'> = {
-  prepareSaveSnapshot: scope => requireCuaSave().prepareSaveSnapshot(scope),
-  saveApproved: (proposalId, permit) => requireCuaSave().saveApproved(proposalId, permit),
-  cancelRun: runId => cuaTarget?.save.cancelRun(runId),
-  settleWrites: () => cuaTarget?.save.settleWrites() ?? Promise.resolve(),
-  discardProposal: proposalId => cuaTarget?.save.discardProposal(proposalId) ?? false
-};
-const cuaSaveAgent = new CuaAgentSaveOrchestrator(cuaSaveAuthority, {
-  bridge: cuaSaveAdapter,
-  assertScope: (conversationId, scope) => cuaAgent.assertSaveScope(conversationId, scope),
-  inputAuthority: cuaAuthority
-});
-
 /** Window icon for platforms that take one; macOS uses the bundle icon. */
 function appIconPath(): string | undefined {
   const iconPath = app.isPackaged
@@ -268,38 +224,6 @@ function createWindow(): void {
   });
   reaAnalysisWindow = mainWindow;
   mainWindow.once('closed', () => { if (reaAnalysisWindow === mainWindow) reaAnalysisWindow = null; });
-  let cuaSave: CuaSaveBridge | undefined;
-  const cuaDriver = new CuaDriver(mainWindow, {
-    isObservationInFlight: scope => cuaAgent.isObservationInFlight(scope),
-    getDeviceScaleFactor: () => screen.getDisplayMatching(mainWindow.getBounds()).scaleFactor,
-    getPendingApproval: () => cuaAuthority.getPendingApproval() ?? cuaSaveAuthority.getPendingApproval(),
-    consumePermit: (request, permit) => cuaAuthority.consume(request, permit),
-    checkPermit: (request, permit) => cuaAuthority.check(request, permit),
-    onCancel: ({ runId }) => {
-      if (runId) {
-        cuaAuthority.revokeRun(runId); cuaSaveAuthority.revokeRun(runId);
-        cuaSave?.cancelRun(runId);
-        cuaAgent.abortRun(runId); cuaSaveAgent.abortRun(runId);
-      }
-    },
-    onState: state => {
-      cuaAgent.settleRun(state);
-      if (!mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send(IPC_CHANNELS.cuaStateChanged, state);
-    }
-  });
-  cuaSave = new CuaSaveBridge(mainWindow, {
-    projects: projectStore,
-    assertScope: scope => cuaDriver.assertObservationScope(scope),
-    checkPermit: (proposal, permit) => cuaSaveAuthority.check(proposal, permit),
-    consumePermit: (proposal, permit) => cuaSaveAuthority.consume(proposal, permit),
-    isProposalPending: proposal => {
-      const pending = cuaSaveAuthority.getPendingApproval(), scope = proposal.scope;
-      return pending !== null && pending.projectId === scope.projectId && pending.sessionId === scope.sessionId && pending.runId === scope.runId
-        && pending.windowId === scope.windowId && pending.frameId === scope.frameId && pending.layoutRevision === scope.layoutRevision && pending.contentRevision === scope.contentRevision;
-    }
-  });
-  cuaTarget = { window: mainWindow, driver: cuaDriver, save: cuaSave };
-
   mainWindow.once('ready-to-show', () => {
     jevCredentialWindow = mainWindow;
     mainWindow.once('closed', () => {
@@ -404,8 +328,6 @@ function installDisplayMediaHandler(): void {
 }
 
 async function installIpcHandlers(): Promise<void> {
-  registerCuaIpc(ipcMain, () => cuaTarget);
-  registerCuaSaveIpc(ipcMain, () => cuaTarget);
   ipcMain.handle(IPC_CHANNELS.getTitleFontData, (_event, input: unknown) => readTitleFontData(input));
   registerCaptureIpcHandlers({
     ipcMain,
@@ -432,6 +354,7 @@ async function installIpcHandlers(): Promise<void> {
   registerExportIpcHandlers(ipcMain, exportIpcService);
   registerReaAnalysisIpc({ service: reaAnalysis, ipcMain, getOwnWindow: () => reaAnalysisWindow });
   ipcMain.handle(IPC_CHANNELS.shortsStart, (_event, payload: unknown) => shortsService.start(payload));
+  ipcMain.handle(IPC_CHANNELS.ollamaDiscover, (_event, payload: unknown) => discoverOllama(payload));
   ipcMain.handle(IPC_CHANNELS.shortsGet, (_event, payload: unknown) => shortsService.get(payload));
   ipcMain.handle(IPC_CHANNELS.shortsList, (_event, payload: unknown) => shortsService.list(payload));
   ipcMain.handle(IPC_CHANNELS.shortsCancel, (_event, payload: unknown) => shortsService.cancel(payload));
@@ -473,10 +396,10 @@ async function installIpcHandlers(): Promise<void> {
   const mcpServerInstance = new OpenVideoMcpServer();
   mcpServerInstance.setServices(projectStore, exportIpcService);
   mcpServerInstance.setTranscriptionService(transcriptionService);
+  mcpServerInstance.setShortsService(shortsService);
   // Agent tools write the project straight to disk; tell open editors to reload
   // so the change shows up on the timeline instead of being silently shadowed.
   mcpServerInstance.setProjectTimelineChangeNotifier((projectId) => {
-    cuaTarget?.driver.invalidateContent('mcp-project-changed');
     for (const window of BrowserWindow.getAllWindows()) {
       window.webContents.send(IPC_CHANNELS.projectTimelineChanged, { projectId });
     }
@@ -495,32 +418,21 @@ async function installIpcHandlers(): Promise<void> {
     return executeRegisteredEditorTool(mcpServerInstance, toolName, params);
   });
 
-  const agentChatTools = await createAgentChatTools(mcpServerInstance, cuaAgent, cuaSaveAgent);
-  const jevObservationHook = createMainJevObservationHook({
-    runtime: createJevRuntime({ service: jevService, readConfig: jevConfigStore.getSnapshot }),
-    agent: cuaAgent, getDriver: () => cuaTarget?.driver ?? null
-  });
+  const agentChatTools = await createAgentChatTools(mcpServerInstance);
   const agentChatGraphBundle = buildAgentChatGraph({
-    jevObservationHook,
     tools: agentChatTools,
     // Derived from the tools that exist, so a tool added tomorrow asks for
     // approval by default rather than because someone remembered a list.
     mutatingToolNames: agentChatMutatingToolNames(agentChatTools),
     spendToolNames: AGENT_CHAT_SPEND_TOOL_NAMES,
-    perCallApprovalToolNames: AGENT_CHAT_CUA_PER_CALL_TOOL_NAMES,
-    cua: cuaAgent,
-    cuaSave: cuaSaveAgent,
     createModel: createAgentChatModel(agentChatTools, credentialStore, chatGptOAuthService)
   });
-  const agentChatSessions = new AgentChatSessionManager(agentChatGraphBundle, {
-    cancelCua: id => settleCuaCancellation([() => cuaAgent.cancelConversation(id), () => cuaSaveAgent.cancelConversation(id)]),
-    getSaveResult: id => cuaSaveAgent.getLastResult(id)
-  });
+  const agentChatSessions = new AgentChatSessionManager(agentChatGraphBundle);
   activeAgentChatSessions = agentChatSessions;
   registerAgentChatIpcHandlers(ipcMain, agentChatSessions, new AgentChatHistoryStore(projectStore), {
     cancelChannel: IPC_CHANNELS.agentChatCancel,
-    isTrustedSender: event => cuaTarget !== null && !cuaTarget.window.isDestroyed()
-      && event.sender === cuaTarget.window.webContents && event.senderFrame === cuaTarget.window.webContents.mainFrame
+    isTrustedSender: event => reaAnalysisWindow !== null && !reaAnalysisWindow.isDestroyed()
+      && event.sender === reaAnalysisWindow.webContents && event.senderFrame === reaAnalysisWindow.webContents.mainFrame
   });
 }
 
@@ -580,7 +492,7 @@ app.on('before-quit', event => {
   if (shortsShutdownComplete) return;
   event.preventDefault();
   exportIpcService.cancelAll();
-  void Promise.allSettled([cuaTarget?.driver.cancel('app-quit'), cuaTarget?.save.settleWrites(), shortsService.shutdown(), reaAnalysis.dispose()]).finally(() => {
+  void Promise.allSettled([shortsService.shutdown(), reaAnalysis.dispose()]).finally(() => {
     shortsShutdownComplete = true;
     app.quit();
   });

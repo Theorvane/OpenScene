@@ -1,7 +1,5 @@
 import type { EditAgentContextAsset, EditAgentProjectContext } from './editAgentContext';
 import type { OpenAiAuthMode, ReasoningEffort } from './openAiAuth';
-import type { CuaDispatchReceipt } from './cua';
-import type { CuaSaveResult } from './cuaSave';
 
 export type AgentChatMessageRole = 'user' | 'assistant' | 'tool';
 
@@ -16,68 +14,10 @@ export interface AgentToolCallProposal {
   readonly toolCallId: string;
   readonly toolName: string;
   readonly args: Record<string, unknown>;
-  /** Display evidence only; never an execution permit or an approval authority. */
-  readonly cuaApproval?: AgentCuaApprovalSummary | undefined;
 }
-
-/**
- * A projection of the exact observed action awaiting approval. Coordinates are
- * displayed in the coordinate system named here; the driver owns conversion
- * and validation. Changing this evidence requires a new proposal and approval.
- */
-export interface AgentCuaInputApprovalSummary {
-  readonly actionKind: 'click' | 'key' | 'drag';
-  readonly actionLabel: string;
-  readonly frameId: string;
-  readonly scopeRevision: string | number;
-  readonly contentRevision: number;
-  readonly coordinateSpace?: 'css' | 'bitmap' | undefined;
-  readonly coords?: { readonly x: number; readonly y: number } | undefined;
-  readonly dragTo?: { readonly x: number; readonly y: number } | undefined;
-}
-
-export interface AgentCuaSaveApprovalSummary {
-  readonly actionKind: 'save';
-  readonly actionLabel: string;
-  readonly frameId: string;
-  readonly scopeRevision: number;
-  readonly contentRevision: number;
-  readonly projectId: string;
-  readonly proposalId: string;
-  readonly snapshotId: string;
-  readonly timelineDigest: string;
-  readonly dirty: boolean;
-  readonly clipCount: number;
-  readonly titleCount: number;
-  readonly coordinateSpace?: undefined;
-  readonly coords?: undefined;
-  readonly dragTo?: undefined;
-}
-
-export type AgentCuaApprovalSummary = AgentCuaInputApprovalSummary | AgentCuaSaveApprovalSummary;
-
-/** Stable presentation codes; the main process remains the source of errors. */
-export type AgentCuaErrorCode =
-  | 'CUA_FRAME_STALE'
-  | 'CUA_FRAME_EXPIRED'
-  | 'CUA_SCOPE_CHANGED'
-  | 'CUA_APPROVAL_EXPIRED'
-  | 'CUA_APPROVAL_MISMATCH'
-  | 'CUA_ACTION_REPLAYED'
-  | 'CUA_BUDGET_EXCEEDED'
-  | 'CUA_CANCELLED'
-  | 'CUA_BUSY'
-  | 'CUA_TARGET_GONE'
-  | 'CUA_CLEANUP_FAILED'
-  | 'CUA_SAVE_OUTCOME_UNKNOWN'
-  | 'CUA_SAVE_NOT_VERIFIED'
-  | 'CUA_SAVE_NOT_WRITTEN'
-  | 'CUA_MODE_REQUIRED'
-  | 'CUA_MODE_CHANGED'
-  | 'CUA_EXPLICIT_SAVE_REQUIRED';
 
 export type AgentChatStatus = 'idle' | 'thinking' | 'awaiting-approval' | 'error';
-export type AgentChatInteractionMode = 'project-tools' | 'self-window';
+export type AgentChatInteractionMode = 'project-tools';
 
 /**
  * How much of the model's context window the conversation is using, measured
@@ -89,23 +29,12 @@ export interface AgentChatContextUsage {
   readonly limitTokens?: number | undefined;
 }
 
-/** Main dispatch facts, independent of graph cancellation and renderer effects. */
-export interface CuaAgentActionResult {
-  readonly conversationId: string;
-  readonly toolCallId: string;
-  readonly receipt: CuaDispatchReceipt;
-}
-
 export interface AgentChatTurnState {
   readonly conversationId: string;
   readonly messages: readonly AgentChatDisplayMessage[];
   readonly pendingApproval: AgentToolCallProposal | null;
   readonly status: AgentChatStatus;
   readonly error?: string | undefined;
-  readonly errorCode?: AgentCuaErrorCode | undefined;
-  /** Main-confirmed Save receipt; independent of later cancellation or UI acknowledgement. */
-  readonly cuaSaveResult?: CuaSaveResult | undefined;
-  readonly cuaActionResult?: CuaAgentActionResult | undefined;
   readonly contextUsage?: AgentChatContextUsage | undefined;
 }
 
@@ -136,37 +65,14 @@ export interface AgentChatSendInput {
  */
 export type AgentToolApprovalDecision = 'approve' | 'always' | 'deny';
 
-export const AGENT_CHAT_CUA_ACTION_TOOL_NAME = 'executeCuaAction' as const;
-export const AGENT_CHAT_CUA_SAVE_TOOL_NAME = 'saveCuaEditorProject' as const;
-
-/** Legacy MCP preparation can save dirty UI. Exact CUA/Save approval must not
- * perform that write before its separate main-only permit is validated. */
-export async function prepareProjectForAgentApproval(
-  toolName: string,
-  decision: AgentToolApprovalDecision,
-  prepareProject?: () => Promise<boolean>,
-  interactionMode: AgentChatInteractionMode = 'project-tools'
-): Promise<boolean> {
-  if (interactionMode === 'self-window' || decision === 'deny' || toolName === AGENT_CHAT_CUA_ACTION_TOOL_NAME || toolName === AGENT_CHAT_CUA_SAVE_TOOL_NAME) return true;
+/** Persist the live project before executing saved-project tools. */
+export async function prepareProjectForAgentApproval(_toolName: string, decision: AgentToolApprovalDecision, prepareProject?: () => Promise<boolean>, _mode?: AgentChatInteractionMode): Promise<boolean> {
+  return decision === 'deny' || !prepareProject ? true : prepareProject();
+}
+export async function prepareProjectForAgentSend(_mode: AgentChatInteractionMode, prepareProject?: () => Promise<boolean>): Promise<boolean> {
   return prepareProject ? prepareProject() : true;
 }
-
-export async function prepareProjectForAgentSend(mode: AgentChatInteractionMode, prepareProject?: () => Promise<boolean>): Promise<boolean> {
-  return mode === 'self-window' || !prepareProject ? true : prepareProject();
-}
-
-export function toolsForAgentInteractionMode<T extends { readonly name: string }>(tools: readonly T[], mode: AgentChatInteractionMode): readonly T[] {
-  return mode === 'self-window' ? [...tools] : tools.filter((tool) =>
-    tool.name !== 'observeEditorWindow' && tool.name !== AGENT_CHAT_CUA_ACTION_TOOL_NAME && tool.name !== AGENT_CHAT_CUA_SAVE_TOOL_NAME);
-}
-
-export async function prepareAgentInteractionModeChange(
-  current: AgentChatInteractionMode, next: AgentChatInteractionMode,
-  busy: boolean, pendingApproval: boolean, cancelAndSettle: () => Promise<boolean>
-): Promise<boolean> {
-  if (current === next || busy || pendingApproval) return false;
-  return cancelAndSettle();
-}
+export function toolsForAgentInteractionMode<T>(tools: readonly T[], _mode: AgentChatInteractionMode): readonly T[] { return tools; }
 
 export interface AgentChatApprovalInput {
   readonly conversationId: string;

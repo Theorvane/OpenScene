@@ -133,7 +133,7 @@ export function ApplicationMenuBar(props: Props): ReactElement {
         onPointerEnter={() => { if (open !== null) setOpen(index); }}
         onClick={() => setOpen(open === index ? null : index)}>{menu.label}</button>)}
     </div>
-    {open !== null && <div className="application-menu__popup" role="menu" data-cua-protected="chrome-menu" data-cua-protected-id="application-menu-popup" aria-labelledby={`application-menu-${open}`} style={{ left: root.current?.querySelectorAll<HTMLButtonElement>('[role="menubar"] > button')[open]?.offsetLeft ?? 0 }}>
+    {open !== null && <div className="application-menu__popup" role="menu" aria-labelledby={`application-menu-${open}`} style={{ left: root.current?.querySelectorAll<HTMLButtonElement>('[role="menubar"] > button')[open]?.offsetLeft ?? 0 }}>
       {menus[open]?.items.map((item, index) => item === null ? <div role="separator" key={index} /> : <button
         key={item.label} type="button" aria-label={item.label} role={item.checked === undefined ? 'menuitem' : 'menuitemcheckbox'}
         {...(item.checked === undefined ? {} : { 'aria-checked': item.checked })} disabled={item.disabled} tabIndex={-1}

@@ -2,7 +2,7 @@
 
 OpenScene is a natural-language video editor. Describe what you want, review the result, and refine it with timeline and node-based editing.
 
-The agent edits the open project's supplied media through the same rules as Timeline and Canvas: describe the edit, review approved changes on Timeline, then refine node workflows or quick-start recipes. It can inspect source evidence, build workflows, materialize results into tracks and start export. Desktop also offers transcript-grounded local-video candidates for multiple editable shorts; candidate quality depends on the evidence and configured model. Existing tools do not establish completed app-window CUA or Jev integration; those remain roadmap work. It does not provide a media-generation workspace.
+The agent edits the open project's supplied media through the same rules as Timeline and Canvas: describe the edit in Natural chat, review approved changes on Timeline, then refine node workflows or quick-start recipes. It can inspect source evidence, build workflows, materialize results into tracks and start export through registered structured tools. Desktop also offers requested transcript-grounded candidates for multiple editable shorts; candidate quality depends on the evidence and configured model. App-window CUA and its observation judgment hook have been removed. Precision and Nodes contain no side chat. It does not provide a media-generation workspace.
 
 ## Discover before editing
 
@@ -64,11 +64,11 @@ The main process resolves project/asset IDs to authorized files. Credentials, ex
 
 The selected model may receive project context, sampled frames and transcripts for the authorized operation. Local media processing does not make an external provider request local. Report the active provider's limits and charges accurately.
 
-## Export and mobile
+## Desktop export
 
 A job ID means started. Inspect the final job state and verification before saying a video is complete. An unmeasured export is not a verified export, and a passing metadata review is not a subjective quality judgment.
 
-Mobile tools are `describe_timeline`, `get_editing_capabilities`, `get_canvas_workflow`, `edit_project` and `export_project`. They use the shared core and existing approval UI. `canvas.move` supports both source and block node positions without changing clip timing. Export uses the native module and user-controlled Photos/share delivery. Chat-based source frame and speech inspection remain desktop capabilities. Desktop scripted tool execution does not prove an external model conversation or a mobile-device export succeeded.
+Mobile support and its tool adapters are deferred. Active agent work targets the desktop editing core and existing approval UI. `canvas.move` supports both source and block node positions without changing clip timing. Desktop scripted tool execution does not establish that an external model conversation succeeded.
 
 ## AutoClip highlight planning
 

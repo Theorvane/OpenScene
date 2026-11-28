@@ -17,14 +17,14 @@ const ONBOARDING_STEPS = [
   {
     kicker: 'Welcome',
     title: 'Welcome to OpenScene',
-    body: 'OpenScene is a local-first desktop studio for recording, arranging, narrating, and exporting media on your machine.',
-    bullets: ['No account is required.', 'Home stays available behind this setup guide.', 'The Edit Agent panel remains docked on the right.']
+    body: 'Edit your videos with natural-language requests, then refine the same project in the precision timeline or node canvas.',
+    bullets: ['Create or open a project from the left sidebar.', 'Add footage and send editing requests in Natural mode.', 'Your project and editing history stay connected across all three modes.']
   },
   {
     kicker: 'Local readiness',
     title: 'Local readiness',
     body: 'Final MP4 export uses your local FFmpeg setup, and desktop capture depends on operating-system screen recording permission.',
-    bullets: ['Configure FFmpeg through an absolute path or PATH discovery.', 'Grant Screen Recording permission when macOS asks.', 'OpenScene never shows FFmpeg paths or arguments in the renderer.']
+    bullets: ['Check FFmpeg readiness in Settings → Local Tools.', 'Grant Screen Recording permission when macOS asks.', 'Imported source files are preserved during editing.']
   },
   {
     kicker: 'Analysis',
@@ -35,8 +35,8 @@ const ONBOARDING_STEPS = [
   {
     kicker: 'Edit Agent',
     title: 'Edit Agent',
-    body: 'The persistent right panel is the Edit Agent surface for project context, chat, tool activity, and approvals.',
-    bullets: ['Attach project context intentionally.', 'Review mutating tool approvals before accepting them.', 'Configure model preferences in Settings.']
+    body: 'Send editing commands in the chat below your video in Natural mode. Precision and Nodes give you focused manual control.',
+    bullets: ['Connect a provider such as Ollama in Settings, then select a model yourself.', 'Review proposed editing actions before approving them.', 'Request highlights or shorts in chat when you need them.']
   },
   {
     kicker: 'Privacy',
@@ -54,33 +54,31 @@ const ONBOARDING_STEPS = [
 
 export function FirstRunOnboarding({ onComplete }: FirstRunOnboardingProps): ReactElement {
   const [stepIndex, setStepIndex] = useState(0);
-  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const dialogRef = useRef<HTMLDialogElement | null>(null);
   const step = ONBOARDING_STEPS[stepIndex] ?? ONBOARDING_STEPS[0];
   const isFirstStep = stepIndex === 0;
   const isFinalStep = stepIndex === ONBOARDING_STEPS.length - 1;
   const progressText = useMemo(() => `${stepIndex + 1} of ${ONBOARDING_STEPS.length}`, [stepIndex]);
 
   useEffect(() => {
-    dialogRef.current?.focus();
+    const dialog = dialogRef.current;
+    if (dialog && !dialog.open) dialog.showModal();
+    return () => dialog?.close();
   }, []);
 
   return (
-    <div
+    <dialog
       className="first-run-onboarding"
-      data-cua-protected="modal"
-      data-cua-protected-id="first-run-onboarding"
       aria-labelledby="first-run-onboarding-title"
-      role="dialog"
-      aria-modal="true"
       ref={dialogRef}
-      tabIndex={-1}
+      onCancel={onComplete}
+      onKeyDown={event => event.stopPropagation()}
     >
-      <div className="first-run-onboarding__scrim" aria-hidden="true" />
       <section className="first-run-onboarding__panel">
         <header className="first-run-onboarding__header">
           <p className="section-kicker">First-run setup</p>
           <p className="first-run-onboarding__progress">Step {progressText}</p>
-          <h2 id="first-run-onboarding-title">{step.title}</h2>
+          <h1 id="first-run-onboarding-title">{step.title}</h1>
           <p>{step.body}</p>
         </header>
         <ol className="first-run-onboarding__rail" aria-label="Onboarding progress">
@@ -100,11 +98,11 @@ export function FirstRunOnboarding({ onComplete }: FirstRunOnboardingProps): Rea
             {isFinalStep ? (
               <Button onClick={onComplete} variant="primary">Start using OpenScene</Button>
             ) : (
-              <Button onClick={() => setStepIndex((current) => Math.min(ONBOARDING_STEPS.length - 1, current + 1))} variant="primary">Next</Button>
+              <Button autoFocus onClick={() => setStepIndex((current) => Math.min(ONBOARDING_STEPS.length - 1, current + 1))} variant="primary">Next</Button>
             )}
           </div>
         </footer>
       </section>
-    </div>
+    </dialog>
   );
 }

@@ -17,7 +17,7 @@ describe('LLM provider and model catalog configuration', () => {
 
     const ids = DEFAULT_LLM_MODELS.map((model) => model.id);
     expect(new Set(ids).size).toBe(ids.length);
-    expect(ids).toContain('qwen2.5-coder');
+    expect(ids).not.toContain('qwen2.5-coder');
     expect(ids).toContain('openai/gpt-5');
     expect(ids).toContain('anthropic/claude-sonnet-5');
     expect(ids).toContain('deepseek/deepseek-chat');
@@ -55,9 +55,10 @@ describe('LLM provider and model catalog configuration', () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it('registers connection semantics: local always on, cloud gated on its credential slot', () => {
+  it('registers connection semantics: endpoints and cloud require an explicit connection', () => {
     expect(LLM_PROVIDERS[0]?.id).toBe('local_ollama');
-    expect(isProviderConnected('local_ollama', {})).toBe(true);
+    expect(isProviderConnected('local_ollama', {})).toBe(false);
+    expect(isProviderConnected('local_ollama', { local_ollama: true })).toBe(true);
 
     for (const popularId of POPULAR_LLM_PROVIDER_IDS) {
       const provider = getLlmProvider(popularId);
@@ -93,10 +94,10 @@ describe('LLM provider and model catalog configuration', () => {
     expect(parseSelectedLlmModelId('openai/gpt-5')).toBe('openai/gpt-5');
     expect(parseSelectedLlmModelId('anthropic/claude-sonnet-5')).toBe('anthropic/claude-sonnet-5');
 
-    // Null/undefined/unknown (including pre-catalog bare cloud ids) fall back to the local default.
-    expect(parseSelectedLlmModelId(null)).toBe('qwen2.5-coder');
-    expect(parseSelectedLlmModelId(undefined)).toBe('qwen2.5-coder');
-    expect(parseSelectedLlmModelId('gpt-5')).toBe('qwen2.5-coder');
+    // Null/undefined/unknown (including pre-catalog bare cloud ids) leave the selection unset.
+    expect(parseSelectedLlmModelId(null)).toBe('');
+    expect(parseSelectedLlmModelId(undefined)).toBe('');
+    expect(parseSelectedLlmModelId('gpt-5')).toBe('');
     expect(getLlmModel('invalid-model-id')).toBeUndefined();
   });
 

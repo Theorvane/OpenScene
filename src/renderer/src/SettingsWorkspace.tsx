@@ -1,3 +1,6 @@
+import { useAiDomainModel } from './AiDomainModelContext';
+import { OllamaProviderSettings } from './OllamaProviderSettings';
+import { ollamaLlmModel } from '../../shared/ollamaModels';
 import { useEffect, useState, type ReactElement, type ReactNode } from 'react';
 
 import type { LocalFfmpegRuntimeStatus } from '../../shared/exportTypes';
@@ -15,20 +18,12 @@ import { useTheme } from './ThemeProvider';
 import { Button, MetadataList, Panel, PanelHeading, StatusCard } from './ui';
 import { classNames } from './ui/classNames';
 import { UpdatesSettings } from './UpdatesSettings';
-import { JevJudgmentSettings, type JevConfigSettingsPort } from './JevJudgmentSettings';
-
-const JEV_CONFIG_API: JevConfigSettingsPort = {
-  getConfig: () => window.videoTool.getJevConfig(),
-  setConfig: config => window.videoTool.setJevConfig(config)
-};
-
 const SETTINGS_SECTIONS = [
   { id: 'appearance', title: 'Appearance', description: 'Theme mode and command desk presets.' },
   { id: 'local-tools', title: 'Local Tools', description: 'Local runtime readiness for desktop capture, narration, and final export.' },
   { id: 'providers', title: 'Providers', description: 'Connected providers, and popular providers to connect.' },
   { id: 'models', title: 'Models', description: 'Search the model catalog and choose which models appear in pickers.' },
-  { id: 'edit-agent', title: 'Edit Agent', description: 'Model preference for the persistent right-side agent.' },
-  { id: 'jev-judgment', title: 'Jev Judgments', description: 'Optional typed observation judgments with a separate secure key.' },
+  { id: 'edit-agent', title: 'Edit Agent', description: 'Model choice shared by every editing view.' },
   { id: 'shortcuts', title: 'Shortcuts', description: 'Timeline editor keyboard shortcut remapping.' },
   { id: 'updates', title: 'Updates', description: 'Installed version and how new releases reach this build.' },
   { id: 'data-privacy', title: 'Data & Privacy', description: 'Local storage, provider authorization, and deletion expectations.' }
@@ -70,12 +65,12 @@ const MODEL_ROW_RENDER_CAP = 250;
  * local engine plus the popular providers; searching sweeps everything, with
  * rendered rows capped and the overflow reported.
  */
-function filteredModelGroups(filter: string): {
+function filteredModelGroups(filter: string, catalog = DEFAULT_LLM_MODELS): {
   readonly groups: readonly { readonly providerId: LlmProviderId; readonly providerLabel: string; readonly models: readonly (typeof DEFAULT_LLM_MODELS)[number][] }[];
   readonly truncatedCount: number;
 } {
   const query = filter.trim().toLowerCase();
-  const matches = DEFAULT_LLM_MODELS.filter((model) =>
+  const matches = catalog.filter((model) =>
     query.length === 0
       ? model.providerId === 'local_ollama' || POPULAR_LLM_PROVIDER_IDS.includes(model.providerId)
       : model.label.toLowerCase().includes(query) ||
@@ -113,8 +108,12 @@ function ffmpegStatusText(state: FfmpegStatusState): { readonly tone: 'neutral' 
 
 export function SettingsWorkspace({ onReplayFirstRunOnboarding }: SettingsWorkspaceProps): ReactElement {
   const { mode, preference, preset, setPreset, setPreference } = useTheme();
-  const { credentialStatus, providerConfig, saveProviderCredential, selectedModel, selectedModelId, setSelectedModelId, updateProviderConfig } = useLlmModel();
-  const [activeSectionId, setActiveSectionId] = useState<SettingsSectionId>('appearance');
+  const { credentialStatus, providerConfig, saveProviderCredential, ollama } = useLlmModel();
+  const { models: agentModels, selectedModel: selectedAgentModel, setSelectedModelId: setAgentModel, hasConnectedProvider } = useAiDomainModel();
+  const selectedModel = selectedAgentModel('edit-agent');
+  const selectedModelId = selectedModel.id;
+  const setSelectedModelId = (id: string) => setAgentModel('edit-agent', id);
+  const [activeSectionId, setActiveSectionId] = useState<SettingsSectionId>('providers');
   const { isModelVisible, setModelVisibility } = useModelVisibility();
   const [connectTarget, setConnectTarget] = useState<LlmProviderInfo | null>(null);
   const chatGptAuth = useChatGptAuth();
@@ -214,7 +213,6 @@ export function SettingsWorkspace({ onReplayFirstRunOnboarding }: SettingsWorksp
           <>
             <StatusCard tone={ffmpegView.tone}>{ffmpegView.text}</StatusCard>
             <MetadataList items={[
-              { term: 'Ollama', description: 'User-managed local engine for the editing assistant.' },
               { term: 'Whisper.cpp', description: 'Local speech transcription. Run npm run setup:transcription or configure an executable and model.' }
             ]} />
           </>
@@ -234,19 +232,10 @@ export function SettingsWorkspace({ onReplayFirstRunOnboarding }: SettingsWorksp
         const visibleOtherProviders = matchedOtherProviders.slice(0, 40);
         return (
           <>
+            <OllamaProviderSettings />
             <div className="settings-group">
               <h3 className="settings-subheading">Connected providers</h3>
               <div className="settings-list">
-                <div className="settings-list__row">
-                  <div className="settings-list__main">
-                    <span className="settings-list__name">Ollama</span>
-                    <span className="settings-tag">Local</span>
-                  </div>
-                  <label className="field-label settings-list__inline-field" htmlFor="ollama-base-url">
-                    Endpoint
-                    <input id="ollama-base-url" type="text" value={providerConfig.ollamaBaseUrl ?? ''} placeholder="http://localhost:11434" onChange={(event) => updateProviderConfig({ ollamaBaseUrl: event.target.value })} />
-                  </label>
-                </div>
                 {connectedProviders.map((provider) => {
                   const keyStored = isProviderKeyStored(provider);
                   const chatGptLinked = provider.id === 'openai' && chatGptAuth.isConnected;
@@ -355,7 +344,7 @@ export function SettingsWorkspace({ onReplayFirstRunOnboarding }: SettingsWorksp
         );
       }
       case 'models': {
-        const { groups, truncatedCount } = filteredModelGroups(modelFilter);
+        const { groups, truncatedCount } = filteredModelGroups(modelFilter, [...DEFAULT_LLM_MODELS, ...(ollama?.models ?? []).map(ollamaLlmModel)]);
         return (
           <>
             <div className="settings-model-search">
@@ -425,23 +414,16 @@ export function SettingsWorkspace({ onReplayFirstRunOnboarding }: SettingsWorksp
           <>
             <label className="field-label" htmlFor="primary-model">Primary LLM model</label>
             <select id="primary-model" value={selectedModelId} onChange={(event) => setSelectedModelId(event.target.value)}>
-              {DEFAULT_LLM_MODELS
-                .filter((model) =>
-                  model.id === selectedModelId ||
-                  ((model.providerId === 'local_ollama' ||
-                    isProviderConnected(model.providerId, credentialStatus) ||
-                    (chatGptAuth.isConnected && isOpenAiCodexModelKey(model.id))) &&
-                    isModelVisible(model.providerId, model.id)))
-                .map((model) => <option key={model.id} value={model.id}>{model.label} ({model.providerLabel}) - [{model.badge}]</option>)}
+              <option value="">{hasConnectedProvider ? '사용할 모델을 선택하세요' : '모델 제공자 연결이 필요합니다'}</option>
+              {agentModels.filter(model => model.available && (isProviderConnected(model.providerId, credentialStatus) || (chatGptAuth.isConnected && isOpenAiCodexModelKey(model.id))) && isModelVisible(model.providerId, model.id))
+                .map(model => <option key={model.id} value={model.id}>{model.providerLabel} → {model.label}</option>)}
             </select>
             <StatusCard tone="neutral"><strong>{selectedModel.label}</strong>: {selectedModel.description}</StatusCard>
-            <Button variant="default" onClick={() => void runModelTest()} disabled={testState.status === 'running'}>{testState.status === 'running' ? 'Testing...' : 'Test selected model'}</Button>
+            <Button variant="default" onClick={() => void runModelTest()} disabled={!selectedModelId || testState.status === 'running'}>{testState.status === 'running' ? 'Testing...' : 'Test selected model'}</Button>
             {testState.status === 'success' && <StatusCard tone="success">Model responded: {testState.completion}</StatusCard>}
             {testState.status === 'error' && <StatusCard tone="danger">{testState.error}</StatusCard>}
           </>
         );
-      case 'jev-judgment':
-        return <JevJudgmentSettings configApi={JEV_CONFIG_API} />;
       case 'shortcuts':
         return (
           <>

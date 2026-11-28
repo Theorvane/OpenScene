@@ -1,42 +1,18 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactElement, type ReactNode } from 'react';
-
+import { useState, type ReactElement, type ReactNode } from 'react';
 import type { EditAgentProjectContext } from '../../shared/editAgentContext';
-import {
-  AGENT_CHAT_LAYOUT_DEFAULT_WIDTH,
-  AGENT_CHAT_LAYOUT_MAX_WIDTH,
-  AGENT_CHAT_LAYOUT_MIN_WIDTH,
-  clampAgentChatPanelWidth,
-  getNextAgentChatPanelWidthFromKey
-} from './agentChatLayoutPreferences';
 import { isWorkspacePageId, type AppPage, type AppPageId } from './appPages';
 import { AgentChatPanel } from './AgentChatPanel';
 import type { ProjectTab } from './projectTabs';
 import { AgentChatProvider, useAgentChat, type AgentChatRestoreRequest } from './AgentChatContext';
-import { Button } from './ui';
-import { useAgentChatLayoutPreference } from './useAgentChatLayoutPreference';
 import { ApplicationMenuProvider } from './ApplicationMenuContext';
 import { ApplicationMenuBar } from './ApplicationMenuBar';
-import { CuaOverlay } from './cua/CuaOverlay';
-import { CuaOverlayProvider, useCuaOverlayState } from './cua/useCuaOverlay';
-
-type ChatPanelDragOrigin = {
-  readonly clientX: number;
-  readonly width: number;
-};
-
-function AppShellBackground(): ReactElement {
-  return (
-    <div className="atmosphere" aria-hidden="true">
-      <div className="atmosphere__beam atmosphere__beam--left" />
-      <div className="atmosphere__beam atmosphere__beam--right" />
-      <div className="atmosphere__grain" />
-    </div>
-  );
-}
+import './desktopNavigation.css';
 
 type AppShellProps = {
+  readonly inlineAgentChat?: boolean;
   readonly activePage: AppPage;
   readonly children: ReactNode;
+  readonly sidebar?: ReactNode;
   readonly hasActiveProject: boolean;
   readonly onPageChange: (pageId: AppPageId) => void;
   readonly activeProjectContext: EditAgentProjectContext | null;
@@ -55,255 +31,38 @@ type AppShellProps = {
   readonly onNavigateBack?: () => void;
 };
 
-function BackIcon(): ReactElement {
-  return (
-    <svg className="product-chrome__button-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-      <path d="M14.5 5.5L8 12l6.5 6.5" />
-    </svg>
-  );
-}
-
-function SettingsIcon(): ReactElement {
-  return (
-    <svg className="product-chrome__button-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-      <circle cx="12" cy="12" r="3" />
-      <path d="M18.5 14.5l1.25 1.1-1.8 3.1-1.6-.55a7.4 7.4 0 01-1.45.85L14.6 20.7H9.4L9.1 19a7.4 7.4 0 01-1.45-.85l-1.6.55-1.8-3.1 1.25-1.1a7.2 7.2 0 010-1.7l-1.25-1.1 1.8-3.1 1.6.55c.45-.33.93-.61 1.45-.85l.3-1.7h5.2l.3 1.7c.52.24 1 .52 1.45.85l1.6-.55 1.8 3.1-1.25 1.1c.08.56.08 1.14 0 1.7z" />
-    </svg>
-  );
-}
-
-function FolderIcon(): ReactElement {
-  return (
-    <svg className="product-chrome__button-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-      <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-    </svg>
-  );
-}
-
-function AppShellContent({ activePage, children, hasActiveProject, onPageChange, activeProjectContext, contentRevision = 0, contentFingerprint = null, studioLayout = false, projectTabs = [], activeProjectId = null, onSelectProjectTab, onCloseProjectTab, chatRestoreRequest = null, canNavigateBack = false, onNavigateBack }: AppShellProps): ReactElement {
-  const { isBusy, pendingApproval, cancelConversation } = useAgentChat();
-  const cua = useCuaOverlayState({
-    contentRevision,
-    contentFingerprint,
-    isAgentBusy: isBusy,
-    hasPendingApproval: pendingApproval !== null,
-    activePageId: activePage.id,
-    onStopRequested: () => {
-      if (isBusy || pendingApproval !== null) void cancelConversation();
-    }
-  });
-  const workspaceInert = cua.isWorkspaceInert;
-  const { layoutPreference, updateLayoutPreference } = useAgentChatLayoutPreference();
-  const shellBodyRef = useRef<HTMLDivElement | null>(null);
-  const dragOriginRef = useRef<ChatPanelDragOrigin | null>(null);
-  const chatPanelWidth = layoutPreference.chatPanelWidth;
-  const [studioChatExpanded, setStudioChatExpanded] = useState(false);
-  const chatPanelCollapsed = studioLayout ? !studioChatExpanded : layoutPreference.chatPanelCollapsed;
-  const projectsIsActive = activePage.id === 'projects';
-  const settingsIsActive = activePage.id === 'settings';
-  const showChatPanel = isWorkspacePageId(activePage.id);
-
-  const setChatPanelWidth = (width: number): void => {
-    const containerWidth = shellBodyRef.current?.getBoundingClientRect().width;
-    updateLayoutPreference((currentPreference) => ({
-      ...currentPreference,
-      chatPanelWidth: clampAgentChatPanelWidth(width, containerWidth)
-    }));
-  };
-
-  const setChatPanelCollapsed = (collapsed: boolean): void => {
-    if (studioLayout) { setStudioChatExpanded(!collapsed); return; }
-    updateLayoutPreference((currentPreference) => ({
-      ...currentPreference,
-      chatPanelCollapsed: collapsed
-    }));
-  };
-
-  useEffect(() => {
-    // Opening a saved chat from the home screen should always land in a
-    // visible chat panel, even if it was collapsed last time.
-    if (chatRestoreRequest === null) return;
-    setStudioChatExpanded(true);
-    updateLayoutPreference((currentPreference) => ({
-      ...currentPreference,
-      chatPanelCollapsed: false
-    }));
-  }, [chatRestoreRequest, updateLayoutPreference]);
-
-  const releasePointer = (event: PointerEvent<HTMLDivElement>): void => {
-    dragOriginRef.current = null;
-    if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
-    event.currentTarget.releasePointerCapture(event.pointerId);
-  };
-
-  const onChatSplitterKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
-    if (event.key === 'Escape' && dragOriginRef.current !== null) {
-      event.preventDefault();
-      setChatPanelWidth(dragOriginRef.current.width);
-      dragOriginRef.current = null;
-      return;
-    }
-
-    const nextWidth = getNextAgentChatPanelWidthFromKey({ currentWidth: chatPanelWidth, key: event.key, shiftKey: event.shiftKey });
-    if (nextWidth === null) return;
-    event.preventDefault();
-    setChatPanelWidth(nextWidth);
-  };
-
-  const onChatSplitterPointerMove = (event: PointerEvent<HTMLDivElement>): void => {
-    if (!event.currentTarget.hasPointerCapture(event.pointerId) || dragOriginRef.current === null) return;
-    setChatPanelWidth(dragOriginRef.current.width + dragOriginRef.current.clientX - event.clientX);
-  };
-
-  const onChatSplitterPointerDown = (event: PointerEvent<HTMLDivElement>): void => {
-    event.currentTarget.setPointerCapture(event.pointerId);
-    dragOriginRef.current = { clientX: event.clientX, width: chatPanelWidth };
-  };
-
-  return (
-    <CuaOverlayProvider controller={cua}>
-    <main className={`app-shell${showChatPanel ? ' app-shell--workspace' : ''}`}>
-      <AppShellBackground />
-      {/* Draggable window titlebar: the native frame is hidden on macOS, so this
-          bar owns window dragging; interactive controls opt out via no-drag. */}
-      <header className="product-chrome" aria-label="Application chrome" inert={isBusy} data-cua-protected="chrome-menu" data-cua-protected-id="product-chrome">
-            <ApplicationMenuBar
-              editorActive={activePage.id === 'edit'}
-              onProjects={() => onPageChange('projects')}
-              onSettings={() => onPageChange('settings')}
-              onToggleAssistant={() => setChatPanelCollapsed(!chatPanelCollapsed)}
-              assistantVisible={showChatPanel && !chatPanelCollapsed}
-              canToggleAssistant={showChatPanel}
-            />
-            {/* Open projects instead of a page label: the tab strip is the
-                only thing the top bar needs to say about where you are. */}
-            <div className="product-chrome__context" role="tablist" aria-label="Open projects">
-              {projectTabs.map((tab) => {
-                const isActive = tab.id === activeProjectId;
-                return (
-                  <span key={tab.id} className={`project-tab${isActive ? ' project-tab--active' : ''}`}>
-                    <button
-                      type="button"
-                      role="tab"
-                      aria-selected={isActive}
-                      className="project-tab__select"
-                      title={tab.name}
-                      onClick={() => onSelectProjectTab?.(tab.id)}
-                    >
-                      {tab.name}
-                    </button>
-                    <button
-                      type="button"
-                      className="project-tab__close"
-                      aria-label={`Close ${tab.name}`}
-                      onClick={() => onCloseProjectTab?.(tab.id)}
-                    >
-                      ✕
-                    </button>
-                  </span>
-                );
-              })}
-              {projectTabs.length === 0 && <span className="product-chrome__empty">{activePage.chromeLabel}</span>}
-            </div>
-            <div className="product-chrome__actions">
-              {showChatPanel && <Button variant={chatPanelCollapsed ? 'ghost' : 'primary'}
-                aria-controls="app-shell-agent-chat" aria-expanded={!chatPanelCollapsed}
-                onClick={() => setChatPanelCollapsed(!chatPanelCollapsed)}>Assistant</Button>}
-              <Button
-                aria-label="Back"
-                className="product-chrome__nav-button"
-                disabled={!canNavigateBack}
-                onClick={() => onNavigateBack?.()}
-                title={canNavigateBack ? 'Back to the previous page' : 'No previous page'}
-                variant="ghost"
-              >
-                <BackIcon />
-              </Button>
-              <Button
-                aria-controls="app-page-panel-projects"
-                aria-current={projectsIsActive ? 'page' : undefined}
-                aria-label="Projects"
-                className="product-chrome__nav-button"
-                onClick={() => onPageChange('projects')}
-                title="Projects"
-                variant={projectsIsActive ? 'primary' : 'ghost'}
-              >
-                <FolderIcon />
-              </Button>
-              <Button
-                aria-controls="app-page-panel-settings"
-                aria-current={settingsIsActive ? 'page' : undefined}
-                aria-label="Settings"
-                className="product-chrome__nav-button"
-                onClick={() => onPageChange('settings')}
-                title="Settings"
-                variant={settingsIsActive ? 'primary' : 'ghost'}
-              >
-                <SettingsIcon />
-              </Button>
+function AppShellContent({ activePage, children, sidebar, onPageChange, activeProjectContext, inlineAgentChat = false, hasUnsavedTimeline }: AppShellProps): ReactElement {
+  const { isBusy, pendingApproval } = useAgentChat();
+  const navigationLocked = isBusy || pendingApproval !== null;
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const naturalVisible = inlineAgentChat && isWorkspacePageId(activePage.id);
+  return <main className="app-shell desktop-shell app-shell--workspace" data-sidebar-open={sidebarOpen}>
+    <header className="product-chrome desktop-shell__chrome" aria-label="Application chrome">
+      <button type="button" className="desktop-icon-button" aria-label="프로젝트 사이드바 전환" title="프로젝트 사이드바" aria-controls="desktop-sidebar" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(value => !value)}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/></svg>
+      </button>
+      <ApplicationMenuBar editorActive={activePage.id === 'edit'} onProjects={() => { if (!navigationLocked) onPageChange('projects'); }} onSettings={() => { if (!navigationLocked) onPageChange('settings'); }} onToggleAssistant={() => {}} assistantVisible={naturalVisible} canToggleAssistant={false} />
+      <span className="desktop-shell__title">{activePage.id === 'settings' ? '설정' : activeProjectContext?.name ?? 'OpenScene'}{hasUnsavedTimeline && activePage.id !== 'settings' ? ' ·' : ''}</span>
+    </header>
+    <div className="desktop-shell__layout">
+      <aside id="desktop-sidebar" className="desktop-sidebar" aria-label="프로젝트 탐색" hidden={!sidebarOpen} inert={navigationLocked}>
+        <div className="desktop-sidebar__scroll">{sidebar}</div>
+        <button className="desktop-sidebar__settings" type="button" aria-current={activePage.id === 'settings' ? 'page' : undefined} onClick={() => onPageChange(activePage.id === 'settings' ? 'edit' : 'settings')}>{activePage.id === 'settings' ? '편집으로 돌아가기' : '설정'}</button>
+      </aside>
+      <div className={`desktop-shell__content${naturalVisible ? ' desktop-shell__content--natural' : ''}`}>
+        <div className="desktop-shell__workspace" aria-busy={isBusy} inert={isBusy}>{children}</div>
+        <div className="desktop-shell__chat" hidden={!naturalVisible}>
+          <AgentChatPanel inline onOpenSettings={() => onPageChange('settings')} />
         </div>
-      </header>
-      <div ref={shellBodyRef} className="app-shell__body">
-        <div id="app-shell-workspace" className="agent-workspace-lock" aria-busy={isBusy} inert={workspaceInert}>
-          <div className="agent-workspace-lock__content">{children}</div>
-          {isBusy && !cua.isActing && !cua.isPreparing && cua.state.phase !== 'ready' && (
-            <div aria-live="polite">
-              <div className="agent-workspace-lock__message" aria-hidden="true">
-                Edit Agent is updating your workspace...
-              </div>
-              <span className="agent-workspace-lock__announcement">Edit Agent is updating your workspace</span>
-            </div>
-          )}
-        </div>
-        {showChatPanel && !chatPanelCollapsed && (
-          <>
-            <div
-              aria-controls="app-shell-workspace app-shell-agent-chat"
-              aria-label="Resize Edit Agent chat panel"
-              aria-orientation="vertical"
-              aria-valuemax={AGENT_CHAT_LAYOUT_MAX_WIDTH}
-              aria-valuemin={AGENT_CHAT_LAYOUT_MIN_WIDTH}
-              aria-valuenow={chatPanelWidth}
-              aria-valuetext={`Edit Agent chat ${chatPanelWidth} pixels`}
-              className="agent-chat-resize-splitter"
-              data-cua-protected="chrome-menu"
-              data-cua-protected-id="agent-chat-splitter"
-              onKeyDown={onChatSplitterKeyDown}
-              onPointerDown={onChatSplitterPointerDown}
-              onPointerMove={onChatSplitterPointerMove}
-              onPointerUp={releasePointer}
-              role="separator"
-              tabIndex={0}
-              title="Drag to resize Edit Agent chat panel"
-            />
-            <AgentChatPanel width={chatPanelWidth} onCollapse={() => setChatPanelCollapsed(true)} />
-          </>
-        )}
       </div>
-      <CuaOverlay
-        state={cua.state}
-        stopPending={cua.stopPending}
-        stopError={cua.stopError}
-        agentBusy={isBusy || pendingApproval !== null}
-        onStop={() => {
-          void cua.triggerStop();
-        }}
-      />
-    </main>
-    </CuaOverlayProvider>
-  );
+    </div>
+  </main>;
 }
 
 export function AppShell(props: AppShellProps): ReactElement {
-  return (
-    <AgentChatProvider
-      activeProject={props.activeProjectContext}
-      hasUnsavedTimeline={props.hasUnsavedTimeline ?? true}
-      {...(props.prepareAgentProject === undefined ? {} : { prepareProject: props.prepareAgentProject })}
-      restoreRequest={props.chatRestoreRequest ?? null}
-      {...(props.onChatRestoreHandled === undefined ? {} : { onRestoreHandled: props.onChatRestoreHandled })}
-    >
-      <ApplicationMenuProvider><AppShellContent {...props} /></ApplicationMenuProvider>
-    </AgentChatProvider>
-  );
+  return <AgentChatProvider activeProject={props.activeProjectContext} hasUnsavedTimeline={props.hasUnsavedTimeline ?? true}
+    {...(props.prepareAgentProject === undefined ? {} : { prepareProject: props.prepareAgentProject })}
+    restoreRequest={props.chatRestoreRequest ?? null} {...(props.onChatRestoreHandled === undefined ? {} : { onRestoreHandled: props.onChatRestoreHandled })}>
+    <ApplicationMenuProvider><AppShellContent {...props} /></ApplicationMenuProvider>
+  </AgentChatProvider>;
 }

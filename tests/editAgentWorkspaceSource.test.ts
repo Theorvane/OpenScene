@@ -19,7 +19,7 @@ describe('Edit Agent workspace wiring', () => {
     expect(context).toContain('activeProject');
     expect(context).toContain('sendMessage');
     expect(panel).toContain('selectedModel.label');
-    expect(panel).toContain('<AgentModelPicker reasoningEffort={reasoningEffort} onReasoningEffortChange={setReasoningEffort} />');
+    expect(panel).toContain('<AgentModelPicker reasoningEffort={reasoningEffort} onReasoningEffortChange={setReasoningEffort} onOpenSettings={onOpenSettings} />');
     expect(panel).toContain('<AgentChatSessionPicker />');
     expect(context).toContain('startNewSession');
     expect(context).toContain('switchSession');

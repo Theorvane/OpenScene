@@ -43,10 +43,6 @@ import { connectVideoClips } from '../../../shared/videoCanvas';
 import { applyCanvasBlock } from '../../../shared/videoCanvasBlocks';
 import { EMPTY_CANVAS_GRAPH, parseVideoCanvasGraph, type VideoCanvasGraph } from '../../../shared/videoCanvasGraph';
 import { applyEditorOperations } from '../../../shared/editorOperations';
-import {
-  notifyCuaTimelineMutationScheduled,
-  notifyExternalCuaTimelineMutation
-} from '../cua/cuaActionSettlement';
 
 export function computeTimelineContentFingerprint(
   project: Pick<LocalProjectSnapshot, 'id' | 'timeline' | 'assets'> | null
@@ -54,12 +50,6 @@ export function computeTimelineContentFingerprint(
   return project === null ? 'null' : JSON.stringify([project.id, project.timeline, project.assets]);
 }
 import { errorMessage, type StatusMessage } from '../appTypes';
-import { hasActiveTimelineDrag } from '../cua/cuaDragGuard';
-import {
-  buildCuaSaveSnapshotReport,
-  evaluateCuaSaveFinished,
-  evaluateCuaSaveReadyRequest
-} from '../cua/cuaSaveClient';
 import { createTimelineHistory, pushTimelineHistory, redoTimelineHistory, undoTimelineHistory, type TimelineHistory } from './editorTimelineHistory';
 import { findClipSelection, findFirstCompatibleTrack, insertionStartForTrack, mediaAssetReady, nextTrackName, placeReadyAssetOnTimeline } from './editorTimelineView';
 import { metadataProbeFailureMessage } from './mediaLoadFailures';
@@ -96,25 +86,12 @@ export function useTimelineEditor() {
   const [isBusy, setIsBusy] = useState(false);
   const [hasUnsavedTimeline, setHasUnsavedTimeline] = useState(false);
   const [isSavingTimeline, setIsSavingTimeline] = useState(false);
-  const [isCuaSaveFrozen, setIsCuaSaveFrozen] = useState(false);
   const [timelineSaveError, setTimelineSaveError] = useState<string | null>(null);
   const [hasSavedTimelineOnce, setHasSavedTimelineOnce] = useState(false);
   const [metadataProbeFailuresByAssetId, setMetadataProbeFailuresByAssetId] = useState<Readonly<Record<string, string>>>({});
   const [metadataProbeRetryRevisionsByAssetId, setMetadataProbeRetryRevisionsByAssetId] = useState<Readonly<Record<string, number>>>({});
   const [statusMessage, setStatusMessage] = useState<StatusMessage>({ tone: 'neutral', text: 'Create or open a project to start editing locally.' });
-  const cuaSaveFreezeTokenRef = useRef<string | null>(null);
-  const liveSaveStateRef = useRef<{
-    project: LocalProjectSnapshot | null;
-    contentRevision: number;
-    hasUnsavedTimeline: boolean;
-    isSavingTimeline: boolean;
-  }>({
-    project: null,
-    contentRevision: 0,
-    hasUnsavedTimeline: false,
-    isSavingTimeline: false
-  });
-  // Monotonic committed content revision for CUA stale-content invalidation.
+  // Monotonic committed content revision for stale project response rejection.
   // Increments ONLY when committed project/timeline/assets content actually changes
   // (never on selection, focus, playhead, uncommitted drag preview, HUD changes, or
   // no-op saveTimeline round-trips returning identical timeline/assets content).
@@ -151,13 +128,6 @@ export function useTimelineEditor() {
   }
   const contentRevision = contentRevisionRef.current.revision;
   const contentFingerprint = contentRevisionRef.current.fingerprint;
-  liveSaveStateRef.current = {
-    project,
-    contentRevision,
-    hasUnsavedTimeline,
-    isSavingTimeline
-  };
-
   const selectedAsset = useMemo(
     () => project?.assets.find((asset) => asset.id === selectedAssetId) ?? null,
     [project, selectedAssetId]
@@ -172,7 +142,6 @@ export function useTimelineEditor() {
     projectLoadEpochRef.current += 1;
     manualSaveRef.current = null;
     setIsSavingTimeline(false);
-    notifyExternalCuaTimelineMutation();
     setProject(snapshot);
     setSelectedClipIds([]);
     setTimelineHistory(snapshot === null ? null : createTimelineHistory(snapshot.timeline));
@@ -234,7 +203,6 @@ export function useTimelineEditor() {
   }, []);
 
   const openProject = useCallback(async (projectId: string): Promise<boolean> => {
-    if (cuaSaveFreezeTokenRef.current !== null) return false;
     const response = await invokeWhileBusy(() => window.videoTool.openProject({ projectId }), 'The project could not be opened.');
     if (response === null) return false;
     if (response.ok) {
@@ -249,12 +217,12 @@ export function useTimelineEditor() {
     return false;
   }, [invokeWhileBusy, setLoadedProject]);
 
-  const createProject = useCallback(async (): Promise<boolean> => {
-    const response = await invokeWhileBusy(() => window.videoTool.createProject({ name: newProjectName }), 'The project could not be created.');
-    if (response === null) return false;
+  const createProjectForImport = useCallback(async (name = newProjectName): Promise<LocalProjectSnapshot | null> => {
+    const response = await invokeWhileBusy(() => window.videoTool.createProject({ name }), 'The project could not be created.');
+    if (response === null) return null;
     if (response.ok) {
       if (response.value.cancelled) {
-        return false;
+        return null;
       }
       const project = response.value.project;
       setLoadedProject(project);
@@ -263,11 +231,13 @@ export function useTimelineEditor() {
       setHasUnsavedTimeline(false);
       await refreshProjects();
       setStatusMessage({ tone: 'success', text: `Created ${project.name} in its own folder.` });
-      return true;
+      return project;
     }
     setStatusMessage({ tone: 'danger', text: errorMessage(response.error) });
-    return false;
+    return null;
   }, [invokeWhileBusy, newProjectName, refreshProjects, setLoadedProject]);
+
+  const createProject = useCallback(async (name?: string): Promise<boolean> => (await createProjectForImport(name)) !== null, [createProjectForImport]);
 
   const openProjectFolder = useCallback(async (projectType: import('../../../shared/projectTypes').ProjectType = 'editing'): Promise<boolean> => {
     const response = await invokeWhileBusy(() => window.videoTool.openProjectFolder({ projectType }), 'The project folder could not be opened.');
@@ -292,29 +262,31 @@ export function useTimelineEditor() {
   }, [invokeWhileBusy, refreshProjects, setLoadedProject]);
 
   const deleteCurrentProject = useCallback(async () => {
-    if (project === null || cuaSaveFreezeTokenRef.current !== null) return;
+    if (project === null) return false;
     const response = await invokeWhileBusy(() => window.videoTool.deleteProject({ projectId: project.id }), 'The project could not be deleted.');
-    if (response === null) return;
-    if (response.ok) {
+    if (response === null) return false;
+    if (response.ok && response.value.deleted) {
       setLoadedProject(null);
       setSelectedAssetId('');
       setSelectedClipId('');
       setHasUnsavedTimeline(false);
       await refreshProjects();
       setStatusMessage({ tone: 'warning', text: 'Project deleted locally.' });
-      return;
+      return true;
     }
-    setStatusMessage({ tone: 'danger', text: errorMessage(response.error) });
+    setStatusMessage({ tone: 'danger', text: response.ok ? 'The project could not be deleted.' : errorMessage(response.error) });
+    return false;
   }, [invokeWhileBusy, project, refreshProjects, setLoadedProject]);
 
+  const closeProject = useCallback(() => { setLoadedProject(null); setSelectedAssetId(''); setSelectedClipId(''); setHasUnsavedTimeline(false); }, [setLoadedProject]);
+
   const setProjectFromExternalImport: typeof setProject = useCallback((next) => {
-    notifyExternalCuaTimelineMutation();
     setProject(next);
   }, []);
-  const { importAssets, importRecordingResult } = useProjectAssetImports({ project, setIsBusy, setProject: setProjectFromExternalImport, setSelectedAssetId, setStatusMessage });
+  const { importAssets, importRecordingResult } = useProjectAssetImports({ project, createProjectForImport, setIsBusy, setProject: setProjectFromExternalImport, setSelectedAssetId, setStatusMessage });
 
   const replaceTimeline = useCallback((update: TimelineUpdate, successText: string, rejectionText?: string): TimelineDocument | null => {
-    if (project === null || cuaSaveFreezeTokenRef.current !== null) return null;
+    if (project === null) return null;
     const timeline = update(project.timeline);
     if (timeline === null) {
       // The generic message is right for clip edits, where the rule broken is
@@ -332,7 +304,6 @@ export function useTimelineEditor() {
     setTimelineHistory((current) => current === null ? createTimelineHistory(timeline) : pushTimelineHistory(current, timeline));
     playback.clampToTimeline(timeline);
     setHasUnsavedTimeline(true);
-    if (changed) notifyCuaTimelineMutationScheduled(nextFingerprint);
     setTimelineSaveError(null);
     setStatusMessage({ tone: 'neutral', text: successText });
     return timeline;
@@ -638,7 +609,6 @@ export function useTimelineEditor() {
   }, [replaceTimeline, selectedClip]);
 
   const detachSelectedClipAudio = useCallback(async (): Promise<void> => {
-    if (cuaSaveFreezeTokenRef.current !== null) return;
     const sourceProject = projectRef.current;
     const sourceSelection = selectedClip;
     if (sourceProject === null || sourceSelection?.asset?.kind !== 'video') return;
@@ -673,7 +643,6 @@ export function useTimelineEditor() {
       ? current.assets
       : [...current.assets, response.value.asset];
     if (transaction === null) {
-      notifyExternalCuaTimelineMutation();
       setProject({ ...current, assets });
       setSelectedAssetId(response.value.asset.id);
       setStatusMessage({
@@ -684,7 +653,6 @@ export function useTimelineEditor() {
     }
 
     const nextProject = { ...current, assets, timeline: transaction.timeline };
-    notifyExternalCuaTimelineMutation();
     setProject(nextProject);
     setTimelineHistory((history) => history === null
       ? createTimelineHistory(transaction.timeline)
@@ -701,7 +669,7 @@ export function useTimelineEditor() {
   }, [invokeWhileBusy, playback, selectedClip]);
 
   const undoTimeline = useCallback(() => {
-    if (timelineHistory === null || cuaSaveFreezeTokenRef.current !== null) return;
+    if (timelineHistory === null) return;
     const next = undoTimelineHistory(timelineHistory);
     if (next === null) return;
     const currentProject = projectRef.current;
@@ -713,12 +681,11 @@ export function useTimelineEditor() {
     setProject((current) => current === null ? current : { ...current, timeline: next.present });
     playback.clampToTimeline(next.present);
     setHasUnsavedTimeline(true);
-    if (changed && nextFingerprint !== null) notifyCuaTimelineMutationScheduled(nextFingerprint);
     setStatusMessage({ tone: 'neutral', text: 'Undid timeline edit.' });
   }, [playback, timelineHistory]);
 
   const redoTimeline = useCallback(() => {
-    if (timelineHistory === null || cuaSaveFreezeTokenRef.current !== null) return;
+    if (timelineHistory === null) return;
     const next = redoTimelineHistory(timelineHistory);
     if (next === null) return;
     const currentProject = projectRef.current;
@@ -730,15 +697,13 @@ export function useTimelineEditor() {
     setProject((current) => current === null ? current : { ...current, timeline: next.present });
     playback.clampToTimeline(next.present);
     setHasUnsavedTimeline(true);
-    if (changed && nextFingerprint !== null) notifyCuaTimelineMutationScheduled(nextFingerprint);
     setStatusMessage({ tone: 'neutral', text: 'Redid timeline edit.' });
   }, [playback, timelineHistory]);
 
   const updateAssetMetadata = useCallback(async (assetId: string, metadata: { readonly durationMs: number; readonly width?: number; readonly height?: number }): Promise<boolean> => {
-    if (project === null || cuaSaveFreezeTokenRef.current !== null) return false;
+    if (project === null) return false;
     const response = await window.videoTool.updateAssetMetadata({ projectId: project.id, assetId, ...metadata });
     if (response.ok) {
-      notifyExternalCuaTimelineMutation();
       setProject((current) => current === null ? current : { ...current, assets: current.assets.map((asset) => asset.id === response.value.id ? response.value : asset) });
       clearMetadataProbeFailure(assetId);
       return true;
@@ -747,43 +712,44 @@ export function useTimelineEditor() {
     return false;
   }, [clearMetadataProbeFailure, project]);
 
-  // The Edit Agent writes the project on disk from the main process, so an open
-  // editor must reload — otherwise the change is invisible and the next local
-  // save silently overwrites it. The edit always lands: it was asked for. Local
-  // unsaved work is not discarded but pushed onto the undo stack, because
-  // refusing to load left the agent's result invisible after any local edit.
+  // Agent writes join the same history and playback session as manual/canvas edits.
   useEffect(() => {
     const openProjectId = project?.id;
     if (openProjectId === undefined) return;
-    return window.videoTool.onProjectTimelineChanged((changedProjectId) => {
+    let requestRevision = 0;
+    let live = true;
+    const unsubscribe = window.videoTool.onProjectTimelineChanged((changedProjectId) => {
       if (changedProjectId !== openProjectId) return;
+      const epoch = projectLoadEpochRef.current;
+      const generation = projectGenerationRef.current;
+      const request = ++requestRevision;
       void (async () => {
-        const response = await window.videoTool.openProject({ projectId: openProjectId });
-        if (!response.ok) {
-          setStatusMessage({ tone: 'danger', text: errorMessage(response.error) });
-          return;
+        try {
+          const response = await window.videoTool.openProject({ projectId: openProjectId });
+          if (!live || request !== requestRevision || projectRef.current?.id !== openProjectId || epoch !== projectLoadEpochRef.current) return;
+          if (generation !== projectGenerationRef.current) {
+            setStatusMessage({ tone: 'warning', text: 'The agent saved an update, but newer local edits are open. Review the saved project before replacing this draft.' });
+            return;
+          }
+          if (!response.ok) { setStatusMessage({ tone: 'danger', text: errorMessage(response.error) }); return; }
+          const snapshot = response.value;
+          if (snapshot.id !== openProjectId) return;
+          setProject(snapshot);
+          setTimelineHistory(current => current === null ? createTimelineHistory(snapshot.timeline) : pushTimelineHistory(current, snapshot.timeline));
+          playback.clampToTimeline(snapshot.timeline);
+          setHasUnsavedTimeline(false);
+          setHasSavedTimelineOnce(true);
+          setStatusMessage({ tone: 'success', text: 'Agent edits applied to the open timeline. Use Undo to restore the previous edit.' });
+        } catch {
+          if (live && request === requestRevision && projectRef.current?.id === openProjectId) setStatusMessage({ tone: 'danger', text: 'The saved agent edit could not be refreshed.' });
         }
-        const snapshot = response.value;
-        if (!hasUnsavedTimeline) {
-          setLoadedProject(snapshot);
-          setStatusMessage({ tone: 'success', text: 'Timeline updated by the Edit Agent.' });
-          return;
-        }
-        notifyExternalCuaTimelineMutation();
-        setProject(snapshot);
-        setTimelineHistory((current) => current === null
-          ? createTimelineHistory(snapshot.timeline)
-          : pushTimelineHistory(current, snapshot.timeline));
-        playback.clampToTimeline(snapshot.timeline);
-        // In memory now matches disk; undo restores the local work.
-        setHasUnsavedTimeline(false);
-        setStatusMessage({ tone: 'warning', text: 'Loaded the Edit Agent timeline. Your unsaved edits are one undo away.' });
       })();
     });
-  }, [hasUnsavedTimeline, playback, project?.id, setLoadedProject]);
+    return () => { live = false; unsubscribe(); };
+  }, [playback.clampToTimeline, project?.id, setProject]);
 
   const renameProject = useCallback(async (name: string): Promise<boolean> => {
-    if (project === null || cuaSaveFreezeTokenRef.current !== null) return false;
+    if (project === null) return false;
     const response = await window.videoTool.renameProject({ projectId: project.id, name });
     if (!response.ok) {
       setStatusMessage({ tone: 'danger', text: errorMessage(response.error) });
@@ -798,7 +764,7 @@ export function useTimelineEditor() {
 
   const saveTimeline = useCallback(async (): Promise<boolean> => {
     const submitted = projectRef.current;
-    if (submitted === null || cuaSaveFreezeTokenRef.current !== null || manualSaveRef.current !== null) return false;
+    if (submitted === null || manualSaveRef.current !== null) return false;
     const request = {};
     const epoch = projectLoadEpochRef.current;
     const generation = projectGenerationRef.current;
@@ -815,7 +781,6 @@ export function useTimelineEditor() {
       if (!matchesSubmission()) return false;
       if (response.ok) {
         if (computeTimelineContentFingerprint(response.value) !== computeTimelineContentFingerprint(submitted)) {
-          notifyExternalCuaTimelineMutation();
         }
         setProject(response.value);
         setHasUnsavedTimeline(false);
@@ -843,82 +808,7 @@ export function useTimelineEditor() {
     }
   }, [setProject]);
 
-  // Explicit live timeline Save bridge (`CuaSaveBridge` in main process):
-  // 1) `onCuaSaveSnapshotRequested`: report readonly live timeline + dirty + contentRevision.
-  // 2) `onCuaSaveRequested`: synchronously freeze local edits & acknowledge ready/not-ready.
-  // 3) `onCuaSaveFinished`: always release freeze; mark clean only when diskMatches===true
-  //    and live (projectId, contentRevision) still match expectedContentRevision.
-  useEffect(() => {
-    const api = typeof window === 'undefined' ? undefined : window.videoTool;
-    if (
-      typeof api?.onCuaSaveSnapshotRequested !== 'function' ||
-      typeof api?.onCuaSaveRequested !== 'function' ||
-      typeof api?.onCuaSaveFinished !== 'function'
-    ) {
-      return;
-    }
-
-    const readLiveState = () => ({
-      ...liveSaveStateRef.current,
-      cuaSaveFreezeToken: cuaSaveFreezeTokenRef.current,
-      hasActiveDrag: hasActiveTimelineDrag()
-    });
-
-    const unsubSnapshot = api.onCuaSaveSnapshotRequested((request) => {
-      const report = buildCuaSaveSnapshotReport(request, readLiveState());
-      if (report !== null && typeof api.cuaReportSaveSnapshot === 'function') {
-        void api.cuaReportSaveSnapshot(report).catch(() => undefined);
-      }
-    });
-
-    const unsubReady = api.onCuaSaveRequested((request) => {
-      const { freezeToken, ack } = evaluateCuaSaveReadyRequest(request, readLiveState());
-      if (freezeToken !== null) {
-        cuaSaveFreezeTokenRef.current = freezeToken;
-        setIsCuaSaveFrozen(true);
-      }
-      if (typeof api.cuaAckSaveReady === 'function') {
-        void api.cuaAckSaveReady(ack).catch(() => undefined);
-      }
-    });
-
-    const unsubFinished = api.onCuaSaveFinished((result) => {
-      const decision = evaluateCuaSaveFinished(result, readLiveState());
-      if (decision.releaseFreeze) {
-        cuaSaveFreezeTokenRef.current = null;
-        setIsCuaSaveFrozen(false);
-      }
-      if (decision.applyCleanUi) {
-        if (result.persistedUpdatedAt !== null) {
-          setProject((current) =>
-            current === null || current.id !== result.projectId
-              ? current
-              : { ...current, updatedAt: result.persistedUpdatedAt! }
-          );
-        }
-        setHasUnsavedTimeline(false);
-        setTimelineSaveError(null);
-        setHasSavedTimelineOnce(true);
-        setStatusMessage({ tone: 'success', text: 'Timeline saved locally.' });
-      } else if (decision.saveError !== null) {
-        setTimelineSaveError(decision.saveError);
-      }
-      if (decision.commitAck !== null && typeof api.cuaAckSaveCommit === 'function') {
-        void api.cuaAckSaveCommit(decision.commitAck).catch(() => undefined);
-      }
-    });
-
-    return () => {
-      unsubSnapshot();
-      unsubReady();
-      unsubFinished();
-      cuaSaveFreezeTokenRef.current = null;
-      setIsCuaSaveFrozen(false);
-    };
-  }, []);
-
-  const effectiveIsSavingTimeline = isSavingTimeline || isCuaSaveFrozen;
-  const timelineSaveStatus: 'clean' | 'dirty' | 'saving' | 'saved' | 'error' = effectiveIsSavingTimeline
+  const timelineSaveStatus: 'clean' | 'dirty' | 'saving' | 'saved' | 'error' = isSavingTimeline
     ? 'saving'
     : timelineSaveError !== null
       ? 'error'
@@ -929,7 +819,7 @@ export function useTimelineEditor() {
           : 'clean';
 
   const saveAiProjectDocument = useCallback(async (ai: AiProjectDocument): Promise<boolean> => {
-    if (project === null || cuaSaveFreezeTokenRef.current !== null) return false;
+    if (project === null) return false;
     const response = await window.videoTool.saveAiProjectDocument({ projectId: project.id, ai });
     if (!response.ok) {
       setStatusMessage({ tone: 'danger', text: errorMessage(response.error) });
@@ -977,13 +867,13 @@ export function useTimelineEditor() {
       'Connected clips. The video track now plays continuously in the new order.'
     ),
     addTimelineTrack, removeTimelineTrack, renameTimelineTrack, insertTimelineTrack, contentFingerprint, contentRevision, createProject, deleteCurrentProject, deleteSelectedClip, duplicateSelectedClip, hasUnsavedTimeline, importAssets,
-    isSavingTimeline: effectiveIsSavingTimeline, isCuaSaveFrozen, timelineSaveError, timelineSaveStatus,
+    isSavingTimeline, timelineSaveError, timelineSaveStatus,
     importRecordingResult, isBusy, metadataProbeFailuresByAssetId, metadataProbeRetryRevisionsByAssetId, moveSelectedClip, newProjectName,
     cutAtPlayhead, transitionAtPlayhead, setTransitionAtPlayhead, removeTransitionAtPlayhead,
     addTitleAtPlayhead, editTitle, deleteTitle, applyTitleStyleToAutomaticCaptions, titleAtPlayhead, applyNarrationSubtitles, applyTranscriptionSubtitles,
     openProject, openProjectFolder, renameProject, placeSelectedAsset, placeAssetOnTimeline, project, projects, refreshProjects, reportMetadataProbeFailure, retryAssetMetadataProbe, saveTimeline, saveAiProjectDocument,
     clearSelection, goToTimelineEnd, goToTimelineStart, selectAllClips, selectedAsset, selectedAssetId, selectedClip, selectedClipId, selectedClipIds,
-    setNewProjectName, setSelectedAssetId, setSelectedClipId: selectClip,
+    closeProject, setNewProjectName, setSelectedAssetId, setSelectedClipId: selectClip,
     splitSelectedClip, statusMessage, trimSelectedClip, updateAssetMetadata, updateSelectedClipEffects, detachSelectedClipAudio,
     activePlaybackClip: playback.activePlaybackClip, canRedoTimeline: (timelineHistory?.future.length ?? 0) > 0,
     canUndoTimeline: (timelineHistory?.past.length ?? 0) > 0, isPlaying: playback.isPlaying, moveClipToTrack,

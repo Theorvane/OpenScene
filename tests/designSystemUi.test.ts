@@ -211,21 +211,21 @@ async function flushMicroAndMacroTasks(): Promise<void> {
 describe('Phase 0 Design System Tokens & Stylesheets', () => {
   it('defines Orca-aligned neutral surfaces, cross-platform typography, 4px spacing, compact controls, status tokens, and zero gradients/glows', () => {
     for (const token of [
-      '--os-ui-bg: #0a0a0a;',
-      '--os-ui-canvas: #121212;',
-      '--os-ui-surface: #171717;',
-      '--os-ui-hover: #222222;',
-      '--os-ui-active: #262626;',
-      '--os-ui-fg: #f0f0f0;',
-      '--os-ui-fg-secondary: #c2c2c2;',
-      '--os-ui-fg-muted: #8f8f8f;',
-      '--os-ui-fg-faint: #6b6b6b;',
-      '--os-ui-border: rgba(255, 255, 255, 0.08);',
-      '--os-ui-border-strong: rgba(255, 255, 255, 0.15);',
-      '--os-ui-cta-bg: #e5e5e5;',
-      '--os-ui-cta-fg: #171717;',
-      '--os-ui-cta-bg-hover: #ffffff;',
-      '--os-ui-focus-ring: #737373;',
+      '--os-ui-bg: var(--background);',
+      '--os-ui-canvas: var(--surface-inset);',
+      '--os-ui-surface: var(--card);',
+      '--os-ui-hover: var(--surface-control-hover);',
+      '--os-ui-active: var(--surface-control-selected);',
+      '--os-ui-fg: var(--foreground);',
+      '--os-ui-fg-secondary: var(--text-strong);',
+      '--os-ui-fg-muted: var(--muted-foreground);',
+      '--os-ui-fg-faint: var(--text-weaker);',
+      '--os-ui-border: var(--border);',
+      '--os-ui-border-strong: var(--border-strong);',
+      '--os-ui-cta-bg: var(--primary);',
+      '--os-ui-cta-fg: var(--primary-foreground);',
+      '--os-ui-cta-bg-hover: color-mix(in srgb, var(--primary) 85%, var(--foreground));',
+      '--os-ui-focus-ring: var(--ring);',
       '--os-space-1: 4px;',
       '--os-space-2: 8px;',
       '--os-space-3: 12px;',
@@ -270,8 +270,7 @@ describe('Phase 0 Design System Tokens & Stylesheets', () => {
     expect(MAIN_TSX).toContain("import '../styles/ui-primitives.css';");
   });
 
-  it('enforces sheet < dialog < dropdown/popover < tooltip < cua-stop layering order', () => {
-    const cuaStop = extractCssVarNumber(TOKENS_CSS, '--os-z-cua-stop');
+  it('enforces sheet < dialog < dropdown/popover < tooltip layering order', () => {
     const tooltip = extractCssVarNumber(TOKENS_CSS, '--os-z-tooltip');
     const dropdown = extractCssVarNumber(TOKENS_CSS, '--os-z-dropdown');
     const popover = extractCssVarNumber(TOKENS_CSS, '--os-z-popover');
@@ -283,10 +282,7 @@ describe('Phase 0 Design System Tokens & Stylesheets', () => {
     expect(dropdown).toBeGreaterThan(dialog);
     expect(popover).toBeGreaterThan(dialog);
     expect(tooltip).toBeGreaterThan(dropdown);
-    // CUA Stop MUST remain strictly above every portal layer.
-    expect(cuaStop).toBeGreaterThan(tooltip);
 
-    expect(UI.OS_Z_INDEX.cuaStop).toBe(cuaStop);
     expect(UI.OS_Z_INDEX.tooltip).toBe(tooltip);
     expect(UI.OS_Z_INDEX.dropdown).toBe(dropdown);
     expect(UI.OS_Z_INDEX.popover).toBe(popover);
@@ -447,8 +443,8 @@ describe('Phase 0 Core Form & Navigation Primitives', () => {
   });
 });
 
-describe('Phase 0 Portal Primitives + Nested Layering & CUA Safety Invariants', () => {
-  it('Dialog renders in portal with CUA-protected attributes, custom container, focus management, and restores focus on normal Escape', async () => {
+describe('Phase 0 Portal Primitives + Nested Layering & keyboard isolation', () => {
+  it('Dialog renders in portal with portal attributes, custom container, focus management, and restores focus on normal Escape', async () => {
     const doc = getDocument();
     const portalHost = doc.createElement('div') as DomEl;
     doc.body.appendChild(portalHost);
@@ -493,10 +489,10 @@ describe('Phase 0 Portal Primitives + Nested Layering & CUA Safety Invariants', 
     const overlay = portalHost.querySelector('.os-ui-dialog__overlay') as DomEl | null;
     expect(dialog).not.toBeNull();
     expect(overlay).not.toBeNull();
-    expect(dialog?.getAttribute('data-cua-protected')).toBe('modal');
+    expect(dialog?.getAttribute('data-cua-protected')).toBeNull();
     expect(dialog?.getAttribute('data-os-portal')).toBe('dialog');
     expect(dialog?.getAttribute('aria-modal')).toBe('true');
-    expect(overlay?.getAttribute('data-cua-protected')).toBe('modal');
+    expect(overlay?.getAttribute('data-cua-protected')).toBeNull();
     expect(overlay?.getAttribute('data-os-portal')).toBe('dialog');
     expect(dialog?.contains(doc.activeElement)).toBe(true);
 
@@ -684,7 +680,7 @@ describe('Phase 0 Portal Primitives + Nested Layering & CUA Safety Invariants', 
     expect(doc.activeElement).toBe(sheetTrigger);
   });
 
-  it('Dialog, Sheet, and DropdownMenu allow capture-phase window Escape (CUA emergency Stop) to fire FIRST', () => {
+  it('Dialog, Sheet, and DropdownMenu allow capture-phase window Escape (prior handlers) to fire FIRST', () => {
     const win = getWindow();
     const doc = getDocument();
 
@@ -751,7 +747,7 @@ describe('Phase 0 Portal Primitives + Nested Layering & CUA Safety Invariants', 
       const portalNode = doc.querySelector(testCase.portalSelector) as DomEl | null;
       expect(portalNode, `${testCase.name} should mount portal`).not.toBeNull();
 
-      // Simulate CUA emergency Stop capture-phase Escape listener on window.
+      // Simulate prior handlers capture-phase Escape listener on window.
       const cuaStopCaptureHandler = (event: unknown): void => {
         const kb = event as { key: string; preventDefault: () => void };
         if (kb.key === 'Escape') {
@@ -767,7 +763,7 @@ describe('Phase 0 Portal Primitives + Nested Layering & CUA Safety Invariants', 
         win.removeEventListener('keydown', cuaStopCaptureHandler, { capture: true });
       }
 
-      expect(order[0], `${testCase.name}: CUA capture-phase Escape must run first`).toBe('cua-capture-stop');
+      expect(order[0], `${testCase.name}: capture-phase Escape must run first`).toBe('cua-capture-stop');
       expect(portalEscape).not.toHaveBeenCalled();
       expect(doc.querySelector(testCase.portalSelector)).not.toBeNull();
 
@@ -837,7 +833,7 @@ describe('Phase 0 Portal Primitives + Nested Layering & CUA Safety Invariants', 
 
       const sheetContent = doc.querySelector('[data-os-portal="sheet"][role="dialog"]') as DomEl;
       expect(sheetContent.getAttribute('data-side')).toBe('right');
-      expect(sheetContent.getAttribute('data-cua-protected')).toBe('modal');
+      expect(sheetContent.getAttribute('data-cua-protected')).toBeNull();
 
       const sheetInput = doc.querySelector('[data-testid="sheet-input"]') as DomEl;
       const sheetTextarea = doc.querySelector('[data-testid="sheet-textarea"]') as DomEl;
@@ -921,7 +917,7 @@ describe('Phase 0 Portal Primitives + Nested Layering & CUA Safety Invariants', 
     expect(doc.activeElement).toBe(trigger);
   });
 
-  it('DropdownMenu and Tooltip render CUA-protected portals with variants and separators', () => {
+  it('DropdownMenu and Tooltip render portals with variants and separators', () => {
     const doc = getDocument();
     const onSelect = vi.fn();
 
@@ -958,13 +954,13 @@ describe('Phase 0 Portal Primitives + Nested Layering & CUA Safety Invariants', 
 
     const menu = doc.querySelector('[data-os-portal="dropdown-menu"][role="menu"]') as DomEl | null;
     expect(menu).not.toBeNull();
-    expect(menu?.getAttribute('data-cua-protected')).toBe('chrome-menu');
+    expect(menu?.getAttribute('data-cua-protected')).toBeNull();
     expect(menu?.querySelector('.os-ui-dropdown__separator')).not.toBeNull();
     expect(menu?.querySelector('.os-ui-dropdown__item--destructive')).not.toBeNull();
 
     const tooltip = doc.querySelector('[data-os-portal="tooltip"]') as DomEl | null;
     expect(tooltip).not.toBeNull();
-    expect(tooltip?.getAttribute('data-cua-protected')).toBe('chrome-menu');
+    expect(tooltip?.getAttribute('data-cua-protected')).toBeNull();
     expect(tooltip?.textContent).toContain('Keyboard shortcuts');
   });
 });

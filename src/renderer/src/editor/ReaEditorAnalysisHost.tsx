@@ -21,8 +21,7 @@ export function ReaEditorAnalysisHost({ editor, locked }: { editor: TimelineEdit
   const live = useRef(context); live.current = context;
   if (!project) return null;
   const expanded = open && !locked;
-  return <section className="rea-editor-host" data-open={expanded} aria-label="Local analysis tools" tabIndex={expanded ? 0 : -1}
-    data-cua-protected="chrome-menu" id="rea-editor-analysis" onKeyDown={event => {
+  return <section className="rea-editor-host" data-open={expanded} aria-label="Local analysis tools" tabIndex={expanded ? 0 : -1} id="rea-editor-analysis" onKeyDown={event => {
       // The focused scroll region owns native navigation. Leave default browser
       // scrolling intact, and leave descendant controls/modifiers/IME untouched.
       if (expanded && event.target === event.currentTarget && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey

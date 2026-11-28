@@ -48,7 +48,7 @@ describe('Settings workspace source contract', () => {
     expect(source).toContain('disconnectProvider');
     expect(source).toContain('ProviderConnectDialog');
     expect(source).toContain('+ Connect');
-    expect(source).toContain('id="ollama-base-url"');
+    expect(source).toContain('<OllamaProviderSettings />');
     expect(source).not.toContain('Media providers');
     expect(source).not.toContain('MEDIA_PROVIDERS.map');
     // OpenAI stays one unified entry, now advertising both login methods.
@@ -61,7 +61,7 @@ describe('Settings workspace source contract', () => {
     const source = await readFile(SETTINGS_SOURCE_URL, 'utf8');
 
     expect(source).toContain('settings-model-search');
-    expect(source).toContain('filteredModelGroups(modelFilter)');
+    expect(source).toContain('filteredModelGroups(modelFilter,');
     expect(source).toContain('role="switch"');
     expect(source).toContain('aria-checked={visible}');
     expect(source).toContain('setModelVisibility(model.providerId, model.id, !visible)');

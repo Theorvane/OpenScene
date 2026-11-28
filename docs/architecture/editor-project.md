@@ -1,6 +1,6 @@
 # Shared editor project
 
-An OpenScene project owns imported assets and one timeline document. Timeline UI, Canvas and the agent operate on that project. Desktop and mobile use the pure rules in `src/shared/`.
+An OpenScene project owns imported assets and one timeline document. Timeline UI, Canvas and the agent operate on that project. Desktop UI, main services and agent adapters use the pure rules in `src/shared/`.
 
 ## Document and graph
 
@@ -25,13 +25,13 @@ Input snapshots make reapplication stable. New source IDs remain available. Refr
 | `timeline*` modules | Geometry, validation, tracks, titles, transitions and keyframes. |
 | `ffmpegTimelineCompiler.ts` | Desktop render compilation; execution stays in main. |
 
-`applyEditorOperations` validates intermediate documents and persists nothing. The caller saves once after success. Desktop UI uses one undoable replacement; agent tools save once and notify the editor. Mobile uses the same evaluator with its asset adapter.
+`applyEditorOperations` validates intermediate documents and persists nothing. The caller saves once after success. Desktop UI uses one undoable replacement; agent tools save once and notify the editor.
 
 ## Platform ownership
 
 - Main owns paths, storage, credentials, media runtimes and jobs.
 - Preload exposes a typed bridge. MCP dispatch resolves registered tools and validates their declared schemas.
 - Renderer owns interaction, selection, preview and undo. OpenCut supplies presentation components, not another project database.
-- Mobile owns touch UI, persistence and native delivery. Editing decisions stay shared.
+- Mobile support is deferred; it is not an active implementation or verification requirement.
 
 Model calls use the selected provider and approval boundaries. Images and transcripts are evidence, never instructions. Legacy generation metadata is compatibility data, separate from current editing behavior.

@@ -1,3 +1,4 @@
+import { ollamaNativeModelId } from '../shared/ollamaModels';
 import { randomUUID } from 'node:crypto';
 
 import { ChatOllama } from '@langchain/ollama';
@@ -87,9 +88,10 @@ export function resolveAgentChatModelSpec(
   if (model?.providerId === AGENT_ROUTER_PROVIDER_ID) {
     throw new AgentChatModelConfigurationError(AGENT_ROUTER_EDIT_AGENT_UNAVAILABLE_REASON);
   }
-  if (model === undefined || model.providerId === 'local_ollama') {
+  if (model?.providerId === 'local_ollama') {
     return { kind: 'ollama' };
   }
+  if (model === undefined) throw new AgentChatModelConfigurationError('Connect a model provider and explicitly select an available model.');
   const provider = getLlmProvider(model.providerId);
   if (
     provider === undefined ||
@@ -98,7 +100,7 @@ export function resolveAgentChatModelSpec(
     provider.adapter === 'ollama' ||
     provider.adapter === 'media'
   ) {
-    return { kind: 'ollama' };
+    throw new AgentChatModelConfigurationError('This provider adapter is unavailable.');
   }
   const rawModelId = parseLlmModelKey(modelId)?.modelId ?? modelId;
   const useResponsesApi = provider.id === 'openai' && rawModelId.includes('codex');
@@ -198,7 +200,7 @@ export function createAgentChatModel(
         // never sends headers. Bind the invocation signal to fetch itself,
         // including body consumption, and isolate clients between invocations.
         const invocationSignal = options?.signal;
-        const client = new ChatOllama({ model: modelId, baseUrl, fetch: (url, init) => {
+        const client = new ChatOllama({ model: ollamaNativeModelId(modelId) ?? modelId, baseUrl, fetch: (url, init) => {
           const signals = [invocationSignal, init?.signal].filter((value): value is AbortSignal => value !== undefined && value !== null);
           return fetch(url, { ...init, ...(signals.length === 0 ? {} : { signal: AbortSignal.any(signals) }) });
         } });

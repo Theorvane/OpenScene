@@ -34,15 +34,18 @@ type EditorProbe = {
 let editor: EditorProbe;
 let cleanup: () => void;
 let save: ReturnType<typeof vi.fn>;
+let timelineChanged: (projectId: string) => void;
+let openProject: ReturnType<typeof vi.fn>;
 beforeEach(async () => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   save = vi.fn();
+  openProject = vi.fn(async ({ projectId }: { projectId: string }) => ({ ok: true, value: snapshot(projectId) }));
   Object.defineProperty(window, 'videoTool', { configurable: true, value: {
     listProjects: async () => ({ ok: true, value: [] }),
-    openProject: async ({ projectId }: { projectId: string }) => ({ ok: true, value: snapshot(projectId) }),
-    deleteProject: async () => ({ ok: true, value: null }),
+    openProject,
+    deleteProject: async () => ({ ok: true, value: { deleted: true } }),
     detachVideoAudio: async () => ({ ok: true, value: { asset: asset('audio') } }),
-    onProjectTimelineChanged: () => () => {}, saveTimeline: save
+    onProjectTimelineChanged: (listener: (projectId: string) => void) => { timelineChanged = listener; return () => {}; }, saveTimeline: save
   } });
   const hookPath = '../src/renderer/src/editor/useTimelineEditor';
   const { useTimelineEditor } = await import(hookPath) as { useTimelineEditor: () => EditorProbe };
@@ -55,6 +58,27 @@ beforeEach(async () => {
 afterEach(() => act(() => cleanup()));
 
 describe('manual Save ownership in the real timeline hook', () => {
+  it('agent refresh preserves the shared playhead and adds one undo transaction', async () => {
+    act(() => { editor.setPlayheadMs(500); editor.setSelectedClipId('clip'); });
+    const before = editor.project!;
+    const after = { ...before, timeline: { ...before.timeline, tracks: [...before.timeline.tracks, { id: 'agent-track', name: 'Agent', kind: 'audio' as const, clips: [] }] } };
+    openProject.mockResolvedValueOnce({ ok: true, value: after });
+    await act(async () => { timelineChanged('A'); });
+    expect(editor.project!.timeline.tracks).toHaveLength(before.timeline.tracks.length + 1);
+    expect(editor.playheadMs).toBe(500); expect(editor.selectedClipId).toBe('clip');
+    expect(editor.hasUnsavedTimeline).toBe(false);
+    act(() => editor.undoTimeline());
+    expect(editor.project!.timeline).toEqual(before.timeline);
+    expect(editor.hasUnsavedTimeline).toBe(true);
+  });
+  it('rejects an agent reload that resolves after a different project was opened', async () => {
+    const pending = deferred();
+    openProject.mockReturnValueOnce(pending.promise);
+    act(() => timelineChanged('A'));
+    await act(async () => { await editor.openProject('B'); });
+    await act(async () => { pending.resolve({ ok: true, value: snapshot('A') }); });
+    expect(editor.project?.id).toBe('B');
+  });
   it('preserves completed audio detachment when an older manual Save resolves', async () => {
     act(() => { editor.setSelectedClipId('clip'); editor.setPlayheadMs(500); });
     const submitted = editor.project!;

@@ -4,6 +4,18 @@ import { EDITOR_LAYOUT_DEFAULT_PREFERENCE } from '../src/renderer/src/editor/edi
 import { getEditorNativeMenuState } from '../src/renderer/src/editor/editorNativeMenuState';
 
 describe('editor native menu state mapping', () => {
+  it('disables hidden edited-clock commands while retaining save and history for source inspection', () => {
+    const state = getEditorNativeMenuState({
+      canRedoTimeline: true, canUndoTimeline: true, hasProject: true,
+      hasUnsavedTimeline: true, isBusy: false, isPlaying: false, canSplitAtPlayhead: false,
+      timelinePlaybackAvailable: false, layoutPreference: EDITOR_LAYOUT_DEFAULT_PREFERENCE
+    });
+    expect(state.commands.playPause.enabled).toBe(false);
+    expect(state.commands.rewind.enabled).toBe(false);
+    expect(state.commands.saveTimeline.enabled).toBe(true);
+    expect(state.commands.undo.enabled).toBe(true);
+    expect(state.commands.redo.enabled).toBe(true);
+  });
   it('keeps trim disabled outside the clip and disables timeline panels in Canvas', () => {
     const state = getEditorNativeMenuState({
       canRedoTimeline: false, canUndoTimeline: true, hasProject: true, hasSelectedClip: true,

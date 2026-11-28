@@ -17,6 +17,7 @@ export type AgentModelPickerInput = {
   readonly isModelVisible: (providerId: string, modelId: string) => boolean;
   /** Models reachable through a non-API session without linking their whole provider. */
   readonly linkedModelIds?: readonly string[];
+  readonly models?: readonly AiDomainModelConfig[];
 };
 
 /**
@@ -38,17 +39,13 @@ export function isAgentModelLinked(input: {
 }
 
 /**
- * Picker rule: list the local engine plus models from connected
- * providers only — the full catalog would be thousands of disabled rows.
- * Visibility switches filter further, and the active model always stays listed
- * so the current selection is never orphaned (which also guarantees the picker
- * is never empty).
+ * Only connected providers expose available models. Keep an explicitly selected
+ * connected model visible even if its catalog visibility was switched off.
  */
 export function buildAgentModelGroups(input: AgentModelPickerInput): readonly AgentModelGroup[] {
-  const models = getDomainModels(input.domain ?? 'edit-agent').filter((model) => {
-    if (model.id === input.activeModelId) return true;
+  const models = (input.models ?? getDomainModels(input.domain ?? 'edit-agent')).filter((model) => {
+    if (!model.available) return false;
     if (
-      model.executionPath !== 'local' &&
       !isAgentModelLinked({
         providerId: model.providerId,
         modelId: model.id,
@@ -59,7 +56,7 @@ export function buildAgentModelGroups(input: AgentModelPickerInput): readonly Ag
     ) {
       return false;
     }
-    return input.isModelVisible(model.providerId, model.id);
+    return model.id === input.activeModelId || input.isModelVisible(model.providerId, model.id);
   });
 
   const groups: { providerId: string; providerLabel: string; models: AiDomainModelConfig[] }[] = [];
@@ -79,7 +76,6 @@ export function agentModelGroupStatus(
   group: AgentModelGroup,
   input: { readonly credentialStatus: Readonly<Record<string, boolean>>; readonly chatGptConnected: boolean }
 ): 'Local' | 'Connected' | 'ChatGPT' | 'Not connected' {
-  if (group.models[0]?.executionPath === 'local') return 'Local';
   if (isProviderConnected(group.providerId, input.credentialStatus)) return 'Connected';
   const linkedBySignIn = group.models.some((model) =>
     isAgentModelLinked({

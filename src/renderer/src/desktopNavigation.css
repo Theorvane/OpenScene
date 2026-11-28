@@ -1,0 +1,55 @@
+.desktop-shell { padding: 0; gap: 0; block-size: 100dvb; min-block-size: 0; display: flex; flex-direction: column; }
+.desktop-shell__chrome { display: flex; justify-content: flex-start; flex: 0 0 44px; min-block-size: 44px; padding-inline: 12px; gap: 10px; background: var(--card); border-block-end: 1px solid var(--border); }
+:root[data-platform="darwin"] .desktop-shell__chrome { padding-inline-start: 86px; }
+.desktop-shell__title { flex: 1 1 0; min-inline-size: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 13px; font-weight: 600; color: var(--foreground); }
+.desktop-icon-button { display: grid; place-items: center; flex: 0 0 28px; inline-size: 28px; block-size: 28px; border: 0; border-radius: 5px; background: transparent; color: var(--muted-foreground); -webkit-app-region: no-drag; cursor: pointer; }
+.desktop-icon-button svg { inline-size: 19px; block-size: 19px; }
+.desktop-icon-button:hover { background: var(--accent); color: var(--foreground); }
+.desktop-shell__layout { display: flex; flex: 1 1 0; min-block-size: 0; min-inline-size: 0; }
+.desktop-sidebar { display: flex; flex-direction: column; flex: 0 0 232px; min-inline-size: 0; min-block-size: 0; background: var(--card); border-inline-end: 1px solid var(--border); }
+.desktop-sidebar[hidden], .desktop-shell__chat[hidden] { display: none; }
+.desktop-sidebar__scroll { flex: 1 1 0; min-block-size: 0; overflow: auto; scrollbar-gutter: stable; padding: 12px 8px; }
+.desktop-sidebar__settings { flex: 0 0 auto; text-align: start; padding: 12px 16px; color: var(--muted-foreground); background: transparent; border: 0; border-block-start: 1px solid var(--border); cursor: pointer; }
+.desktop-shell__content { display: flex; flex-direction: column; flex: 1 1 0; min-inline-size: 0; min-block-size: 0; }
+.desktop-shell__workspace { flex: 1 1 0; min-block-size: 0; min-inline-size: 0; display: flex; flex-direction: column; }
+.desktop-shell__workspace > .app-page-stack { flex: 1 1 0; min-block-size: 0; }
+.desktop-shell__chat { flex: 0 1 38%; min-block-size: 260px; display: flex; flex-direction: column; border-block-start: 1px solid var(--border); }
+.desktop-shell__chat > * { flex: 1 1 0; min-block-size: 0; }
+.desktop-shell .desktop-shell__chat .agent-chat-panel-shell--inline { flex: 1 1 0; min-block-size: 0; block-size: 100%; inline-size: 100%; min-inline-size: 0; max-inline-size: none; overflow: hidden; }
+.desktop-shell .desktop-shell__chat .agent-chat-panel { min-block-size: 0; block-size: 100%; inline-size: 100%; grid-template-rows: auto auto auto minmax(0, 1fr) auto; }
+.desktop-shell .desktop-shell__chat .agent-chat-log { min-block-size: 0; padding-block: 4px; }
+.desktop-navigation-error { position: absolute; z-index: 2; inset-block-start: 48px; inset-inline: 12px; padding: 8px 12px; border: 1px solid var(--destructive); border-radius: 6px; background: var(--card); color: var(--foreground); }
+.desktop-projects__heading { display: flex; align-items: center; justify-content: space-between; padding: 3px 7px 9px; color: var(--muted-foreground); font-size: 12px; }
+.desktop-projects__actions { display: flex; gap: 4px; }
+.desktop-projects__list { display: flex; flex-direction: column; gap: 3px; margin-block-end: 18px; }
+.desktop-project-row { display: flex; align-items: center; border-radius: 6px; }
+.desktop-project-row[data-active="true"] { background: var(--muted); box-shadow: inset 2px 0 var(--primary); }
+.desktop-project-row__menu { flex: 0 0 auto; position: relative; }
+.desktop-project-row__menu summary { list-style: none; cursor: pointer; padding: 3px 8px; color: var(--muted-foreground); }
+.desktop-project-row__menu > div { display: flex; flex-direction: column; gap: 3px; padding: 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--card); }
+.desktop-project-row__menu[open] { flex-basis: 100%; }
+.desktop-project-row:has(details[open]) { flex-wrap: wrap; }
+.desktop-project-row__menu button { text-align: start; padding: 6px; border: 0; background: transparent; color: var(--foreground); cursor: pointer; }
+.desktop-project-row__select { flex: 1 1 0; min-inline-size: 0; padding: 8px; border: 0; text-align: start; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--foreground); background: transparent; cursor: pointer; }
+.desktop-projects__empty { padding: 8px; font-size: 12px; color: var(--muted-foreground); }
+.desktop-projects__form { display: flex; flex-direction: column; gap: 14px; }
+.desktop-projects__form input { inline-size: 100%; padding: 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--background); color: var(--foreground); }
+.desktop-sidebar .video-results { border-block-start: 1px solid var(--border); padding: 12px 4px; }
+.desktop-sidebar .video-results__source { min-inline-size: 0; overflow-wrap: anywhere; }
+.desktop-shell .os-ws-body { grid-template-columns: minmax(0, 1fr); }
+.desktop-shell .os-ws-header { grid-template-columns: auto minmax(0, 1fr) auto; min-block-size: 44px; padding: 4px 10px; }
+.desktop-shell .os-ws-header__left:empty { display: none; }
+.desktop-shell .os-ws-header__center { justify-self: start; }
+.desktop-shell .os-ws-header__right { flex-wrap: wrap; }
+.desktop-shell .os-ws-safety-strip { min-block-size: 24px; padding-block: 3px; font-size: 11px; }
+.desktop-shell .os-ws-main { min-inline-size: 0; }
+.desktop-shell .editor-view--natural .source-media-preview video { block-size: clamp(90px, 14vh, 180px); }
+.desktop-shell .editor-view--natural .program-monitor { block-size: clamp(120px, 18vh, 180px); }
+.desktop-shell .agent-chat-log > .status-card { padding: 10px; }
+.desktop-shell .agent-chat-log > .status-card::before { display: none; }
+.desktop-shell .agent-chat-log > .status-card p { margin-block: 0 6px; }
+.desktop-shell .editor-view--natural .source-track-timeline__lane { min-block-size: 24px; }
+.desktop-shell .agent-chat-panel__header { padding-block: 6px; }
+.desktop-shell .os-ws-header__right button { white-space: nowrap; }
+.desktop-shell button:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+@media (max-width: 1100px) { .desktop-sidebar { flex-basis: 200px; } .desktop-shell .os-ws-header { display: flex; flex-wrap: wrap; gap: 5px; } .desktop-shell .os-ws-header__right { margin-inline-start: auto; } }

@@ -7,7 +7,7 @@ import {
 } from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 
-import { cn, composeCuaSafeEscapeHandler, isolateModalKeyDown, type CuaProtectedKind } from './cn';
+import { cn, composeEscapeHandler, isolateModalKeyDown, type PortalSurfaceKind } from './cn';
 
 export type DialogProps = ComponentPropsWithoutRef<typeof DialogPrimitive.Root>;
 export type DialogTriggerProps = ComponentPropsWithoutRef<typeof DialogPrimitive.Trigger>;
@@ -15,12 +15,12 @@ export type DialogPortalProps = ComponentPropsWithoutRef<typeof DialogPrimitive.
 export type DialogCloseProps = ComponentPropsWithoutRef<typeof DialogPrimitive.Close>;
 
 export interface DialogOverlayProps extends ComponentPropsWithoutRef<typeof DialogPrimitive.Overlay> {
-  readonly cuaProtectedKind?: Extract<CuaProtectedKind, 'modal' | 'settings' | 'approval-ui'>;
+  readonly surfaceKind?: Extract<PortalSurfaceKind, 'modal' | 'settings' | 'approval-ui'>;
 }
 
 export interface DialogContentProps extends ComponentPropsWithoutRef<typeof DialogPrimitive.Content> {
   readonly container?: HTMLElement | null;
-  readonly cuaProtectedKind?: Extract<CuaProtectedKind, 'modal' | 'settings' | 'approval-ui'>;
+  readonly surfaceKind?: Extract<PortalSurfaceKind, 'modal' | 'settings' | 'approval-ui'>;
   readonly showCloseButton?: boolean;
   readonly closeLabel?: string;
 }
@@ -36,12 +36,11 @@ export const DialogPortal = DialogPrimitive.Portal;
 export const DialogClose = DialogPrimitive.Close;
 
 export const DialogOverlay = forwardRef<ElementRef<typeof DialogPrimitive.Overlay>, DialogOverlayProps>(
-  function DialogOverlay({ className, cuaProtectedKind = 'modal', ...props }, ref) {
+  function DialogOverlay({ className, surfaceKind = 'modal', ...props }, ref) {
     return (
       <DialogPrimitive.Overlay
         ref={ref}
         className={cn('os-ui-dialog__overlay', className)}
-        data-cua-protected={cuaProtectedKind}
         data-os-portal="dialog"
         {...props}
       />
@@ -56,7 +55,7 @@ export const DialogContent = forwardRef<ElementRef<typeof DialogPrimitive.Conten
       className,
       closeLabel = 'Close dialog',
       container,
-      cuaProtectedKind = 'modal',
+      surfaceKind = 'modal',
       onEscapeKeyDown,
       onKeyDown,
       showCloseButton = true,
@@ -71,14 +70,13 @@ export const DialogContent = forwardRef<ElementRef<typeof DialogPrimitive.Conten
 
     return (
       <DialogPortal {...(container !== undefined ? { container } : {})}>
-        <DialogOverlay cuaProtectedKind={cuaProtectedKind} />
+        <DialogOverlay surfaceKind={surfaceKind} />
         <DialogPrimitive.Content
           ref={ref}
           aria-modal="true"
           className={cn('os-ui-dialog__content', className)}
-          data-cua-protected={cuaProtectedKind}
           data-os-portal="dialog"
-          onEscapeKeyDown={composeCuaSafeEscapeHandler(onEscapeKeyDown)}
+          onEscapeKeyDown={composeEscapeHandler(onEscapeKeyDown)}
           onKeyDown={handleKeyDown}
           {...props}
         >

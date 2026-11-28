@@ -7,8 +7,6 @@
  * Design rules:
  * - Pure achromatic neutral dark surfaces, hairline 1px borders, 4px spacing rhythm
  * - Zero gradients, zero glow shadows, zero pill soup, zero emojis
- * - Fixed-width non-shrinking CUA Stop button participates in the root stacking
- *   context at `--os-z-cua-stop` (9999) so Dialog/Sheet/Dropdown never obscure it
  * - Zero horizontal overflow across 1280x800, 1440x900, 1920x1080 at 100/125/150% zoom
  */
 
@@ -137,47 +135,6 @@
   height: 26px;
   padding: 0 var(--os-space-2);
   font-size: var(--os-font-size-sm);
-}
-
-.os-ws-stop-btn {
-  position: relative;
-  z-index: var(--os-z-cua-stop);
-  pointer-events: auto;
-  box-sizing: border-box;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  width: 84px;
-  min-width: 84px;
-  height: 26px;
-  padding: 0 var(--os-space-2);
-  border-radius: var(--os-ui-radius-xs);
-  border: 1px solid var(--os-ui-danger-border);
-  background-color: var(--os-ui-surface-elevated);
-  color: var(--os-ui-danger-fg);
-  font-family: var(--os-font-sans);
-  font-size: var(--os-font-size-sm);
-  font-weight: 500;
-  white-space: nowrap;
-  flex-shrink: 0;
-  cursor: pointer;
-  transition: background-color 110ms ease, border-color 110ms ease;
-}
-
-.os-ws-stop-btn:hover {
-  background-color: var(--os-ui-danger-bg);
-  border-color: var(--os-ui-danger);
-}
-
-.os-ws-stop-btn:focus-visible {
-  outline: 2px solid var(--os-ui-danger);
-  outline-offset: 1px;
-}
-
-.os-ws-stop-btn[data-cua-active="true"] {
-  background-color: var(--os-ui-danger-bg);
-  border-color: var(--os-ui-danger);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -467,54 +424,7 @@
 /* Bridge existing editor/chat components onto the approved neutral palette. */
 body:has(.app-shell--workspace) { min-width: 0; min-height: 0; }
 .app-shell--workspace .app-shell__body { padding: 0; gap: 0; overflow: hidden; }
-.app-shell--workspace {
-  color: var(--os-ui-fg);
-  font-family: var(--os-font-sans);
-  --background: var(--os-ui-bg);
-  --foreground: var(--os-ui-fg);
-  --card: var(--os-ui-surface);
-  --card-foreground: var(--os-ui-fg);
-  --popover: var(--os-ui-surface-elevated);
-  --popover-foreground: var(--os-ui-fg);
-  --primary: var(--os-ui-cta-bg);
-  --primary-foreground: var(--os-ui-cta-fg);
-  --secondary: var(--os-ui-active);
-  --secondary-foreground: var(--os-ui-fg);
-  --muted: var(--os-ui-hover);
-  --muted-foreground: var(--os-ui-fg-muted);
-  --accent: var(--os-ui-active);
-  --accent-foreground: var(--os-ui-fg);
-  --border: var(--os-ui-border);
-  --border-strong: var(--os-ui-border-strong);
-  --input: var(--os-ui-surface);
-  --ring: var(--os-ui-focus-ring);
-  --text-strong: var(--os-ui-fg);
-  --text-weak: var(--os-ui-fg-muted);
-  --text-weaker: var(--os-ui-fg-faint);
-  --color-text: var(--os-ui-fg);
-  --color-muted: var(--os-ui-fg-muted);
-  --color-faint: var(--os-ui-fg-faint);
-  --color-primary: var(--os-ui-cta-bg);
-  --color-panel: var(--os-ui-surface);
-  --color-panel-strong: var(--os-ui-surface-elevated);
-  --color-line: var(--os-ui-border);
-  --color-line-strong: var(--os-ui-border-strong);
-  --surface-control: var(--os-ui-surface);
-  --surface-control-hover: var(--os-ui-hover);
-  --surface-control-selected: var(--os-ui-active);
-  --surface-hover: var(--os-ui-hover);
-  --surface-active: var(--os-ui-active);
-  --surface-inset: var(--os-ui-canvas);
-  --surface-inset-strong: var(--os-ui-bg);
-  --surface-raised: var(--os-ui-surface-elevated);
-  --surface-raised-soft: var(--os-ui-surface);
-  --line-subtle: var(--os-ui-border);
-  --line-control: var(--os-ui-border-strong);
-  --line-selected: var(--os-ui-focus-ring);
-  --focus-ring: var(--os-ui-focus-ring);
-  --font-body: var(--os-font-sans);
-  --font-display: var(--os-font-sans);
-}
+.app-shell--workspace { font-family: var(--os-font-sans); }
 
 @media (max-width: 1100px) {
   .os-ws-shell .os-ws-sidebar { width: 140px; }
@@ -1258,3 +1168,76 @@ body:has(.app-shell--workspace) { min-width: 0; min-height: 0; }
     gap: var(--os-space-3);
   }
 }
+
+/* Source inspection stays independent of the saved edit and Shorts start gate. */
+.natural-source-workspace { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.natural-source-workspace__body { flex: 1; min-height: 160px; overflow: auto; }
+.editor-view--natural { display: flex; flex-direction: column; gap: 8px; overflow: auto; min-block-size: 0; }
+.editor-preview { display: flex; flex-direction: column; min-inline-size: 0; min-block-size: 0; }
+.editor-preview > .program-monitor { display: grid; flex: 1 1 auto; min-block-size: 0; }
+.editor-preview .editor-preview-frame { background: #000; }
+.editor-preview__toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 12px; }
+.editor-preview__toolbar [role="group"] { display: flex; gap: 4px; }
+.editor-preview__toolbar button { min-block-size: 30px; padding-inline: 10px; border: 1px solid var(--os-ui-border); border-radius: 5px; color: var(--os-ui-fg); background: var(--os-ui-surface); }
+.editor-preview__toolbar button[aria-pressed="true"] { background: var(--os-ui-active); }
+.editor-view--natural > .editor-preview { flex: 0 0 auto; }
+.editor-view--natural .program-monitor { flex: 0 0 auto; block-size: clamp(160px, 22vh, 240px); }
+.editor-view--natural .source-media-preview video { block-size: clamp(140px, 20vh, 220px); }
+.natural-editing-context { flex: 0 0 164px; min-block-size: 100px; overflow: auto; }
+.editor-view.editor-view--precision { display: flex; flex-direction: column; }
+.editor-view--precision > .editor-preview { flex: 1 1 auto; }
+.rea-editor-host[data-open='true'] ~ .editor-preview { display: none; }
+.rea-editor-host > button { min-block-size: 30px; padding: 4px 10px; color: var(--os-ui-fg); background: var(--os-ui-surface); border: 1px solid var(--os-ui-border); border-radius: 4px; }
+.editor-floating-panel__body > .editor-preview { block-size: 100%; inline-size: 100%; }
+.agent-chat-panel-shell.agent-chat-panel-shell--inline { inline-size: 100%; max-inline-size: none; min-inline-size: 0; block-size: auto; min-block-size: 300px; max-block-size: none; flex: 1 0 320px; overflow: visible; }
+.agent-chat-panel-shell--inline .agent-chat-panel { display: flex; flex-direction: column; min-block-size: 300px; border-radius: 0; }
+.agent-chat-panel-shell--inline .agent-chat-log { flex: 1 1 60px; min-block-size: 48px; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.agent-chat-panel-shell--inline .agent-chat-panel__header { padding-block: 4px; }
+.agent-chat-panel-shell--inline .agent-chat-panel__form { flex: 0 0 auto; padding-block: 6px; }
+.agent-chat-panel-shell--inline .agent-chat-panel__sessions { padding-block: 2px; }
+.app-shell--workspace .app-shell__body.app-shell__body--natural { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(240px, 1fr) minmax(220px, 38%); gap: 0; }
+.app-shell__body--natural > .agent-chat-panel-shell--inline { min-block-size: 0; block-size: 100%; }
+.app-shell__body--natural .agent-chat-panel { min-block-size: 0; }
+.video-results { display: flex; flex-direction: column; gap: 8px; min-inline-size: 0; padding-block: 8px; }
+.video-results header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.video-results h2, .video-results h3 { margin: 0; font-size: 12px; }
+.video-results h3 { margin-block-start: 10px; color: var(--os-ui-fg-muted); }
+.video-results label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; }
+.video-results select { inline-size: 100%; min-inline-size: 0; }
+.video-results button, .video-results select { min-block-size: 30px; border: 1px solid var(--os-ui-border); border-radius: 5px; color: var(--os-ui-fg); background: var(--os-ui-surface); overflow-wrap: anywhere; }
+.video-results__source { text-align: start; padding: 6px 8px; }
+.video-results__source[aria-pressed="true"] { background: var(--os-ui-active); }
+.video-results__item, .video-results__job { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--os-ui-border); border-radius: 6px; font-size: 11px; }
+.video-results__item > div { display: flex; flex-wrap: wrap; gap: 6px; }
+.playback-transport { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 6px; }
+.playback-transport button { display: inline-flex; align-items: center; justify-content: center; inline-size: 32px; min-block-size: 32px; padding: 5px; color: var(--os-ui-fg); background: var(--os-ui-hover); border: 1px solid var(--os-ui-border-strong); border-radius: 4px; cursor: pointer; }
+.playback-transport button:disabled { opacity: .45; cursor: default; }
+.playback-transport svg { display: block; pointer-events: none; }
+.playback-transport__time { margin-inline-end: auto; font-variant-numeric: tabular-nums; font-size: 11px; color: var(--os-ui-fg-muted); }
+.source-media-preview { flex: 0 0 auto; min-width: 0; padding: 12px 16px; border-bottom: 1px solid var(--os-ui-border); background: var(--os-ui-surface); }
+.source-media-preview__header { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 8px; }
+.source-media-preview__header h2 { font-size: var(--os-font-size-sm); margin: 0; }
+.source-media-preview__header select { min-width: 0; max-width: 65%; min-height: 28px; color: var(--os-ui-fg); background: var(--os-ui-canvas); }
+.source-media-preview__header span { color: var(--os-ui-fg-muted); font-size: var(--os-font-size-xs); }
+.source-media-preview video { display: block; width: 100%; height: clamp(140px, 26vh, 300px); background: #000; object-fit: contain; }
+.source-media-preview__ruler { display: flex; justify-content: space-between; gap: 12px; font-variant-numeric: tabular-nums; color: var(--os-ui-fg-muted); }
+
+.source-media-preview__transport { display: flex; align-items: center; gap: 8px; padding: 8px 0; flex-wrap: wrap; }
+.source-media-preview__transport button { display: inline-flex; align-items: center; justify-content: center; width: 32px; min-height: 32px; padding: 5px; flex: 0 0 auto; color: var(--os-ui-fg); background: var(--os-ui-hover); border: 1px solid var(--os-ui-border-strong); border-radius: 4px; cursor: pointer; }
+.source-media-preview__transport button:hover:not(:disabled) { background: var(--os-ui-active); }
+.source-media-preview__transport svg { display: block; flex: 0 0 auto; pointer-events: none; }
+.source-media-preview__transport button:disabled { opacity: .45; cursor: default; }
+.source-media-preview__transport span { margin-inline-start: auto; color: var(--os-ui-fg-muted); font-size: var(--os-font-size-xs); font-variant-numeric: tabular-nums; }
+.source-track-timeline { font-size: var(--os-font-size-xs); padding-bottom: 4px; }
+.source-track-timeline__row { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 8px; align-items: center; }
+.source-track-timeline__clock { min-width: 0; }
+.source-track-timeline__clock input { display: block; margin: 0; width: 100%; min-height: 28px; accent-color: var(--os-ui-cta-bg); }
+.source-track-timeline__label { color: var(--os-ui-fg-secondary); }
+.source-track-timeline__lanes { display: flex; flex-direction: column; gap: 4px; }
+.source-track-timeline__lane { position: relative; min-height: 32px; background: var(--os-ui-canvas); border: 1px solid var(--os-ui-border); overflow: hidden; }
+.source-track-timeline__clip { position: absolute; inset-block: 2px; min-width: 1px; padding: 2px 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: start; color: var(--os-ui-fg); background: color-mix(in srgb, #507184 20%, var(--os-ui-canvas)); border: 1px solid #507184; border-radius: 3px; cursor: pointer; }
+[data-source-track="audio"] .source-track-timeline__clip { background: color-mix(in srgb, #547660 20%, var(--os-ui-canvas)); border-color: #547660; }
+[data-source-track="subtitle"] .source-track-timeline__clip { background: color-mix(in srgb, #80684b 20%, var(--os-ui-canvas)); border-color: #80684b; }
+.source-track-timeline__empty { display: block; padding: 8px; color: var(--os-ui-fg-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.source-track-timeline__playhead { position: absolute; inset-block: 0; width: 1px; background: var(--os-ui-cta-bg); pointer-events: none; }
+.source-media-preview__transport button:focus-visible, .source-track-timeline__clip:focus-visible { outline: 2px solid var(--os-ui-fg); outline-offset: -2px; z-index: 1; }

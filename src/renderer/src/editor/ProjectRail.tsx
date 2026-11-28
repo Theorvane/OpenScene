@@ -41,26 +41,7 @@ export function ProjectRail({ editor }: ProjectRailProps): ReactElement {
         <button className="button button--ghost" type="button" onClick={() => void editor.refreshProjects()} disabled={editor.isBusy}>Refresh</button>
       </div>
 
-      <label className="field-label">
-        New project name
-        <input value={editor.newProjectName} onChange={onNameChange} placeholder="Launch reel" />
-      </label>
-      <button className="button button--primary" type="button" onClick={() => void editor.createProject()} disabled={editor.isBusy}>Create project</button>
-
-      <div className="project-list" aria-label="Saved local projects">
-        {editor.projects.map((project) => (
-          <button
-            className={`project-card${editor.project?.id === project.id ? ' project-card--selected' : ''}`}
-            key={project.id}
-            type="button"
-            onClick={() => void editor.openProject(project.id)}
-            disabled={editor.isBusy}
-          >
-            <ProjectCover projectId={project.id} updatedAt={project.updatedAt} />
-            <span className="project-card__info"><strong>{project.name}</strong><small>{editor.project?.id === project.id ? 'OPEN · ' : ''}{formatTimestamp(project.updatedAt)}</small></span>
-          </button>
-        ))}
-      </div>
+      <p className="desktop-projects__empty">프로젝트 관리는 왼쪽 사이드바에서 할 수 있습니다.</p>
 
       {editor.project !== null && (
         <div className="runtime-card" role="status">

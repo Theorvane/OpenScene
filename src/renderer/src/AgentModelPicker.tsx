@@ -12,6 +12,7 @@ type AgentModelPickerProps = {
   /** Stored effort for the active model, or undefined for the provider default. */
   readonly reasoningEffort: ReasoningEffort | undefined;
   readonly onReasoningEffortChange: (effort: ReasoningEffort | undefined) => void;
+  readonly onOpenSettings?: (() => void) | undefined;
 };
 
 const POPOVER_WIDTH_PX = 300;
@@ -22,8 +23,8 @@ const POPOVER_WIDTH_PX = 300;
  * their provider is connected in Settings. The popover renders through a portal
  * because the chat panel and the prompt card both clip overflow.
  */
-export function AgentModelPicker({ reasoningEffort, onReasoningEffortChange }: AgentModelPickerProps): ReactElement {
-  const { selectedModel, setSelectedModelId } = useAiDomainModel();
+export function AgentModelPicker({ reasoningEffort, onReasoningEffortChange, onOpenSettings }: AgentModelPickerProps): ReactElement {
+  const { selectedModel, setSelectedModelId, models } = useAiDomainModel();
   const { credentialStatus } = useLlmModel();
   const { isModelVisible } = useModelVisibility();
   const chatGptAuth = useChatGptAuth();
@@ -39,7 +40,8 @@ export function AgentModelPicker({ reasoningEffort, onReasoningEffortChange }: A
     activeModelId: activeModel.id,
     credentialStatus,
     chatGptConnected: chatGptAuth.isConnected,
-    isModelVisible
+    isModelVisible,
+    ...(models === undefined ? {} : { models })
   });
 
   // Anchor the portal popover above the trigger, clamped into the viewport.
@@ -81,6 +83,7 @@ export function AgentModelPicker({ reasoningEffort, onReasoningEffortChange }: A
       aria-label="Edit Agent models by provider"
       style={anchorStyle}
     >
+      {groups.length === 0 && <div className="agent-model-picker__empty"><p>모델 제공자 연결이 필요합니다.</p>{onOpenSettings && <button type="button" onClick={() => { setIsOpen(false); onOpenSettings(); }}>제공자 설정 열기</button>}</div>}
       {groups.map((group) => {
         const status = agentModelGroupStatus(group, { credentialStatus, chatGptConnected: chatGptAuth.isConnected });
         const connected = status !== 'Not connected';
@@ -118,17 +121,7 @@ export function AgentModelPicker({ reasoningEffort, onReasoningEffortChange }: A
           </div>
         );
       })}
-      {groups.length === 0 ? (
-        /* The local engine is always listed, so an empty list means the
-           running build predates this code or the catalog failed to load. */
-        <p className="agent-model-picker__hint">
-          No models resolved — restart the app to pick up the current build.
-        </p>
-      ) : groups.every((group) => group.models[0]?.executionPath === 'local') ? (
-        <p className="agent-model-picker__hint">
-          Connect a provider in Settings → Providers to add its models here.
-        </p>
-      ) : null}
+
     </div>
   );
 

@@ -46,9 +46,10 @@ export interface WorkspaceShellProps {
   readonly safety: WorkspaceSafetyState;
   readonly canUndo?: boolean;
   readonly onUndo?: () => void;
+  readonly canRedo?: boolean;
+  readonly onRedo?: () => void;
   readonly onSave?: () => void;
   readonly saveScopeLabel?: string;
-  readonly onStop: () => void;
   readonly onOpenAssets?: () => void;
   readonly onOpenSettings?: () => void;
   readonly assetsDrawerContent?: ReactNode;
@@ -58,6 +59,13 @@ export interface WorkspaceShellProps {
   readonly children: ReactNode;
   /** Keep a live editor mounted when only its presentation changes. */
   readonly persistentContent?: boolean;
+  readonly videoList?: ReactNode;
+  readonly showProjectIdentity?: boolean;
+  readonly showSettingsShortcut?: boolean;
+  readonly onProjectSettings?: (() => void) | undefined;
+  readonly actions?: ReactNode;
+  readonly showSidebar?: boolean;
+  readonly showProjectMenu?: boolean;
 }
 
 function BrandMark(): ReactElement {
@@ -115,21 +123,6 @@ function MoreIcon(): ReactElement {
   );
 }
 
-function describeCuaStatus(safety: WorkspaceSafetyState): { readonly label: string; readonly dotClass: string } {
-  switch (safety.cuaStatus) {
-    case 'acting':
-      return { label: safety.cuaLabel ?? '자동 조작 실행 중', dotClass: 'os-ws-dot os-ws-dot--info' };
-    case 'ready':
-      return { label: safety.cuaLabel ?? '자동 조작 준비됨', dotClass: 'os-ws-dot os-ws-dot--ok' };
-    case 'stopping':
-      return { label: safety.cuaLabel ?? '자동 조작 중지 중', dotClass: 'os-ws-dot os-ws-dot--warn' };
-    case 'cleanup-failed':
-      return { label: safety.cuaLabel ?? '입력 정리 실패 · 재실행 잠김', dotClass: 'os-ws-dot os-ws-dot--danger' };
-    default:
-      return { label: safety.cuaLabel ?? '자동 조작 대기', dotClass: 'os-ws-dot' };
-  }
-}
-
 export function WorkspaceShell({
   activeCandidateId = null,
   activeProjectId,
@@ -147,10 +140,18 @@ export function WorkspaceShell({
   onSave,
   onSelectCandidate,
   onSelectProject,
-  onStop,
   onUndo,
+  canRedo = false,
+  onRedo,
   projects,
   persistentContent = false,
+  videoList,
+  showProjectIdentity = true,
+  showSettingsShortcut = true,
+  onProjectSettings,
+  actions,
+  showSidebar = true,
+  showProjectMenu = true,
   safety,
   saveScopeLabel,
   showCandidateNavigation = true,
@@ -161,10 +162,6 @@ export function WorkspaceShell({
 
   const activeProject = projects.find((project) => project.id === activeProjectId) ?? null;
   const projectDisplayName = activeProject?.name ?? '새 프로젝트';
-  const cuaDisplay = describeCuaStatus(safety);
-  const isCuaActive =
-    safety.cuaStatus === 'acting' || safety.cuaStatus === 'stopping' || safety.cuaStatus === 'cleanup-failed';
-
   const activeTabValue = mode === 'intake' ? '' : mode;
 
   const handleOpenAssets = (): void => {
@@ -193,8 +190,9 @@ export function WorkspaceShell({
         className="os-ws-shell"
         data-workspace-mode={mode}
       >
-        <header className="os-ws-header" data-cua-protected="chrome-menu" data-cua-protected-id="workspace-header">
+        <header className="os-ws-header">
           <div className="os-ws-header__left">
+            {showProjectIdentity && <>
             <span className="os-ws-brand">
               <BrandMark />
               <span>OpenScene</span>
@@ -214,6 +212,7 @@ export function WorkspaceShell({
                 {activeProject?.sourceFileName ?? projectDisplayName}
               </TooltipContent>
             </Tooltip>
+            </>}
           </div>
 
           <div className="os-ws-header__center">
@@ -231,7 +230,7 @@ export function WorkspaceShell({
           </div>
 
           <div className="os-ws-header__right">
-            <DropdownMenu>
+            {showProjectMenu && <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
                   variant="ghost"
@@ -246,6 +245,7 @@ export function WorkspaceShell({
               <DropdownMenuContent align="end">
                 <DropdownMenuLabel>프로젝트 작업</DropdownMenuLabel>
                 <DropdownMenuItem onSelect={onNewVideo}>새 영상 시작</DropdownMenuItem>
+                {onProjectSettings && <DropdownMenuItem onSelect={onProjectSettings}>프로젝트 설정</DropdownMenuItem>}
                 {onDuplicateProject !== undefined && (
                   <DropdownMenuItem onSelect={onDuplicateProject}>프로젝트 복제</DropdownMenuItem>
                 )}
@@ -256,7 +256,7 @@ export function WorkspaceShell({
                   </>
                 )}
               </DropdownMenuContent>
-            </DropdownMenu>
+            </DropdownMenu>}
 
             <Button
               variant="ghost"
@@ -268,8 +268,9 @@ export function WorkspaceShell({
               data-testid="workspace-undo-btn"
             >
               <UndoIcon />
-              <span>취소</span>
+              <span>실행 취소</span>
             </Button>
+            {onRedo && <Button variant="ghost" size="sm" disabled={!canRedo} onClick={onRedo} aria-label="다시 실행" data-testid="workspace-redo-btn">↪</Button>}
 
             <Button
               variant="primary"
@@ -282,19 +283,8 @@ export function WorkspaceShell({
             >
               저장
             </Button>
+            {actions}
 
-            <button
-              type="button"
-              className="os-ws-stop-btn"
-              data-cua-stop="true"
-              data-cua-protected="stop-button"
-              data-cua-active={isCuaActive ? 'true' : 'false'}
-              data-testid="workspace-cua-stop-btn"
-              onClick={onStop}
-            >
-              <StopIcon />
-              <span>중지</span>
-            </button>
           </div>
         </header>
 
@@ -318,17 +308,13 @@ export function WorkspaceShell({
             )}
           </div>
 
-          <span className="os-ws-safety-item os-ws-safety-item--muted">
-            <span className={cuaDisplay.dotClass} aria-hidden="true" />
-            <span className="os-ui-truncate">{cuaDisplay.label}</span>
-          </span>
         </div>
 
         <div className="os-ws-body">
-          <aside className="os-ws-sidebar" aria-label="프로젝트 및 후보 탐색" data-cua-protected="chrome-menu" data-cua-protected-id="workspace-sidebar">
+          {showSidebar && <aside className="os-ws-sidebar" aria-label="프로젝트 및 후보 탐색">
             <ScrollArea className="os-ws-sidebar__scroll">
               <div className="os-ws-sidebar__inner">
-                <section className="os-ws-sidebar__section">
+                {videoList ?? <section className="os-ws-sidebar__section">
                   <div className="os-ws-sidebar__section-header">
                     <span className="os-ws-sidebar__heading">프로젝트</span>
                     <Button
@@ -360,7 +346,7 @@ export function WorkspaceShell({
                       </button>
                     ))
                   )}
-                </section>
+                </section>}
 
                 {showCandidateNavigation && <section className="os-ws-sidebar__section">
                   <div className="os-ws-sidebar__section-header">
@@ -402,7 +388,7 @@ export function WorkspaceShell({
                 <FolderIcon />
                 <span>자산</span>
               </Button>
-              <Button
+              {showSettingsShortcut && <Button
                 variant="ghost"
                 size="sm"
                 className="os-ws-sidebar__footer-btn"
@@ -411,9 +397,9 @@ export function WorkspaceShell({
               >
                 <SlidersIcon />
                 <span>설정 · Jev</span>
-              </Button>
+              </Button>}
             </div>
-          </aside>
+          </aside>}
 
           <main className="os-ws-main">
             {mode === 'intake' && children}
@@ -451,7 +437,7 @@ export function WorkspaceShell({
 
         {settingsDrawerContent !== undefined && (
           <Sheet open={settingsOpen} onOpenChange={setSettingsOpen}>
-            <SheetContent side="right" cuaProtectedKind="settings">
+            <SheetContent side="right" surfaceKind="settings">
               <SheetHeader>
                 <SheetTitle>설정 · Jev</SheetTitle>
                 <SheetDescription>로컬 모델, 전사 엔진, Jev 연결 설정을 관리합니다.</SheetDescription>

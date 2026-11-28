@@ -107,7 +107,7 @@ describe('evidence-grounded shorts selection', () => {
     try {
       const address = server.address();
       if (!address || typeof address === 'string') throw new Error('Missing local fixture address');
-      const model = createAgentChatModel([])({ modelId: 'fixture-model', ollamaBaseUrl: `http://127.0.0.1:${address.port}`, openAiAuthMode: undefined, reasoningEffort: undefined });
+      const model = createAgentChatModel([])({ modelId: 'local_ollama/fixture-model', ollamaBaseUrl: `http://127.0.0.1:${address.port}`, openAiAuthMode: undefined, reasoningEffort: undefined });
       const result = await selectShortsCandidates(fixture, createShortsCandidateProvider(model), signal());
       expect(result.candidates[0]?.endMs).toBe(20000);
       expect(requestBody.tools).toBeUndefined();
@@ -139,7 +139,7 @@ describe('evidence-grounded shorts selection', () => {
     try {
       const address = server.address();
       if (!address || typeof address === 'string') throw new Error('Missing fixture port');
-      const model = createAgentChatModel([])({ modelId: 'fixture-model', ollamaBaseUrl: `http://127.0.0.1:${address.port}`, openAiAuthMode: undefined, reasoningEffort: undefined });
+      const model = createAgentChatModel([])({ modelId: 'local_ollama/fixture-model', ollamaBaseUrl: `http://127.0.0.1:${address.port}`, openAiAuthMode: undefined, reasoningEffort: undefined });
       const controller = new AbortController();
       const provider = createShortsCandidateProvider(model, { timeoutMs: mode === 'timeout' ? 100 : 2000 });
       // Await the actual provider promise, not selection's cancellation race.

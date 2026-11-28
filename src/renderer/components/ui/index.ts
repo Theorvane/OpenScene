@@ -1,12 +1,12 @@
 export {
   cn,
-  composeCuaSafeEscapeHandler,
+  composeEscapeHandler,
   isEditableElement,
   isolateMenuKeyDown,
   isolateModalKeyDown,
   OS_Z_INDEX
 } from './cn';
-export type { ClassValue, CuaProtectedKind, OsPortalKind } from './cn';
+export type { ClassValue, PortalSurfaceKind, OsPortalKind } from './cn';
 
 export { Button } from './Button';
 export type { ButtonProps, ButtonSize, ButtonVariant } from './Button';

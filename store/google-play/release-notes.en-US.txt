@@ -1,3 +1,0 @@
-OpenScene editing update
-
-Edit imported media in Timeline or connect clips in Canvas. Both views share the saved sequence. The editing assistant works with your footage. Requests to a connected chat provider may incur charges on your account.

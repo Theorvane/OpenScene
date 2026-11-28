@@ -7,20 +7,8 @@ const CODEX_MODEL_ID = 'openai/gpt-5.3-codex-spark';
 const allVisible = (): boolean => true;
 
 describe('Edit Agent model picker groups', () => {
-  it('always lists the local engine, so the picker is never empty with nothing connected', () => {
-    const groups = buildAgentModelGroups({
-      activeModelId: LOCAL_MODEL_ID,
-      credentialStatus: {},
-      chatGptConnected: false,
-      isModelVisible: allVisible
-    });
-
-    expect(groups.length).toBeGreaterThan(0);
-    const local = groups.find((group) => group.providerId === 'local_ollama');
-    expect(local?.models.map((model) => model.id)).toContain(LOCAL_MODEL_ID);
-    expect(agentModelGroupStatus(local!, { credentialStatus: {}, chatGptConnected: false })).toBe('Local');
-    // Nothing else is reachable without a connection.
-    expect(groups.some((group) => group.providerId === 'openai')).toBe(false);
+  it('shows no model when no provider is connected', () => {
+    expect(buildAgentModelGroups({ activeModelId: '', credentialStatus: {}, chatGptConnected: false, isModelVisible: allVisible })).toEqual([]);
   });
 
   it('adds the Codex models under OpenAI once a ChatGPT sign-in is connected', () => {
@@ -53,10 +41,10 @@ describe('Edit Agent model picker groups', () => {
     expect(agentModelGroupStatus(openai!, { credentialStatus, chatGptConnected: false })).toBe('Connected');
   });
 
-  it('keeps the active model listed even when every model is hidden', () => {
+  it('keeps the explicitly selected connected model listed when hidden', () => {
     const groups = buildAgentModelGroups({
       activeModelId: CODEX_MODEL_ID,
-      credentialStatus: {},
+      credentialStatus: { openaiApiKey: true },
       chatGptConnected: false,
       isModelVisible: () => false
     });

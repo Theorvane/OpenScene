@@ -40,11 +40,11 @@ npm run dev
 
 - `vitest.json`: 개별 테스트 결과와 통계.
 - `full-tests.log`, `previously-failed-tests.log`: 전체 실행과 미디어 회귀 검사 로그.
-- `npm-ci.log`, `mobile-npm-ci.log`: 의존성 준비 결과.
+- `npm-ci.log`: 의존성 준비 결과.
 - `tool-versions.txt`, `image-id.txt`: 실행 환경 식별자.
 - `block-output-probe.json`, `block-look.json`, `block-contact-sheet.png`: 선택적 로컬 QA 파일 검사.
 - REA 결과: [자체 빌드 분석 가이드](rea-editor-evidence.md) 참조.
 
 스크립트는 `.local-runtimes/block-workflow-result.mp4`가 있을 때만 그 파일의 probe와 프레임 시트를 만든다. 최신 캔버스 결과처럼 다른 로컬 출력은 별도의 probe/look 실행으로 확인해야 한다. 다른 체크아웃에 없는 QA 파일을 검사한 것으로 보고하지 않는다.
 
-최근 기록은 [캔버스·내보내기 검증](canvas-export-verification.md)에 리비전과 함께 관리한다. `1d68304`에서는 1,191개 테스트가 실패·건너뜀 없이 통과했다. 모바일 타입 검사는 포함되지만 실기기 검증은 별도다.
+최근 기록은 [캔버스·내보내기 검증](canvas-export-verification.md)에 리비전과 함께 관리한다. `1d68304`에서는 1,191개 테스트가 실패·건너뜀 없이 통과했다. 현재 검증 경로는 PC 전용이며 모바일 검증은 중단했다.

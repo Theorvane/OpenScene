@@ -41,7 +41,7 @@ beforeEach(async () => {
   Object.defineProperty(window, 'videoTool', { configurable: true, value: {
     listProjects: async () => ({ ok: true, value: [] }),
     openProject: async ({ projectId }: { projectId: string }) => ({ ok: true, value: snapshot(projectId) }),
-    deleteProject: async () => ({ ok: true, value: null }),
+    deleteProject: async () => ({ ok: true, value: { deleted: true } }),
     detachVideoAudio: async () => ({ ok: true, value: { asset: asset('audio') } }),
     onProjectTimelineChanged: () => () => {}, saveTimeline: save
   } });
@@ -73,7 +73,6 @@ it('imports through the mounted host into one real history transaction, preservi
   await act(async () => button('Local shot analysis').click());
   const region = document.querySelector<HTMLElement>('[aria-label="Local analysis tools"]')!;
   expect(region.tabIndex).toBe(0);
-  expect(region.dataset.cuaProtected).toBe('chrome-menu');
   const toggle = button('Local shot analysis');
   expect(toggle.getAttribute('aria-expanded')).toBe('true');
   expect(document.getElementById(toggle.getAttribute('aria-controls')!)).not.toBeNull();

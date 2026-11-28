@@ -1,7 +1,6 @@
-import { useEffect, useMemo, useState, type CSSProperties, type ReactElement, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactElement, type ReactNode } from 'react';
 import { ReaEditorAnalysisHost } from "./ReaEditorAnalysisHost";
 import { EditorWorkspace } from '../../../../external/opencut/apps/web/src/components/editor/editor-workspace';
-import { EditorHeader } from './EditorWorkbenchHeader';
 
 import { AssetMetadataProbeHost } from './AssetMetadataProbeHost';
 import { EDITOR_INSPECTOR_DOCK_TAB_IDS, getDefaultEditorDockTabs, getDefaultEditorLeftDockTabId } from './dockTabs';
@@ -27,7 +26,8 @@ import {
 } from './editorLayoutPreferences';
 import { ExportPanel } from './ExportPanel';
 import { InspectorPanel } from './InspectorPanel';
-import { ProgramMonitor } from './ProgramMonitor';
+import { EditorPreview } from './EditorPreview';
+import { VideoResultsList } from './VideoResultsList';
 import { ProjectRail } from './ProjectRail';
 import { TimelineCanvas } from './TimelineCanvas';
 import { TimelineEditorLeftDock } from './TimelineEditorLeftDock';
@@ -38,23 +38,22 @@ import { useEditorShortcutPreference } from './useEditorShortcutPreference';
 import type { TimelineEditorController } from './useTimelineEditor';
 import { useTimelineShortcuts } from './useTimelineShortcuts';
 import { useAgentChat } from '../AgentChatContext';
-import { useCuaActing, useCuaOverlay } from '../cua/useCuaOverlay';
-import { WorkspaceShell, WorkspaceIntakeView, NaturalStudioView } from '../../components/workspace';
+import { WorkspaceShell } from '../../components/workspace';
 import '../../styles/workspace-shell.css';
-import { useTheme } from '../ThemeProvider';
-import { THEME_PRESETS, type ThemePresetId } from '../theme';
 import type { TabDefinition } from '../ui';
 import { VideoConnectionCanvas } from './VideoConnectionCanvas';
-import { ShortsReviewWorkspace, type ShortsOpenEditorRequest } from './shorts/ShortsReviewWorkspace';
-import { writeExportFramePreference } from './exportFramePreference';
 import './videoCanvas.css';
 import './editorWorkbench.css';
 
 export type InspectorTabId = (typeof EDITOR_INSPECTOR_DOCK_TAB_IDS)[number];
 
-type EditorViewMode = 'timeline' | 'canvas' | 'shorts';
+export type EditorViewMode = 'timeline' | 'canvas' | 'shorts';
 
 type TimelineEditorProps = {
+  readonly sourcePreview?: boolean;
+  readonly onSourcePreviewChange?: (source: boolean) => void;
+  readonly editorView?: EditorViewMode;
+  readonly onEditorViewChange?: (view: EditorViewMode) => void;
   readonly active?: boolean;
   readonly editor: TimelineEditorController;
   readonly onProjectSettings?: () => void;
@@ -111,16 +110,13 @@ function getDefaultInspectorTabId({ selectedAssetId, selectedClipId }: Inspector
   return 'selection';
 }
 
-export function TimelineEditor({ active = true, editor, onProjectSettings, onOpenSettings, onProjects, onSelectProject }: TimelineEditorProps): ReactElement {
-  const [editorView, setEditorView] = useState<EditorViewMode>('shorts');
-  const [shortsReturnContext, setShortsReturnContext] = useState<ShortsOpenEditorRequest | null>(null);
-  const [restoredShortsTarget, setRestoredShortsTarget] = useState<{
-    readonly sourceProjectId: string;
-    readonly resultProjectId: string;
-    readonly jobId: string;
-    readonly candidateId: string;
-    readonly token: number;
-  } | null>(null);
+export function TimelineEditor({ sourcePreview, onSourcePreviewChange, editorView: controlledView, onEditorViewChange, active = true, editor, onProjectSettings, onOpenSettings, onProjects, onSelectProject }: TimelineEditorProps): ReactElement {
+  const [localView, setLocalView] = useState<EditorViewMode>('shorts');
+  const editorView = controlledView ?? localView;
+  const [previewChoice, setPreviewChoice] = useState<{ projectId: string | null; source: boolean }>({ projectId: null, source: false });
+  const inspectingSource = (editor.project?.assets.some(asset => asset.kind === 'video') ?? false) &&
+    (!(editor.project?.timeline.tracks.some(track => track.clips.length > 0) ?? false) || (sourcePreview ?? (previewChoice.projectId === editor.project?.id && previewChoice.source)));
+  const setInspectingSource = useCallback((source: boolean) => { setPreviewChoice({ projectId: editor.project?.id ?? null, source }); onSourcePreviewChange?.(source); }, [editor.project?.id, onSourcePreviewChange]);
   const canvasMode = editorView === 'canvas';
   const shortsMode = editorView === 'shorts';
   const fullStageMode = canvasMode || shortsMode;
@@ -146,53 +142,18 @@ export function TimelineEditor({ active = true, editor, onProjectSettings, onOpe
   }, []);
   const chat = useAgentChat();
   const { isBusy: isAgentBusy, pendingApproval } = chat;
-  // Decide synchronously at project entry so an empty project never briefly
-  // activates its review effects before intake is shown. Imports stay in intake
-  // until the user's explicit Start; the review registry itself stays mounted.
-  const hadMediaOnEntry = useMemo(() => (editor.project?.assets.length ?? 0) > 0, [editor.project?.id]);
-  const [completedIntakeProjectId, setCompletedIntakeProjectId] = useState<string | null>(null);
-  const intakeComplete = editor.project !== null && (hadMediaOnEntry || completedIntakeProjectId === editor.project.id);
-  const cua = useCuaOverlay();
-  const isCuaActing = useCuaActing();
-  const { mode: themeMode, preset, setPreset, toggleTheme } = useTheme();
   const [leftDockTabId, setLeftDockTabId] = useState<EditorLeftDockTabId>('project');
   const [inspectorTabId, setInspectorTabId] = useState<InspectorTabId>('selection');
   const { layoutPreference, updateLayoutPreference } = useEditorLayoutPreference();
   const { shortcutPreferences } = useEditorShortcutPreference();
   const selectEditorView = (view: EditorViewMode): void => {
-    setEditorView(view);
+    setLocalView(view);
+    onEditorViewChange?.(view);
     try {
       localStorage.setItem('openvideo-editor-view', view);
     } catch {
       // The selected view remains usable when browser storage is unavailable.
     }
-  };
-  const openMaterializedShortInEditor = async (request: ShortsOpenEditorRequest): Promise<void> => {
-    if (editor.hasUnsavedTimeline && !(await editor.saveTimeline())) return;
-    // Refresh the project list before opening the newly materialized project so
-    // App.tsx's tab pruning sees it as an existing project.
-    await editor.refreshProjects();
-    writeExportFramePreference(request.resultProjectId, 'portrait');
-    const opened = await editor.openProject(request.resultProjectId);
-    if (!opened) return;
-    setShortsReturnContext(request);
-    selectEditorView('timeline');
-  };
-  const returnToShortsReview = async (): Promise<void> => {
-    if (shortsReturnContext === null) return;
-    if (editor.hasUnsavedTimeline && !(await editor.saveTimeline())) return;
-    const context = shortsReturnContext;
-    const opened = await editor.openProject(context.sourceProjectId);
-    if (!opened) return;
-    setShortsReturnContext(null);
-    setRestoredShortsTarget((current) => ({
-      sourceProjectId: context.sourceProjectId,
-      resultProjectId: context.resultProjectId,
-      jobId: context.jobId,
-      candidateId: context.candidateId,
-      token: (current?.token ?? 0) + 1
-    }));
-    selectEditorView('shorts');
   };
   const inspectorTabs = getInspectorTabs(editor);
   const projectIdentity = editor.project?.id ?? '';
@@ -220,6 +181,7 @@ export function TimelineEditor({ active = true, editor, onProjectSettings, onOpe
   };
 
   const workspaceClassName = [
+    'oc-editor-host--unified',
     canvasMode ? 'oc-editor-host--canvas' : null,
     shortsMode ? 'oc-editor-host--shorts' : null,
     fullStageMode || !layoutPreference.leftDockVisible ? 'oc-editor-host--left-hidden' : null,
@@ -275,8 +237,8 @@ export function TimelineEditor({ active = true, editor, onProjectSettings, onOpe
 
   useTimelineShortcuts({
     canSplit: editor.selectedClip !== null,
-    isLocked: isAgentBusy || fullStageMode,
-    cuaActing: isCuaActing,
+    isLocked: isAgentBusy || fullStageMode || !active,
+    timelinePlaybackAvailable: active && !inspectingSource,
     clearSelection: editor.clearSelection,
     deleteSelectedClip: editor.deleteSelectedClip,
     duplicateSelectedClip: editor.duplicateSelectedClip,
@@ -298,6 +260,7 @@ export function TimelineEditor({ active = true, editor, onProjectSettings, onOpe
 
   useEditorNativeMenuCommands({
     editor,
+    timelinePlaybackAvailable: active && !inspectingSource,
     canvasMode,
     shortcutPreferences,
     isAgentBusy,
@@ -312,72 +275,40 @@ export function TimelineEditor({ active = true, editor, onProjectSettings, onOpe
 
   return (
     <WorkspaceShell
+      showSidebar={false}
+      showProjectMenu={false}
       persistentContent
       mode={canvasMode ? 'node' : shortsMode ? 'natural' : 'precision'}
       onModeChange={(mode) => selectEditorView(mode === 'node' ? 'canvas' : mode === 'natural' ? 'shorts' : 'timeline')}
       projects={workspaceProjects}
+      videoList={<VideoResultsList editor={editor} active={active} onSelectProject={onSelectProject} onInspectAsset={(id) => { editor.setSelectedAssetId(id); setInspectingSource(true); }} />}
       showCandidateNavigation={false}
       saveScopeLabel="현재 프로젝트 타임라인"
       activeProjectId={editor.project?.id ?? null}
       onSelectProject={(id) => onSelectProject?.(id)}
-      onNewVideo={() => onProjects?.()}
+      onNewVideo={() => { void (async () => {
+        if (editor.hasUnsavedTimeline && !await editor.saveTimeline()) return;
+        await editor.createProject();
+      })(); }}
       onOpenAssets={() => { selectEditorView('timeline'); setLeftDockTabId('media'); updateLayoutPreference((current) => ({ ...current, leftDockVisible: true })); }}
       onOpenSettings={() => onOpenSettings?.()}
       canUndo={editor.canUndoTimeline && !isAgentBusy && !editor.isBusy}
       onUndo={editor.undoTimeline}
-      {...(editor.project === null || isAgentBusy || editor.isBusy ? {} : { onSave: () => { void editor.saveTimeline(); } })}
-      onStop={() => { void cua?.triggerStop(); }}
+      onRedo={editor.redoTimeline}
+      canRedo={editor.canRedoTimeline && !isAgentBusy && !editor.isBusy}
+      {...(editor.project === null || !editor.hasUnsavedTimeline || isAgentBusy || editor.isBusy || editor.isSavingTimeline ? {} : { onSave: () => { void editor.saveTimeline(); } })}
+      showProjectIdentity={false}
+      showSettingsShortcut={false}
+      onProjectSettings={onProjectSettings}
+      actions={(fullStageMode || !floatingExportVisible) ? <ExportPanel editor={editor} /> : null}
       safety={{ sourcePreserved: editor.project !== null, dirty: editor.hasUnsavedTimeline, saving: editor.isSavingTimeline,
-        pendingApprovalCount: pendingApproval === null ? 0 : 1,
-        cuaStatus: cua?.state.phase === 'acting' || cua?.state.phase === 'ready' || cua?.state.phase === 'stopping' || cua?.state.phase === 'cleanup-failed' ? cua.state.phase : 'idle' }}
+        pendingApprovalCount: pendingApproval === null ? 0 : 1 }}
     >
     <EditorWorkspace
       mode="host"
       className={workspaceClassName}
       style={workspaceStyle}
       labelledBy="timeline-editor-title"
-      header={<EditorHeader
-        brand="OpenScene"
-        projectName={editor.project?.name ?? 'No project'}
-        themeMode={themeMode}
-        themePreset={preset}
-        themeOptions={THEME_PRESETS}
-        onThemeModeToggle={toggleTheme}
-        onThemePresetChange={(next) => setPreset(next as ThemePresetId)}
-        actions={<>
-          <details className="workbench-menu">
-            <summary>Project</summary>
-            <div className="workbench-menu__popover">
-              <button type="button" onClick={onProjectSettings}>Project settings</button>
-              <button type="button" disabled={!editor.hasUnsavedTimeline || isAgentBusy || editor.isBusy} onClick={() => { void editor.saveTimeline(); }}>Save project</button>
-            </div>
-          </details>
-          <details className="workbench-menu">
-            <summary>View</summary>
-            <div className="workbench-menu__popover">
-              <span className="workbench-menu__label">WORKSPACE PANELS</span>
-              <button type="button" disabled={fullStageMode} aria-pressed={layoutPreference.leftDockVisible} onClick={() => updateLayoutPreference(toggleEditorLeftDock)}>Media library {layoutPreference.leftDockVisible ? '✓' : ''}</button>
-              <button type="button" disabled={fullStageMode} aria-pressed={layoutPreference.inspectorVisible} onClick={() => updateLayoutPreference(toggleEditorInspector)}>Inspector {layoutPreference.inspectorVisible ? '✓' : ''}</button>
-              <button type="button" onClick={resetLayout}>Reset layout</button>
-            </div>
-          </details>
-          <button
-            className="oc-editor-host__save"
-            data-testid="editor-save-btn"
-            data-dirty={editor.hasUnsavedTimeline ? 'true' : 'false'}
-            data-saving={editor.isSavingTimeline ? 'true' : 'false'}
-            data-save-status={editor.timelineSaveStatus}
-            data-save-error={editor.timelineSaveError ?? undefined}
-            aria-busy={editor.isSavingTimeline}
-            type="button"
-            onClick={() => { void editor.saveTimeline(); }}
-            disabled={editor.project === null || !editor.hasUnsavedTimeline || editor.isSavingTimeline}
-          >
-            {editor.isSavingTimeline ? '저장 중…' : `저장${editor.hasUnsavedTimeline ? ' *' : ''}`}
-          </button>
-          {!floatingExportVisible && <ExportPanel editor={editor} />}
-        </>}
-      />}
       left={<TimelineEditorLeftDock
         activeTabId={leftDockTabId}
         editor={editor}
@@ -403,52 +334,18 @@ export function TimelineEditor({ active = true, editor, onProjectSettings, onOpe
           <h1 id="timeline-editor-title">OpenScene</h1>
           <span className="editor-program-region__subtitle">Timeline editor</span>
         </div>
-        {!shortsMode && shortsReturnContext !== null && editor.project?.id === shortsReturnContext.resultProjectId && (
-          <div className="shorts-return-banner" data-testid="shorts-return-banner" role="region" aria-label="Return to Shorts review">
-            <span>
-              격리 쇼츠 프로젝트({shortsReturnContext.candidateId}) 편집 중 · 9:16 수동 Transform(얼굴추적 미포함) · 트림 · 자막 수정 후 저장하고 복귀하세요.
-            </span>
-            <button
-              type="button"
-              className="button button--primary"
-              data-testid="shorts-return-to-review-btn"
-              disabled={editor.isBusy}
-              onClick={() => { void returnToShortsReview(); }}
-            >
-              {editor.hasUnsavedTimeline ? '저장 후 쇼츠 검토로 돌아가기' : '쇼츠 검토로 돌아가기'}
-            </button>
-          </div>
-        )}
-        <div className="editor-view" hidden={!canvasMode} data-cua-safe-surface={canvasMode && editor.project !== null ? 'canvas' : undefined}>
-          {editor.project !== null && <VideoConnectionCanvas key={editor.project.id} editor={editor}
-            locked={(isAgentBusy && !isCuaActing) || editor.isBusy} onPreview={() => selectEditorView('timeline')} />}
+        <div className="editor-view" hidden={!canvasMode}>
+          {editor.project !== null && <VideoConnectionCanvas key={editor.project.id} editor={editor} showHistoryControls={false}
+            locked={isAgentBusy || editor.isBusy} onPreview={() => selectEditorView('timeline')} />}
         </div>
-        <div className="editor-view" hidden={!shortsMode}>
-          <NaturalStudioView liveReviewSlot={<>
-          <div className="os-ws-live-stage" hidden={intakeComplete || editor.project === null}>
-            <WorkspaceIntakeView pickerOnly prompt={chat.input} onPromptChange={chat.setInput} presets={[]}
-              recentProjects={workspaceProjects} selectedFileName={editor.project?.assets[0]?.displayName ?? null}
-              starting={editor.isBusy} errorMessage={editor.statusMessage.tone === 'danger' ? editor.statusMessage.text : null}
-              onPickMedia={() => { void editor.importAssets(); }} onStart={() => setCompletedIntakeProjectId(editor.project?.id ?? null)}
-              onOpenRecentProject={(id) => onSelectProject?.(id)} />
-          </div>
-          <div className="os-ws-live-stage" hidden={!intakeComplete}>
-            <ShortsReviewWorkspace
-              active={intakeComplete && active}
-              editor={editor}
-              initialJobId={restoredShortsTarget !== null && restoredShortsTarget.sourceProjectId === editor.project?.id ? restoredShortsTarget.jobId : null}
-              initialCandidateId={restoredShortsTarget !== null && restoredShortsTarget.sourceProjectId === editor.project?.id ? restoredShortsTarget.candidateId : null}
-              returnReloadToken={restoredShortsTarget !== null && restoredShortsTarget.sourceProjectId === editor.project?.id ? restoredShortsTarget.token : 0}
-              returnReloadProjectId={restoredShortsTarget !== null && restoredShortsTarget.sourceProjectId === editor.project?.id ? restoredShortsTarget.resultProjectId : null}
-              onOpenSettings={onOpenSettings}
-              onOpenMaterializedProject={openMaterializedShortInEditor}
-            />
-          </div>
-          </>} />
-        </div>
-        <div className="editor-view editor-view--precision" hidden={fullStageMode}>
-            {active && !fullStageMode && <ReaEditorAnalysisHost editor={editor} locked={isAgentBusy || editor.isBusy} />}
-            {floatingProgramVisible ? <div className="empty-slate">Program Monitor is floating above the workspace.</div> : <ProgramMonitor editor={editor} />}
+        <div className={shortsMode ? 'editor-view editor-view--natural' : 'editor-view editor-view--precision'} hidden={canvasMode}>
+          {active && !fullStageMode && <ReaEditorAnalysisHost editor={editor} locked={isAgentBusy || editor.isBusy} />}
+          {floatingProgramVisible && !shortsMode
+            ? <div className="empty-slate">Program Monitor is floating above the workspace.</div>
+            : <EditorPreview editor={editor} active={active && !canvasMode} sourceMode={inspectingSource} onSourceModeChange={setInspectingSource} />}
+          {shortsMode && !inspectingSource && <div className="natural-editing-context">
+            <TimelineCanvas id="natural-timeline-panel" editor={editor} showHistoryControls={false} />
+          </div>}
         </div>
       </main>}
 
@@ -467,12 +364,12 @@ export function TimelineEditor({ active = true, editor, onProjectSettings, onOpe
 
       floatingPanels={fullStageMode ? null : <div className="editor-floating-layer" aria-label="Floating workspace panels">
         {floatingProjectVisible && renderFloatingPanel({ child: <ProjectRail editor={editor} />, floatingPanel: layoutPreference.floatingPanels.project, panelId: 'project' })}
-        {floatingProgramVisible && renderFloatingPanel({ child: <ProgramMonitor editor={editor} />, floatingPanel: layoutPreference.floatingPanels.program, panelId: 'program' })}
+        {floatingProgramVisible && renderFloatingPanel({ child: <EditorPreview editor={editor} active={active && !canvasMode} sourceMode={inspectingSource} onSourceModeChange={setInspectingSource} />, floatingPanel: layoutPreference.floatingPanels.program, panelId: 'program' })}
         {floatingInspectorVisible && renderFloatingPanel({ child: inspectorPanel, floatingPanel: layoutPreference.floatingPanels.inspector, panelId: 'inspector' })}
         {floatingExportVisible && renderFloatingPanel({ child: <ExportPanel editor={editor} />, floatingPanel: layoutPreference.floatingPanels.export, panelId: 'export' })}
       </div>}
 
-      timeline={<div hidden={fullStageMode} className="live-workspace-timeline"><TimelineCanvas id="editor-timeline-panel" editor={editor} /></div>}
+      timeline={!fullStageMode && !inspectingSource ? <div className="live-workspace-timeline"><TimelineCanvas id="editor-timeline-panel" editor={editor} showHistoryControls={false} /></div> : null}
     />
     </WorkspaceShell>
   );

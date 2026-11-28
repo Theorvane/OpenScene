@@ -1,7 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
-import type { AgentChatContextUsage, AgentChatDisplayMessage, AgentChatHistoryEntry, AgentChatStatus, AgentCuaErrorCode, AgentToolApprovalDecision, AgentToolCallProposal, AgentChatInteractionMode } from '../../shared/agentChat';
-import type { CuaSaveResult } from '../../shared/cuaSave';
-import { prepareAgentInteractionModeChange, prepareProjectForAgentApproval, prepareProjectForAgentSend } from '../../shared/agentChat';
+import type { AgentChatContextUsage, AgentChatDisplayMessage, AgentChatHistoryEntry, AgentChatStatus, AgentToolApprovalDecision, AgentToolCallProposal, AgentChatInteractionMode } from '../../shared/agentChat';
+import { prepareProjectForAgentApproval, prepareProjectForAgentSend } from '../../shared/agentChat';
 import type { EditAgentProjectContext } from '../../shared/editAgentContext';
 import type { AiDomainModelConfig } from '../../shared/aiDomainModels';
 import { isProviderConnected } from '../../shared/llmProviders';
@@ -28,9 +27,9 @@ function createConversationId(): string {
 
 interface AgentChatController {
   readonly interactionMode: AgentChatInteractionMode;
-  readonly changeInteractionMode: (mode: AgentChatInteractionMode) => Promise<void>;
   readonly selectedModel: AiDomainModelConfig;
   readonly isLocalModel: boolean;
+  readonly hasConnectedProvider: boolean;
   /** True when the selected model's provider is usable: local, or cloud with a stored key. */
   readonly modelReady: boolean;
   /** Thinking effort chosen for the active model (undefined = provider default). */
@@ -42,8 +41,6 @@ interface AgentChatController {
   readonly pendingApproval: AgentToolCallProposal | null;
   readonly status: AgentChatStatus;
   readonly error: string | undefined;
-  readonly errorCode: AgentCuaErrorCode | undefined;
-  readonly cuaSaveResult: CuaSaveResult | undefined;
   readonly isBusy: boolean;
   readonly activeProject: EditAgentProjectContext | null;
   /** Context window consumed by the conversation, when a turn reported it. */
@@ -81,17 +78,24 @@ export function AgentChatProvider({ activeProject, prepareProject, hasUnsavedTim
   const [interactionMode, setInteractionMode] = useState<AgentChatInteractionMode>('project-tools');
   const { providerConfig, credentialStatus } = useLlmModel();
   const chatGptAuth = useChatGptAuth();
-  const { selectedModel: getSelectedDomainModel } = useAiDomainModel();
+  const { selectedModel: getSelectedDomainModel, hasConnectedProvider } = useAiDomainModel();
   const selectedModel = getSelectedDomainModel('edit-agent');
   const conversationIdRef = useRef<string>(createConversationId());
 
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<readonly AgentChatDisplayMessage[]>([]);
-  const [pendingApproval, setPendingApproval] = useState<AgentToolCallProposal | null>(null);
+  const [pendingApproval, setPendingApprovalState] = useState<AgentToolCallProposal | null>(null);
+  const activeProjectIdRef = useRef<string | null>(null);
+  activeProjectIdRef.current = activeProject?.projectId ?? null;
+  const approvalScopeRef = useRef<{ projectId: string | null; conversationId: string } | null>(null);
+  const setPendingApproval = (proposal: AgentToolCallProposal | null, scope = {
+    projectId: activeProjectIdRef.current, conversationId: conversationIdRef.current
+  }): void => {
+    approvalScopeRef.current = proposal === null ? null : scope;
+    setPendingApprovalState(proposal);
+  };
   const [status, setStatus] = useState<AgentChatStatus>('idle');
   const [error, setError] = useState<string | undefined>(undefined);
-  const [errorCode, setErrorCode] = useState<AgentCuaErrorCode | undefined>(undefined);
-  const [cuaSaveResult, setCuaSaveResult] = useState<CuaSaveResult | undefined>(undefined);
   const [isBusy, setIsBusy] = useState(false);
   const [contextUsage, setContextUsage] = useState<AgentChatContextUsage | undefined>(undefined);
   const [historyEntries, setHistoryEntries] = useState<readonly AgentChatHistoryEntry[]>([]);
@@ -131,10 +135,8 @@ export function AgentChatProvider({ activeProject, prepareProject, hasUnsavedTim
       return next;
     });
   };
-  const modelReady =
-    isLocalModel ||
-    openAiAuthMode === 'chatgpt' ||
-    isProviderConnected(selectedModel.providerId, credentialStatus);
+  const modelReady = selectedModel.available && selectedModel.id.length > 0 &&
+    (openAiAuthMode === 'chatgpt' || isProviderConnected(selectedModel.providerId, credentialStatus));
 
   useEffect(() => {
     if (restoreRequest === null) return;
@@ -146,8 +148,8 @@ export function AgentChatProvider({ activeProject, prepareProject, hasUnsavedTim
     setPendingApproval(null);
     setStatus('idle');
     setError(undefined);
-    setErrorCode(undefined);
-    setCuaSaveResult(undefined);
+
+
     setInput('');
     onRestoreHandled?.();
   }, [restoreRequest, onRestoreHandled]);
@@ -182,8 +184,8 @@ export function AgentChatProvider({ activeProject, prepareProject, hasUnsavedTim
     setPendingApproval(null);
     setStatus('idle');
     setError(undefined);
-    setErrorCode(undefined);
-    setCuaSaveResult(undefined);
+
+
     setInput('');
     setContextUsage(undefined);
     setHistoryRevision((revision) => revision + 1);
@@ -196,7 +198,7 @@ export function AgentChatProvider({ activeProject, prepareProject, hasUnsavedTim
     if (!response.ok || response.value === null) {
       setStatus('error');
       setError(response.ok ? 'That conversation is no longer in this project.' : response.error.message);
-      setErrorCode(undefined);
+
       return;
     }
     conversationIdRef.current = conversationId;
@@ -209,13 +211,14 @@ export function AgentChatProvider({ activeProject, prepareProject, hasUnsavedTim
     setPendingApproval(null);
     setStatus('idle');
     setError(undefined);
-    setErrorCode(undefined);
-    setCuaSaveResult(undefined);
+
+
     setInput('');
   };
 
   const sendMessage = async (text: string): Promise<void> => {
     if (text.trim().length === 0 || isBusy || pendingApproval || !modelReady) return;
+    const requestScope = { projectId: activeProjectIdRef.current, conversationId: conversationIdRef.current };
 
     // Echo the turn immediately. The main-process round trip takes as long as
     // the model does, so waiting for it leaves the panel looking like the
@@ -228,14 +231,17 @@ export function AgentChatProvider({ activeProject, prepareProject, hasUnsavedTim
     setMessages((current) => [...current, pendingUserMessage]);
     setIsBusy(true);
     setError(undefined);
-    setErrorCode(undefined);
-    setCuaSaveResult(undefined);
+
+
     setStatus('thinking');
     setInput('');
 
     try {
       if (activeProject !== null && !await prepareProjectForAgentSend(interactionMode, prepareProject)) {
         throw new Error('Save the open timeline before asking the agent to edit it.');
+      }
+      if (activeProjectIdRef.current !== requestScope.projectId || conversationIdRef.current !== requestScope.conversationId) {
+        throw new Error('The active project changed. Send the request again from the intended project.');
       }
       const response = await window.videoTool.agentChatSend({
         conversationId: conversationIdRef.current,
@@ -259,21 +265,21 @@ export function AgentChatProvider({ activeProject, prepareProject, hasUnsavedTim
             ? mergePendingUserMessage(response.value.messages, pendingUserMessage)
             : response.value.messages
         );
-        setPendingApproval(response.value.pendingApproval);
+        setPendingApproval(response.value.pendingApproval, requestScope);
         setStatus(response.value.status);
         setError(response.value.error);
-        setErrorCode(response.value.errorCode);
-        setCuaSaveResult(response.value.cuaSaveResult);
+
+
       } else {
         // The echoed turn stays on screen so the error reads as a reply to it.
         setStatus('error');
         setError(response.error.message);
-        setErrorCode(undefined);
+
       }
     } catch (cause) {
       setStatus('error');
       setError(cause instanceof Error ? cause.message : 'Agent request failed.');
-      setErrorCode(undefined);
+
     } finally {
       setIsBusy(false);
     }
@@ -281,17 +287,26 @@ export function AgentChatProvider({ activeProject, prepareProject, hasUnsavedTim
 
   const respondToApproval = async (decision: AgentToolApprovalDecision, feedback?: string): Promise<void> => {
     if (!pendingApproval || isBusy) return;
+    const proposal = pendingApproval;
+    const scope = approvalScopeRef.current;
+    const assertApprovalScope = (): void => {
+      if (scope === null || approvalScopeRef.current !== scope || activeProjectIdRef.current !== scope.projectId || conversationIdRef.current !== scope.conversationId) {
+        throw new Error('The approval belongs to another project or conversation. Cancel it before continuing.');
+      }
+    };
 
     setIsBusy(true);
     setError(undefined);
-    setErrorCode(undefined);
+
     try {
-      if (activeProject !== null && !await prepareProjectForAgentApproval(pendingApproval.toolName, decision, prepareProject, interactionMode)) {
+      assertApprovalScope();
+      if (activeProject !== null && !await prepareProjectForAgentApproval(proposal.toolName, decision, prepareProject, interactionMode)) {
         throw new Error('Save the open timeline before approving the agent edit.');
       }
+      assertApprovalScope();
       const response = await window.videoTool.agentChatApprove({
-        conversationId: conversationIdRef.current,
-        toolCallId: pendingApproval.toolCallId,
+        conversationId: scope!.conversationId,
+        toolCallId: proposal.toolCallId,
         decision,
         ...(feedback === undefined || feedback.trim().length === 0 ? {} : { feedback })
       });
@@ -299,20 +314,20 @@ export function AgentChatProvider({ activeProject, prepareProject, hasUnsavedTim
       if (response.ok) {
         setContextUsage(response.value.contextUsage);
         setMessages(response.value.messages);
-        setPendingApproval(response.value.pendingApproval);
+        setPendingApproval(response.value.pendingApproval, scope!);
         setStatus(response.value.status);
         setError(response.value.error);
-        setErrorCode(response.value.errorCode);
-        setCuaSaveResult(response.value.cuaSaveResult);
+
+
       } else {
         setStatus('error');
         setError(response.error.message);
-        setErrorCode(undefined);
+
       }
     } catch (cause) {
       setStatus('error');
       setError(cause instanceof Error ? cause.message : 'Agent approval failed.');
-      setErrorCode(undefined);
+
     } finally {
       setIsBusy(false);
     }
@@ -330,13 +345,10 @@ export function AgentChatProvider({ activeProject, prepareProject, hasUnsavedTim
           setPendingApproval(response.value.pendingApproval);
           setStatus(response.value.status);
           setError(response.value.error);
-          setErrorCode(response.value.errorCode);
-          if (response.value.cuaSaveResult !== undefined) {
-            setCuaSaveResult(response.value.cuaSaveResult);
-          }
+
         }
-      } catch {
-        // Driver stop path handles cancellation when chat cancel IPC is unavailable.
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : '요청을 중지하지 못했습니다. 다시 시도하세요.');
       } finally {
         cancelInFlightRef.current = null;
       }
@@ -354,7 +366,7 @@ export function AgentChatProvider({ activeProject, prepareProject, hasUnsavedTim
       if (!response.ok) {
         setStatus('error');
         setError(response.error.message);
-        setErrorCode(undefined);
+
         return;
       }
       restoredSeedRef.current = null;
@@ -362,12 +374,12 @@ export function AgentChatProvider({ activeProject, prepareProject, hasUnsavedTim
       setPendingApproval(response.value.pendingApproval);
       setStatus(response.value.status);
       setError(response.value.error);
-      setErrorCode(response.value.errorCode);
+
       setContextUsage(response.value.contextUsage);
     } catch (cause) {
       setStatus('error');
       setError(cause instanceof Error ? cause.message : 'Could not compact the conversation.');
-      setErrorCode(undefined);
+
     } finally {
       setIsBusy(false);
     }
@@ -381,7 +393,7 @@ export function AgentChatProvider({ activeProject, prepareProject, hasUnsavedTim
       if (!response.ok) {
         setStatus('error');
         setError(response.error.message);
-        setErrorCode(undefined);
+
         return;
       }
 
@@ -390,12 +402,12 @@ export function AgentChatProvider({ activeProject, prepareProject, hasUnsavedTim
       setPendingApproval(null);
       setStatus('idle');
       setError(undefined);
-      setErrorCode(undefined);
-      setCuaSaveResult(undefined);
+
+
     } catch (cause) {
       setStatus('error');
       setError(cause instanceof Error ? cause.message : 'Could not reset the agent conversation.');
-      setErrorCode(undefined);
+
     } finally {
       setIsBusy(false);
     }
@@ -403,33 +415,8 @@ export function AgentChatProvider({ activeProject, prepareProject, hasUnsavedTim
 
   const controller: AgentChatController = {
     interactionMode,
-    changeInteractionMode: async (mode) => {
-      if (mode === interactionMode || isBusy || pendingApproval) return;
-      setIsBusy(true);
-      try {
-        const ready = await prepareAgentInteractionModeChange(interactionMode, mode, isBusy, pendingApproval !== null, async () => {
-          const result = await window.videoTool.agentChatCancel({ conversationId: conversationIdRef.current });
-          if (!result.ok || result.value.errorCode) {
-            setError(result.ok ? result.value.error ?? 'The current run could not settle; mode was not changed.' : result.error.message);
-            if (result.ok) setErrorCode(result.value.errorCode);
-            return false;
-          }
-          return true;
-        });
-        if (!ready) return;
-        // Start a new thread only after actual release/write settlement. No
-        // project preparation or Save is performed by a mode change.
-        conversationIdRef.current = createConversationId();
-        setActiveConversationId(conversationIdRef.current);
-        restoredSeedRef.current = null;
-        setMessages([]); setPendingApproval(null); setInput(''); setStatus('idle');
-        setError(undefined); setErrorCode(undefined); setCuaSaveResult(undefined); setContextUsage(undefined);
-        setInteractionMode(mode);
-        setHistoryRevision((revision) => revision + 1);
-      } catch (cause) { setError(cause instanceof Error ? cause.message : 'Mode change failed.'); }
-      finally { setIsBusy(false); }
-    },
     selectedModel,
+    hasConnectedProvider,
     isLocalModel,
     modelReady,
     reasoningEffort,
@@ -440,8 +427,6 @@ export function AgentChatProvider({ activeProject, prepareProject, hasUnsavedTim
     pendingApproval,
     status,
     error,
-    errorCode,
-    cuaSaveResult,
     isBusy,
     activeProject,
     contextUsage,

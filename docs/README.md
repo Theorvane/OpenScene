@@ -8,10 +8,11 @@ The editing flow is natural-language requests â†’ precise Timeline refinement â†
 
 - [Product and setup](../README.md): editing flow, installation and commands.
 - [Canvas workflows](canvas-workflows.md): quick starts, 12 blocks, original inputs and arrangement.
-- [Menus and layout](editor-menu-layout.md): desktop controls and mobile equivalents.
+- [Menus and layout](editor-menu-layout.md): desktop controls.
 - [Precise clip manipulation](timeline-snapping.md): snapping, trims and manual checks.
 - [Caption delivery](planning/2026-09-07-subtitle-delivery.md): burn-in and sidecar rules.
-- [Mobile](../mobile/README.md): touch editing, assistant and native export.
+
+- [Desktop-first scope](desktop-focus.md): mobile suspension and restoration boundary.
 
 ## Developing
 
@@ -28,6 +29,5 @@ The editing flow is natural-language requests â†’ precise Timeline refinement â†
 - [Canvas-to-export verification](canvas-export-verification.md): recorded execution and acceptance checks.
 - [Linux media-analysis environment](media-analysis-environment.md): media tools, full-suite checks and Windows integration.
 - [Menu and bridge analysis](rea-editor-evidence.md): optional analysis of OpenScene's own build.
-- [Mobile native setup](../mobile/README-native.md) and [release procedure](../mobile/RELEASING.md).
 
 Test records describe their named revision and environment. Device tests, model conversations and static analysis have separate verification scopes.

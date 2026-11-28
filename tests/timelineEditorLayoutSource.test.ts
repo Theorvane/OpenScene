@@ -72,15 +72,14 @@ describe('timeline editor layout source contract', () => {
     expect(hookSource).not.toContain('ipcRenderer');
   });
 
-  it('Given product identity, When the app shell and editor render, Then OpenScene branding belongs to the OpenCut workbench header', async () => {
+  it('uses application chrome for project identity and omits a duplicate workbench header', async () => {
     const source = await readTimelineEditorSource();
     const appShellSource = await readAppShellSource();
     const headerSource = normalizedSource(await readFile(OPENCUT_HEADER_SOURCE_URL, 'utf8'));
 
-    expect(source).toContain('<EditorHeader');
-    expect(source).toContain('brand="OpenScene"');
-    expect(source).toContain('projectName={editor.project?.name ?? \'No project\'}');
-    expect(source).toContain('onThemePresetChange={(next) => setPreset(next as ThemePresetId)}');
+    expect(source).not.toContain('<EditorHeader');
+    expect(source).toContain('showProjectIdentity={false}');
+    expect(source).toContain('showSettingsShortcut={false}');
     expect(headerSource).toContain('className="oc-editor-header__brand"');
     expect(headerSource).toContain('className="oc-editor-header__project"');
     expect(source).toContain('<h1 id="timeline-editor-title">OpenScene</h1>');

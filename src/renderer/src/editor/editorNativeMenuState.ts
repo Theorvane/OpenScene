@@ -12,6 +12,7 @@ export type EditorNativeMenuStateInput = {
   readonly hasUnsavedTimeline: boolean;
   readonly isBusy: boolean;
   readonly isPlaying: boolean;
+  readonly timelinePlaybackAvailable?: boolean;
   readonly layoutPreference: EditorLayoutPreference;
 };
 
@@ -27,8 +28,8 @@ export function getEditorNativeMenuState(input: EditorNativeMenuStateInput): Tim
   return {
     playPauseLabel: input.isPlaying ? 'Pause' : 'Play',
     commands: {
-      playPause: commandState(input.hasProject),
-      rewind: commandState(input.hasProject),
+      playPause: commandState(input.hasProject && input.timelinePlaybackAvailable !== false),
+      rewind: commandState(input.hasProject && input.timelinePlaybackAvailable !== false),
       undo: commandState(input.canUndoTimeline),
       redo: commandState(input.canRedoTimeline),
       splitAtPlayhead: commandState(input.canSplitAtPlayhead),

@@ -1,3 +1,4 @@
+import { ollamaNativeModelId } from './ollamaModels';
 import {
   AGENT_ROUTER_EDIT_AGENT_UNAVAILABLE_REASON,
   AGENT_ROUTER_MODELS,
@@ -15,7 +16,7 @@ export type AiDomainProvider = {
 };
 
 export const AI_DOMAIN_PROVIDERS: readonly AiDomainProvider[] = [
-  { id: 'local_ollama', label: 'Ollama', executionPath: 'local' },
+  { id: 'local_ollama', label: 'Ollama', executionPath: 'api' },
   ...LLM_CATALOG.map(provider => ({ id: provider.id, label: provider.label, executionPath: 'api' as const }))
 ];
 
@@ -46,18 +47,6 @@ export type AiDomainModelPreferences = Record<AiDomain, string>;
 export const AI_DOMAIN_MODEL_STORAGE_KEY = 'openvideo-ai-domain-model-preferences-v1';
 
 const AI_DOMAIN_MODEL_CATALOG: readonly AiDomainModelConfig[] = [
-  {
-    id: 'qwen2.5-coder',
-    providerId: 'local_ollama',
-    label: 'Qwen 2.5 Coder 14B',
-    providerLabel: 'Ollama',
-    description: 'Local tool-calling model for LangGraph edit operations.',
-    executionPath: 'local',
-    precisionBit: '4-bit (Q4_K_M)',
-    availablePrecisions: ['4-bit (Q4_K_M)', '8-bit (Q8_0)', '16-bit (FP16)'],
-    domains: ['edit-agent'],
-    available: true
-  },
   ...AGENT_ROUTER_MODELS.map((model): AiDomainModelConfig => ({
     id: `${AGENT_ROUTER_PROVIDER_ID}/${model.id}`,
     providerId: AGENT_ROUTER_PROVIDER_ID,
@@ -92,14 +81,12 @@ const AI_DOMAIN_MODEL_CATALOG: readonly AiDomainModelConfig[] = [
 const AI_DOMAINS: readonly AiDomain[] = ['edit-agent'];
 
 export function formatAiModelOptionLabel(model: AiDomainModelConfig): string {
-  const isZen = model.id === 'qwen2.5-coder';
-  const prefix = isZen ? '★ ' : '';
   const statusSuffix = model.available ? '' : ' (Unavailable)';
-  return `${prefix}${model.providerLabel} → ${model.label}${statusSuffix}`;
+  return `${model.providerLabel} → ${model.label}${statusSuffix}`;
 }
 
-export function getDomainModels(domain: AiDomain): readonly AiDomainModelConfig[] {
-  return AI_DOMAIN_MODEL_CATALOG.filter(model => model.domains.includes(domain));
+export function getDomainModels(domain: AiDomain, discovered: readonly AiDomainModelConfig[] = []): readonly AiDomainModelConfig[] {
+  return [...AI_DOMAIN_MODEL_CATALOG, ...discovered].filter(model => model.domains.includes(domain));
 }
 
 export function getAvailableDomainModels(domain: AiDomain): readonly AiDomainModelConfig[] {
@@ -110,17 +97,13 @@ export function isDomainModelAvailableOnRuntime(model: AiDomainModelConfig, runt
   return model.available && (model.availableOn === undefined || model.availableOn.includes(runtime));
 }
 
-export function getDomainModel(domain: AiDomain, modelId: string): AiDomainModelConfig | undefined {
-  return getDomainModels(domain).find((model) => model.id === modelId);
+export function getDomainModel(domain: AiDomain, modelId: string, discovered: readonly AiDomainModelConfig[] = []): AiDomainModelConfig | undefined {
+  return getDomainModels(domain, discovered).find((model) => model.id === modelId);
 }
 
-export function getDefaultDomainModelId(domain: AiDomain): string {
-  const model = getAvailableDomainModels(domain)[0];
-  if (model === undefined) {
-    throw new Error(`No available AI model is configured for domain ${domain}.`);
-  }
-  return model.id;
-}
+export function getDefaultDomainModelId(_domain: AiDomain): string { return ''; }
+
+export const UNSELECTED_DOMAIN_MODEL: AiDomainModelConfig = { id: '', providerId: '', label: '모델 선택 필요', providerLabel: '', description: '모델 제공자를 연결하고 사용할 모델을 선택하세요.', executionPath: 'api', domains: ['edit-agent'], available: false };
 
 export function parseAiDomainModelPreferences(stored: Partial<Record<AiDomain, string>> | null | undefined): AiDomainModelPreferences {
   return Object.fromEntries(
@@ -130,7 +113,7 @@ export function parseAiDomainModelPreferences(stored: Partial<Record<AiDomain, s
         ? `openai/${candidate.slice('openai-codex/'.length)}`
         : candidate;
       const model = normalizedCandidate === undefined ? undefined : getDomainModel(domain, normalizedCandidate);
-      return [domain, model?.available ? model.id : getDefaultDomainModelId(domain)];
+      return [domain, model?.available ? model.id : normalizedCandidate && ollamaNativeModelId(normalizedCandidate) ? normalizedCandidate : ''];
     })
   ) as AiDomainModelPreferences;
 }

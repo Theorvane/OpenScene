@@ -1,3 +1,4 @@
+import { ollamaNativeModelId, ollamaLlmModel } from './ollamaModels';
 import { LLM_CATALOG } from './llmCatalog.generated';
 import { AGENT_ROUTER_MODELS, AGENT_ROUTER_PROVIDER_ID } from './agentRouter';
 
@@ -34,35 +35,6 @@ export function parseLlmModelKey(key: string): { readonly providerId: string; re
   return { providerId: key.slice(0, slash), modelId: key.slice(slash + 1) };
 }
 
-const LOCAL_LLM_MODELS: readonly LlmModelConfig[] = [
-  {
-    id: 'qwen2.5-coder',
-    providerId: 'local_ollama',
-    label: 'Qwen 2.5 Coder 14B',
-    providerLabel: 'Ollama',
-    description: 'High-performance offline local model for timeline scripts & prompts',
-    category: 'editor-assistant',
-    badge: 'LOCAL',
-    defaultMode: 'local',
-    available: true,
-    toolCall: true,
-    contextWindow: '32k'
-  },
-  {
-    id: 'llama3.2-vision',
-    providerId: 'local_ollama',
-    label: 'Llama 3.2 Vision 11B',
-    providerLabel: 'Ollama',
-    description: 'Local multimodal vision model for video scene analysis',
-    category: 'video-prompt',
-    badge: 'LOCAL',
-    defaultMode: 'local',
-    available: true,
-    vision: true,
-    contextWindow: '128k'
-  }
-];
-
 function describeCloudModel(providerLabel: string, flags: { toolCall?: boolean; reasoning?: boolean; vision?: boolean }): string {
   const traits = [
     flags.reasoning === true ? 'reasoning' : null,
@@ -74,7 +46,6 @@ function describeCloudModel(providerLabel: string, flags: { toolCall?: boolean; 
 
 /** Full models.dev catalog flattened into canonical `providerId/modelId` entries. */
 export const DEFAULT_LLM_MODELS: readonly LlmModelConfig[] = [
-  ...LOCAL_LLM_MODELS,
   ...AGENT_ROUTER_MODELS.map((model): LlmModelConfig => ({
     id: `${AGENT_ROUTER_PROVIDER_ID}/${model.id}`,
     providerId: AGENT_ROUTER_PROVIDER_ID,
@@ -112,6 +83,7 @@ export const LLM_STORAGE_CONFIG_KEY = 'openvideo-llm-provider-config';
 
 export interface LlmProviderApiConfig {
   ollamaBaseUrl?: string;
+  ollamaEnabled?: boolean;
   openaiApiKey?: string;
   anthropicApiKey?: string;
   geminiApiKey?: string;
@@ -123,13 +95,14 @@ export interface LlmProviderApiConfig {
 }
 
 export function getLlmModel(modelId: string): LlmModelConfig | undefined {
-  return MODELS_BY_ID.get(modelId);
+  const known = MODELS_BY_ID.get(modelId);
+  if (known) return known;
+  const native = ollamaNativeModelId(modelId);
+  return native ? { ...ollamaLlmModel({ name: native, tools: false, vision: false }), id: modelId } : undefined;
 }
 
+export const UNSELECTED_LLM_MODEL: LlmModelConfig = { id: '', providerId: '', label: '모델 선택 필요', providerLabel: '', description: '모델 제공자를 연결하고 사용할 모델을 선택하세요.', category: 'editor-assistant', badge: 'SMART', defaultMode: 'api', available: false };
+
 export function parseSelectedLlmModelId(storedId: string | null | undefined): string {
-  if (!storedId) return DEFAULT_LLM_MODELS.find((m) => m.available)?.id ?? DEFAULT_LLM_MODELS[0]!.id;
-  const match = MODELS_BY_ID.get(storedId);
-  return match !== undefined && match.available
-    ? match.id
-    : (DEFAULT_LLM_MODELS.find((m) => m.available)?.id ?? DEFAULT_LLM_MODELS[0]!.id);
+  return storedId && (MODELS_BY_ID.has(storedId) || ollamaNativeModelId(storedId)) ? storedId : '';
 }

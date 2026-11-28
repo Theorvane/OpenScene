@@ -2,7 +2,7 @@
 
 ## Architecture
 
-OpenScene has an Electron, React, TypeScript and Vite desktop app and a mobile front end over shared editing rules.
+OpenScene has an Electron, React, TypeScript and Vite desktop app over shared editing rules. Mobile support is deferred.
 
 The product edits supplied media through Timeline, a node Canvas and an editing agent over one saved project. Canvas workflows are applied to timeline tracks before review/export. Media generation, production boards and voice synthesis are not active product surfaces.
 
@@ -39,15 +39,8 @@ npm run build
 - Keep `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`, `webSecurity: true`, and blocked window navigation.
 - File paths, FFmpeg executable paths, FFmpeg argv, transcription input paths, and export paths stay in the main process. The renderer gets typed job status and open or reveal actions.
 - OpenScene stores recordings, projects, imported assets, transcripts and exports locally under Electron `userData` unless an explicit local override exists.
-- Local storage/export does not imply all agent requests are local. Desktop and mobile can call the selected model provider with authorized context; desktop multimodal requests can include sampled frames and transcripts. Preserve existing approval gates and credential boundaries.
+- Local storage/export does not imply all agent requests are local. The desktop can call the selected model provider with authorized context; desktop multimodal requests can include sampled frames and transcripts. Preserve existing approval gates and credential boundaries.
 - Desktop has no analytics or general cloud-media storage service. Packaged desktop builds have explicit update checks/download/install controls; do not describe that as background automatic installation.
-- Mobile reports anonymous usage counts to the publisher's own OpenPanel instance.
-  Usage reporting is bounded by `mobile/src/lib/analytics.ts`: a closed list of
-  event names, property values restricted to numbers, booleans and null, and no
-  profile ever identified. A prompt, a file name, a path or a key is not a thing
-  that list can express. Adding an event means adding it there and deciding
-  whether it belongs, and the switch is in Settings, on by default and stated in
-  the app rather than only in a policy.
 - Agent support follows [capabilities and boundaries](docs/hybrid-ai-editor-direction.md): local models are user-configured and connected providers use the app's authorization flow.
 
 ## Compatibility Identifiers
@@ -83,40 +76,26 @@ migrate what is stored under it, it orphans it:
 - Treat Program Monitor as best-effort preview. FFmpeg MP4 export is the supported final output for saved local timelines.
 - When editing docs, use `OpenScene` for the product name and keep compatibility identifiers exactly as written above.
 
-## Two Surfaces, One Core
+## Desktop-first scope
 
-The desktop app and `mobile/` are two front ends over the same editing rules.
-A feature is not finished on one of them.
+Mobile support is deferred by user decision (2026-11-28). The active product is
+the Electron desktop app for macOS, Windows and Linux. Do not add or resume
+mobile implementation, native modules, mobile CI/store publishing, or mobile
+typecheck/device requirements unless the user explicitly reopens that scope.
 
-- **Put the rule in `src/shared/` first.** Anything that decides an outcome —
-  what a trim does, what plays at a moment, what an export composites, what a
-  model costs — is a pure function there, imported by both. Neither surface
-  reimplements a rule. A project that behaves one way on a laptop and another on
-  a phone is the failure this exists to prevent, and it is discovered by users,
-  not by tests.
-- **Ship the mobile screen in the same pull request.** Not a follow-up issue:
-  a feature that lands on the desktop alone leaves the shared core with a caller
-  on one side only, and the second caller is what proves the seam was drawn in
-  the right place. It has found real mistakes — `NodeJS.Platform` in shared code,
-  and image adapters returning a Node `Buffer` — each caught by the mobile
-  typecheck and by nothing else.
-- **Say so when a surface genuinely cannot have it.** Some things are honestly
-  platform-bound: window capture and chat-based frame/speech inspection are desktop capabilities. Native export requires a mobile development build and cannot run in Expo Go. Unsupported capabilities stay visible with the reason, in the UI and
-  in the pull request. Silence reads as an oversight; a stated limit reads as a
-  decision.
-- **Verify on both.** `npm run typecheck && npm test && npm run build` at the
-  root, `npm run typecheck` in `mobile/`, and the screen exercised on a
-  development client. The mobile typecheck is not optional — it is the only
-  check that compiles the shared core against a non-Node environment.
-- **Do not reach for a native module to avoid sharing.** Native code is for what
-  only the platform can do — AVFoundation and Media3 for rendering, the keystore
-  for secrets. It is not a place to put a rule that both surfaces need.
+- Put reusable editing and indexing rules in `src/shared/`; preserve pure typed contracts.
+- Keep desktop file access, FFmpeg, credentials and OS operations in `src/main/`.
+- A desktop feature does not require a mobile screen or mobile parity work.
+- Verify with root `npm run typecheck`, `npm test`, and `npm run build`.
+- Exercise affected desktop flows and report unverified platform behavior.
+- Mobile code can be recovered from Git history; do not delete or repurpose
+  persisted/public compatibility identifiers when restoring it.
 
 ## Agent Skills & TypeMCP Integration
 
 - **Agent Skills Location**: `.agents/skills/api-to-typemcp/SKILL.md` (Integrates `api-to-typemcp` skill for converting OpenAPI/Swagger specifications or API docs into TypeMCP MCP projects).
 - **TypeMCP Server & Tools**: OpenScene editing capabilities (frame inspection, transcription, timeline editing and export) are declared as standard TypeMCP tools (`@theorvane/type-mcp`) in `src/main/openVideoMcpServer.ts` and exposed over IPC (`window.videoTool.mcpGetTools` / `mcpExecuteTool`).
-- `getEditingCapabilities`, `getCanvasWorkflow` and atomic `editProject` expose shared block, layout and timeline operations. Keep the advertised catalog derived from implementation and dispatch only registered, schema-validated tools. Mobile uses the same editing core with its own approved tool adapter.
+- `getEditingCapabilities`, `getCanvasWorkflow` and atomic `editProject` expose shared block, layout and timeline operations. Keep the advertised catalog derived from implementation and dispatch only registered, schema-validated tools.
 
 ## Required Issue, Branch, And PR Workflow
 
@@ -130,7 +109,7 @@ Every change after the initial repository bootstrap follows this sequence. Never
 6. Run and report fresh verification evidence. Obtain specification and code-quality review before merging.
 7. Squash merge only after CI and review pass. Verify the issue closes and `dev` contains the merged commit.
 8. Promote vetted `dev` to release-only `main` through a separate reviewed release pull request. Verify `main` contains the release commit before publication.
-9. Store listings are filled in from `store/`, not written into the consoles from memory. One file per store per language — `store/app-store/whats-new.<locale>.txt`, `store/google-play/release-notes.<locale>.txt` — and both stores carry the same set of languages. The App Store text may not name another platform — App Review refuses it under Guideline 2.3.10, and `tests/storeReleaseNotes.test.ts` refuses it first.
+9. Mobile store releases are suspended. Do not restore App Store/Google Play jobs or store listing actions without an explicit scope decision.
 10. The version in `package.json` is the release decision. Bump it on `dev` before promoting: the push to `main` tags `v<version>`, creates a `release/v<version>` branch, packages macOS, Windows, and Linux on their own runners, and publishes the release with every artifact attached. Promoting without a bump republishes nothing, by design.
 
 ## Local FFmpeg editing skill

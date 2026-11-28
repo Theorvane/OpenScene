@@ -25,14 +25,15 @@ describe('app page shell source contract', () => {
     expect(app).toContain('hidden={!workspaceIsVisible}');
   });
 
-  it('opens Projects and Settings from product chrome instead of workspace navigation', async () => {
+  it('opens project folders and Settings from the persistent sidebar without a project selection page', async () => {
     const [app, appShell] = await Promise.all([readSource(APP_SOURCE_URL), readSource(APP_SHELL_SOURCE_URL)]);
 
     expect(appShell).toContain('onPageChange: (pageId: AppPageId) => void;');
     expect(appShell).not.toContain('app-page-panel-home');
-    expect(appShell).toContain('aria-controls="app-page-panel-projects"');
-    expect(appShell).toContain('aria-controls="app-page-panel-settings"');
-    expect(appShell).toContain("onClick={() => onPageChange('settings')}");
+    expect(app).toContain('<ProjectSidebar projects={editor.projects}');
+    expect(app).not.toContain('<ProjectsPage');
+    expect(appShell).toContain('className="desktop-sidebar__settings"');
+    expect(appShell).toContain("onPageChange(activePage.id === 'settings' ? 'edit' : 'settings')");
     expect(app).not.toContain('AppWorkspaceNavigation');
     expect(app).not.toContain('aria-label="Application workspaces"');
   });
@@ -42,7 +43,7 @@ describe('app page shell source contract', () => {
 
     expect(app).toContain('const hasActiveProject = editor.project !== null;');
     expect(app).toContain('if (isProjectRequiredPageId(pageId) && !hasActiveProject) {');
-    expect(app).toContain("navigateToPage('projects');");
+    expect(app).toContain("navigateToPage('edit');");
     expect(app).toContain('if (hasActiveProject || !isProjectRequiredPageId(activePageId)) return;');
     expect(app).toContain("const opened = await editor.openProjectFolder('editing');");
     expect(app).toContain('const opened = await editor.openProject(projectId);');
@@ -60,8 +61,8 @@ describe('app page shell source contract', () => {
     expect(app).toContain('if (isWorkspacePageId(resolved)) setActiveWorkspaceId(resolved);');
     expect(app).toContain('canNavigateBack={pageHistory.length > 0}');
     expect(app).toContain('onNavigateBack={navigateBack}');
-    expect(appShell).toContain('aria-label="Back"');
-    expect(appShell).toContain('disabled={!canNavigateBack}');
+    expect(appShell).toContain('aria-label="프로젝트 사이드바 전환"');
+
   });
 
   it('keeps mounted workspace panels directly labeled after removing the sidebar', async () => {

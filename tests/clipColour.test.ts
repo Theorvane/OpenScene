@@ -165,58 +165,7 @@ describe('a rendered grade', () => {
  * check honestly.
  */
 describe('the surfaces', () => {
-  const readMobile = (path: string) => readFile(new URL(`../mobile/${path}`, import.meta.url), 'utf8');
   const readDesktop = (path: string) => readFile(new URL(`../src/${path}`, import.meta.url), 'utf8');
-
-  it('grades on Android with the effects Media3 already has', async () => {
-    const kotlin = await readMobile(
-      'modules/video-export/android/src/main/java/expo/modules/videoexport/VideoExportModule.kt'
-    );
-    expect(kotlin).toContain('Brightness(segment.brightness)');
-    // Media3 centres contrast on zero and takes saturation as a percentage
-    // change; the plan centres both on one.
-    expect(kotlin).toContain('Contrast(segment.contrast - 1f)');
-    expect(kotlin).toContain('adjustSaturation((segment.saturation - 1f) * 100f)');
-  });
-
-  it('carries colour over the bridge rather than dropping it', async () => {
-    const bridge = await readMobile('src/lib/exportComposition.ts');
-    expect(bridge).toContain('brightness: segment.brightness');
-    expect(bridge).toContain('saturation: segment.saturation');
-  });
-
-  it('grades on iOS through a compositor, because layer instructions cannot', async () => {
-    // This is where iOS spent a release: the controls were shown disabled with
-    // the reason, because `AVMutableVideoCompositionLayerInstruction` carries a
-    // transform and an opacity and no colour at all. Drawing the frames through
-    // Core Image is what makes the grade reachable, and it has to keep doing the
-    // placement and the transition ramps the layer instructions were doing.
-    const composer = await readMobile('modules/video-export/ios/VideoComposer.swift');
-    expect(composer).toContain('AVVideoCompositing');
-    expect(composer).toContain('CIColorControls');
-    expect(composer).toContain('customVideoCompositorClass = GradingCompositor.self');
-    // And only where it is needed: an ungraded export stays on AVFoundation's
-    // own compositing rather than paying for a Core Image render per frame.
-    expect(composer).toContain('request.videoSegments.contains(where: { !$0.colour.isNeutral })');
-
-    // The bridge has to carry the three numbers into the module, or the
-    // compositor grades by the defaults and nothing changes.
-    const module = await readMobile('modules/video-export/ios/VideoExportModule.swift');
-    expect(module).toContain('@Field var brightness: Double = 0');
-    expect(module).toContain('ComposerColour(brightness: brightness, contrast: contrast, saturation: saturation)');
-
-    // And the controls are no longer disabled on one platform.
-    const screen = await readMobile('src/screens/EditScreen.tsx');
-    expect(screen).not.toContain('not rendered on iOS yet');
-    expect(screen).not.toContain("Platform.OS !== 'ios'");
-  });
-
-  it('admits the phone preview does not show a grade', async () => {
-    // A preview that showed roughly the right brightness and nothing of
-    // saturation would disagree with the file, which is the failure this editor
-    // keeps being caught by.
-    expect(await readMobile('src/screens/EditScreen.tsx')).toContain('The preview does not show it yet');
-  });
 
   it('shows it on the desktop, where the monitor can', async () => {
     expect(await readDesktop('renderer/src/editor/ProgramMonitor.tsx')).toContain('effectCssFilter(');

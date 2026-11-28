@@ -29,7 +29,7 @@ import { discoverFfmpeg, type FfmpegDiscoveryResult } from './ffmpegDiscovery';
 import { startFfmpegExportProcess, type FfmpegExecution, type StartFfmpegExportProcessInput } from './ffmpegExportProcess';
 import { compileFfmpegTimeline, FfmpegTimelineError } from './ffmpegTimelineCompiler';
 import { ExportJobStore } from './exportJobStore';
-import { ExportOutputError, hashExportOutput, prepareExportOutputPath, removeExportOutput, validateExportOutput, writeExportProvenanceSidecar, writeExportSubtitleSidecar } from './exportOutputFiles';
+import { ExportOutputError, hashExportOutput, prepareExportOutputPath, readCompletedExport, removeExportOutput, validateExportOutput, writeExportProvenanceSidecar, writeExportSubtitleSidecar } from './exportOutputFiles';
 import { inspectContainerMetadata, type InspectContainerMetadataInput } from './containerMetadataInspection';
 import { fail, ok } from './ipcResponses';
 
@@ -100,6 +100,16 @@ function exportFailureReason(error: unknown): string {
 
 export class ExportIpcService {
   private readonly completedOutputs = new Map<string, string>();
+  private readonly recoveredJobs = new Map<string, LocalExportJob>();
+  private async findJob(jobId: string): Promise<LocalExportJob | null> {
+    const current = this.dependencies.jobs.get(jobId) ?? this.recoveredJobs.get(jobId);
+    if (current) return current;
+    const restored = await readCompletedExport(this.dependencies.exportsRoot, jobId);
+    if (!restored) return null;
+    this.recoveredJobs.set(jobId, restored.job);
+    this.completedOutputs.set(jobId, restored.outputPath);
+    return restored.job;
+  }
   private readonly activeExecutions = new Map<string, FfmpegExecution>();
   private readonly pendingJobs = new Set<string>();
   private cancellationGeneration = 0;
@@ -214,7 +224,7 @@ export class ExportIpcService {
     if (input === null) {
       return fail('INVALID_INPUT', 'The export job lookup payload was not valid.');
     }
-    const job = this.dependencies.jobs.get(input.jobId);
+    const job = await this.findJob(input.jobId);
     return job === null ? fail('JOB_NOT_FOUND', 'The export job was not found.') : ok(job);
   }
 
@@ -566,7 +576,7 @@ export class ExportIpcService {
     if (input === null) {
       return fail('INVALID_INPUT', 'The export result action payload was not valid.');
     }
-    const job = this.dependencies.jobs.get(input.jobId);
+    const job = await this.findJob(input.jobId);
     const outputPath = this.completedOutputs.get(input.jobId);
     if (job?.state.kind !== 'completed' || outputPath === undefined) {
       return fail('EXPORT_RESULT_UNAVAILABLE', 'The exported video result is not available.');

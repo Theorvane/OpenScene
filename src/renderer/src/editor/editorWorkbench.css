@@ -45,6 +45,10 @@
 .app-shell__body { gap: 0; padding: 0; }
 .app-shell .local-edit-bay { height: 100%; grid-template-rows: minmax(0, 1fr); }
 .oc-editor-host { gap: 0; padding: 0; }
+.oc-editor-host.oc-editor-host--unified > .oc-editor-host__header { display: none; }
+.oc-editor-host.oc-editor-host--unified:not(.oc-editor-host--canvas):not(.oc-editor-host--shorts) { grid-template-rows: 0 minmax(0, var(--editor-program-percent, 58fr)) var(--space-2, 8px) minmax(var(--editor-timeline-min-height, 150px), var(--editor-timeline-percent, 42fr)); }
+.oc-editor-host.oc-editor-host--unified.oc-editor-host--canvas,
+.oc-editor-host.oc-editor-host--unified.oc-editor-host--shorts.oc-editor-host--left-hidden { grid-template-rows: 0 minmax(0, 1fr); }
 .oc-editor-host > .oc-editor-host__header, .oc-editor-host > .oc-editor-host__left, .oc-editor-host > .oc-editor-host__program, .oc-editor-host > .oc-editor-host__timeline, .oc-editor-host > .oc-editor-host__inspector { border-radius: 0; }
 .editor-view > .program-monitor { display: grid; height: 100%; box-sizing: border-box; grid-template-rows: minmax(0, 1fr) auto; }
 .editor-view--precision { display: grid; grid-template-rows: auto minmax(0, 1fr); }

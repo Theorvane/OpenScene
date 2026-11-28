@@ -7,7 +7,6 @@ export type {
   WorkspaceApprovalTechnicalMetadata,
   WorkspaceCandidateItem,
   WorkspaceCandidateStatus,
-  WorkspaceCuaStatus,
   WorkspaceExportStatus,
   WorkspaceFailedExportItem,
   WorkspaceFitMode,

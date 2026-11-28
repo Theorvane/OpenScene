@@ -7,6 +7,7 @@ import { projectAssetImportFailureMessage } from './projectAssetImportFeedback';
 
 type ProjectAssetImportState = {
   readonly project: LocalProjectSnapshot | null;
+  readonly createProjectForImport?: () => Promise<LocalProjectSnapshot | null>;
   readonly setIsBusy: Dispatch<SetStateAction<boolean>>;
   readonly setProject: Dispatch<SetStateAction<LocalProjectSnapshot | null>>;
   readonly setSelectedAssetId: Dispatch<SetStateAction<string>>;
@@ -20,7 +21,7 @@ type PendingImportPresentation = {
 };
 
 
-export function useProjectAssetImports({ project, setIsBusy, setProject, setSelectedAssetId, setStatusMessage }: ProjectAssetImportState) {
+export function useProjectAssetImports({ project, createProjectForImport, setIsBusy, setProject, setSelectedAssetId, setStatusMessage }: ProjectAssetImportState) {
   const [presentationVersion, setPresentationVersion] = useState(0);
   const pendingPresentationRef = useRef<PendingImportPresentation | null>(null);
 
@@ -43,8 +44,9 @@ export function useProjectAssetImports({ project, setIsBusy, setProject, setSele
   }, [setProject]);
 
   const importAssets = useCallback(async (acceptedKinds?: readonly MediaKind[]) => {
-    if (project === null) return;
-    const projectId = project.id;
+    const targetProject = project ?? await createProjectForImport?.();
+    if (targetProject == null) return;
+    const projectId = targetProject.id;
     setIsBusy(true);
     const input = acceptedKinds === undefined ? { projectId } : { projectId, acceptedKinds };
     let response: Awaited<ReturnType<typeof window.videoTool.importProjectAssets>>;
@@ -63,7 +65,7 @@ export function useProjectAssetImports({ project, setIsBusy, setProject, setSele
       return;
     }
     presentProjectImport({ projectId, selectedAssetId: null, statusMessage: { tone: 'danger', text: errorMessage(response.error) } });
-  }, [mergeAssetsIntoProject, presentProjectImport, project, setIsBusy]);
+  }, [createProjectForImport, mergeAssetsIntoProject, presentProjectImport, project, setIsBusy]);
 
   const importRecordingResult = useCallback(async (sessionId: string): Promise<StatusMessage> => {
     if (project === null) return { tone: 'warning', text: 'Open a local project before importing the recording.' };

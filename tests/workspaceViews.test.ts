@@ -158,8 +158,8 @@ async function flush(): Promise<void> {
 }
 
 describe('Phase 1A Workspace Stylesheet & Helpers', () => {
-  it('reuses Phase 0 tokens with zero gradients, zero glow shadows, zero pill soup, and root-stacking CUA Stop', () => {
-    expect(WORKSPACE_CSS).toContain('z-index: var(--os-z-cua-stop);');
+  it('reuses Phase 0 tokens with zero gradients, zero glow shadows, zero pill soup, without CUA Stop', () => {
+    expect(WORKSPACE_CSS).not.toContain('--os-z-cua-stop');
     expect(WORKSPACE_CSS).not.toMatch(/gradient\(|box-shadow:|999px|9999px/i);
     expect(WS.formatTimecodeSec(0)).toBe('00:00');
     expect(WS.formatTimecodeSec(84)).toBe('01:24');
@@ -193,7 +193,7 @@ describe('WorkspaceShell', () => {
     }
     expect(container.textContent).toContain('저장되지 않은 변경 있음');
   });
-  it('switches across 3 top-level tabs, supports intake mode, exposes CUA Stop protected button, and opens Settings Sheet', async () => {
+  it('switches across 3 top-level tabs, supports intake mode, omits removed CUA controls, and opens Settings Sheet', async () => {
     const doc = getDocument();
     const onStop = vi.fn();
     const onSave = vi.fn();
@@ -267,20 +267,14 @@ describe('WorkspaceShell', () => {
     };
     verifyAriaControlsResolved();
 
-    // CUA Stop button has fixed protected attributes and fires onStop
-    const stopBtn = container.querySelector('[data-testid="workspace-cua-stop-btn"]') as DomEl;
-    expect(stopBtn.getAttribute('data-cua-stop')).toBe('true');
-    expect(stopBtn.getAttribute('data-cua-protected')).toBe('stop-button');
-    expect(stopBtn.getAttribute('data-cua-active')).toBe('true');
-    act(() => stopBtn.click());
-    expect(onStop).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('[data-testid="workspace-cua-stop-btn"]')).toBeNull();
 
     // Safety strip reflects source preserved, dirty state, pending approval, and CUA status
     const safetyText = container.querySelector('[data-testid="workspace-safety-strip"]')?.textContent ?? '';
     expect(safetyText).toContain('원본 파일 보존됨');
     expect(safetyText).toContain('저장되지 않은 변경 있음');
     expect(safetyText).toContain('승인 대기 1건');
-    expect(safetyText).toContain('타임라인 트림 실행 중');
+    expect(safetyText).not.toContain('타임라인 트림 실행 중');
 
     // Top-level 3 tabs switch via mouse/keyboard
     const naturalTab = container.querySelector('[data-testid="mode-tab-natural"]') as DomEl;
@@ -323,7 +317,7 @@ describe('WorkspaceShell', () => {
     act(() => (container.querySelector('[data-testid="sidebar-settings-btn"]') as DomEl).click());
     const sheet = doc.querySelector('[data-os-portal="sheet"][role="dialog"]');
     expect(sheet).not.toBeNull();
-    expect(sheet?.getAttribute('data-cua-protected')).toBe('settings');
+    expect(sheet?.getAttribute('data-cua-protected')).toBeNull();
     expect(doc.querySelector('[data-testid="settings-drawer-body"]')?.textContent).toContain('Jev 연결 설정');
   });
 });

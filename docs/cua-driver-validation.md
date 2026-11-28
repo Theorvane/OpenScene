@@ -26,4 +26,4 @@ Raw initial evidence: `/tmp/openscene-cua-probe/input.json`, `/tmp/openscene-cua
 
 The actual OpenScene scenario (MCP clip creation, CUA selection/move, MCP state inspection, UI Undo) and mid-drag stop/rollback evidence are pending the coordinated Frontend Pointer Events implementation and LLM main approval runtime. Stop must verify renderer rollback before claiming cancellation, since a plain mouseUp can commit a pointer drag. Fresh verification, exact final SHA, CI and independent review must accompany the completed integration.
 
-This capability is Electron desktop-specific. Mobile cannot capture/control a BrowserWindow; the shared DTO and pure coordinate conversion must still compile under the mobile TypeScript configuration.
+This capability is Electron desktop-specific. The shared DTO and pure coordinate conversion must compile under the desktop main/renderer TypeScript configurations. Mobile support is deferred.
