@@ -3,6 +3,7 @@ import { selectSourcePreviewAsset, sourcePreviewDurationMs, sourceTransportTarge
 import { buildSourcePreviewTracks, sourcePreviewCaptions, type SourceAudioStatus, type SourceCaptionSnapshot } from '../../../shared/sourcePreviewTimeline';
 import type { SubtitleCue } from '../../../shared/narrationPlan';
 import { SourceTrackTimeline } from './SourceTrackTimeline';
+import { SourceTransportIcon } from './SourceTransportIcon';
 import { formatDuration } from '../format';
 
 type SourceAsset = {
@@ -88,15 +89,15 @@ function SourcePlayer({ projectId, asset, active, captions }: { readonly project
     {error !== null && <div role="alert">{error} <button type="button" onClick={() => { setRetry(value => value + 1); videoRef.current?.load(); }}>다시 시도</button></div>}
     {url === null && error === null && <p>원본 영상 불러오는 중…</p>}
     <div className="source-media-preview__transport" role="group" aria-label="원본 재생 제어">
-      <button type="button" aria-label="원본 처음으로" disabled={disabled} onClick={() => seek(sourceTransportTargetMs(positionMs, durationMs, 'start'))}>처음으로</button>
-      <button type="button" aria-label="원본 5초 뒤로" disabled={disabled} onClick={() => seek(sourceTransportTargetMs(positionMs, durationMs, 'back'))}>−5초</button>
-      <button type="button" aria-label={isPlaying ? '원본 일시정지' : '원본 재생'} disabled={disabled} onClick={() => { void togglePlayback(); }}>{isPlaying ? '일시정지' : '재생'}</button>
-      <button type="button" aria-label="원본 5초 앞으로" disabled={disabled} onClick={() => seek(sourceTransportTargetMs(positionMs, durationMs, 'forward'))}>+5초</button>
-      <button type="button" aria-label="원본 끝으로" disabled={disabled} onClick={() => seek(sourceTransportTargetMs(positionMs, durationMs, 'end'))}>끝으로</button>
-      <button type="button" aria-label={muted ? '원본 소리 켜기' : '원본 소리 끄기'} aria-pressed={muted} disabled={disabled} onClick={() => {
+      <button type="button" aria-label="원본 처음으로" title="처음으로" disabled={disabled} onClick={() => seek(sourceTransportTargetMs(positionMs, durationMs, 'start'))}><SourceTransportIcon name="start" /></button>
+      <button type="button" aria-label="원본 5초 뒤로" title="5초 뒤로" disabled={disabled} onClick={() => seek(sourceTransportTargetMs(positionMs, durationMs, 'back'))}><SourceTransportIcon name="back" /></button>
+      <button type="button" aria-label={isPlaying ? '원본 일시정지' : '원본 재생'} title={isPlaying ? '일시정지' : '재생'} disabled={disabled} onClick={() => { void togglePlayback(); }}><SourceTransportIcon name={isPlaying ? 'pause' : 'play'} /></button>
+      <button type="button" aria-label="원본 5초 앞으로" title="5초 앞으로" disabled={disabled} onClick={() => seek(sourceTransportTargetMs(positionMs, durationMs, 'forward'))}><SourceTransportIcon name="forward" /></button>
+      <button type="button" aria-label="원본 끝으로" title="끝으로" disabled={disabled} onClick={() => seek(sourceTransportTargetMs(positionMs, durationMs, 'end'))}><SourceTransportIcon name="end" /></button>
+      <button type="button" aria-label={muted ? '원본 소리 켜기' : '원본 소리 끄기'} title={muted ? '소리 켜기' : '음소거'} aria-pressed={muted} disabled={disabled} onClick={() => {
         const video = videoRef.current;
         if (video !== null) { video.muted = !video.muted; setMuted(video.muted); }
-      }}>{muted ? '소리 켜기' : '음소거'}</button>
+      }}><SourceTransportIcon name={muted ? 'muted' : 'sound'} /></button>
       <span>{formatDuration(positionMs)} / {formatDuration(durationMs)}</span>
     </div>
     <SourceTrackTimeline tracks={tracks} durationMs={durationMs} positionMs={positionMs} disabled={disabled} onSeek={seek} />
