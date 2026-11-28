@@ -87,7 +87,7 @@ describe('persistent agent control surface', () => {
     expect(app).not.toContain('byteLength');
     expect(appShell).toContain('readonly activeProjectContext: EditAgentProjectContext | null;');
     expect(appShell).toContain('activeProject={props.activeProjectContext}');
-    expect(panel).toContain('readonly width: number;');
+    expect(panel).toContain('readonly width?: number;');
     expect(panel).toContain('agent-chat-project-scope');
     expect(panel).toContain('Open a project to give the agent project scope.');
     expect(panel).not.toContain('Active selection');

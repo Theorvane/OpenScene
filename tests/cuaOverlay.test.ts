@@ -341,10 +341,10 @@ describe('CuaOverlay', () => {
     expect(timelineCanvas).toContain('data-dirty={editor.hasUnsavedTimeline');
     expect(timelineCanvas).toContain('data-saving={editor.isSavingTimeline');
     expect(timelineCanvas).toContain('data-save-status={editor.timelineSaveStatus}');
-    expect(timelineEditor).toContain('data-testid="editor-save-btn"');
-    expect(timelineEditor).toContain('data-dirty={editor.hasUnsavedTimeline');
-    expect(timelineEditor).toContain('data-saving={editor.isSavingTimeline');
-    expect(timelineEditor).toContain('data-save-status={editor.timelineSaveStatus}');
+    expect(timelineEditor).not.toContain('data-testid="editor-save-btn"');
+    const shell = await readFile(new URL('../src/renderer/components/workspace/WorkspaceShell.tsx', import.meta.url), 'utf8');
+    expect(shell).toContain('data-testid="workspace-save-btn"');
+    expect(shell).toContain('data-cua-protected="chrome-menu"');
   });
 });
 

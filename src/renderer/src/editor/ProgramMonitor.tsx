@@ -1,3 +1,4 @@
+import { PlaybackTransport } from './PlaybackTransport';
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactElement, type ReactNode, type SyntheticEvent } from 'react';
 
 import type { TimelineEditorController } from './useTimelineEditor';
@@ -43,16 +44,6 @@ function clearPreviewRequestTimeout(attempt: PreviewRequestAttempt): void {
   attempt.timeoutId = null;
 }
 
-// 30fps based timecode generator: HH:MM:SS:FF
-function formatTimecode(ms: number): string {
-  const totalSeconds = Math.floor(ms / 1000);
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  const frames = Math.floor((ms % 1000) / (1000 / 30));
-  return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`;
-}
-
 function meterPercent(value: number): number {
   return Math.round(value * AUDIO_METER_PERCENT_SCALE);
 }
@@ -70,6 +61,7 @@ export function ProgramMonitor({ editor, exportControl }: ProgramMonitorProps): 
   );
   const [previewRetryRevision, setPreviewRetryRevision] = useState(0);
   const [readyAttemptId, setReadyAttemptId] = useState(0);
+  const [previewMuted, setPreviewMuted] = useState(false);
   const [scale, setScale] = useState('Fit');
   const [resolution, setResolution] = useState('Full');
   const [showSafeMargins, setShowSafeMargins] = useState(false);
@@ -210,18 +202,6 @@ export function ProgramMonitor({ editor, exportControl }: ProgramMonitorProps): 
     });
   }, [editor.isPlaying, editor.setIsPlaying, readyPreviewIsActivePlaybackClip, readyAttemptId]);
 
-  const stepFrame = (direction: 'forward' | 'backward'): void => {
-    if (project === null) return;
-    const frameMs = 1000 / 30; // 30 fps
-    const targetMs = direction === 'forward' ? editor.playheadMs + frameMs : editor.playheadMs - frameMs;
-    editor.setPlayheadMs(Math.max(0, targetMs));
-  };
-
-  const stopPlayback = (): void => {
-    editor.setIsPlaying(false);
-    editor.setPlayheadMs(0);
-  };
-
   const retryPreview = (): void => {
     if (asset === null || project === null || previewLoadState.status !== 'error') return;
     setPreviewLoadState(programMonitorPreviewLoadState({ type: 'loading' }));
@@ -290,14 +270,14 @@ export function ProgramMonitor({ editor, exportControl }: ProgramMonitorProps): 
         };
         const mediaLabel = `${asset.kind === 'video' ? 'Video' : asset.kind === 'image' ? 'Image' : 'Audio'} preview: ${asset.displayName}`;
         if (asset.kind === 'video') {
-          preview = <video ref={setMediaElement} key={readyAttemptId} src={previewLoadState.url} aria-label={mediaLabel} controls={false} playsInline style={activeVideoStyle} onAbort={onMediaFailure} onEnded={handleMediaEnded} onError={onMediaFailure} />;
+          preview = <video muted={previewMuted} ref={setMediaElement} key={readyAttemptId} src={previewLoadState.url} aria-label={mediaLabel} controls={false} playsInline style={activeVideoStyle} onAbort={onMediaFailure} onEnded={handleMediaEnded} onError={onMediaFailure} />;
         } else if (asset.kind === 'image') {
           preview = <img key={readyAttemptId} src={previewLoadState.url} alt={mediaLabel} style={activeVideoStyle} onError={() => reportMediaFailure(readyAttemptId)} />;
         } else {
           preview = (
             <div className="preview-frame__empty">
               <span>{mediaLabel}</span>
-              <audio ref={setMediaElement} key={readyAttemptId} src={previewLoadState.url} aria-label={mediaLabel} controls={false} onAbort={onMediaFailure} onEnded={handleMediaEnded} onError={onMediaFailure} />
+              <audio muted={previewMuted} ref={setMediaElement} key={readyAttemptId} src={previewLoadState.url} aria-label={mediaLabel} controls={false} onAbort={onMediaFailure} onEnded={handleMediaEnded} onError={onMediaFailure} />
             </div>
           );
         }
@@ -423,70 +403,15 @@ export function ProgramMonitor({ editor, exportControl }: ProgramMonitorProps): 
         className="monitor-controls"
         style={{
           display: 'grid',
-          gridTemplateColumns: '1fr auto 1fr',
+          gridTemplateColumns: 'minmax(0, 1fr) auto',
           alignItems: 'center',
           gap: 'var(--space-3)',
           padding: 'var(--space-2) var(--space-2) 0',
           marginTop: 'var(--space-1)'
         }}
       >
-        {/* Left: current / total timecode */}
-        <div
-          className="timecode-display"
-          style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--space-2)', minWidth: 0 }}
-          title="Current playhead position (HH:MM:SS:FF)"
-        >
-          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-caption)', fontWeight: 500, color: 'var(--text-strong)' }}>
-            {formatTimecode(editor.playheadMs)}
-          </span>
-          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-caption)', color: 'var(--text-weaker)' }}>
-            / {formatTimecode(durationMs)}
-          </span>
-        </div>
-
-        {/* Center: playback controls */}
-        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 'var(--space-1)' }}>
-          <button
-            className="button button--ghost"
-            style={{ padding: '2px 8px', minHeight: '26px' }}
-            aria-label="Step backward one frame"
-            title="Step backward 1 frame"
-            onClick={() => stepFrame('backward')}
-            disabled={project === null}
-          >
-            ⏮
-          </button>
-          <button
-            className="button button--ghost"
-            style={{ padding: '2px 10px', minHeight: '26px', minWidth: '44px', fontSize: 'var(--text-body)' }}
-            aria-label={editor.isPlaying ? 'Pause timeline playback' : 'Play timeline playback'}
-            title="Play / Pause"
-            onClick={() => editor.setIsPlaying(!editor.isPlaying)}
-            disabled={project === null}
-          >
-            {editor.isPlaying ? '⏸' : '▶'}
-          </button>
-          <button
-            className="button button--ghost"
-            style={{ padding: '2px 8px', minHeight: '26px' }}
-            aria-label="Stop timeline playback and return to start"
-            title="Stop playback"
-            onClick={stopPlayback}
-            disabled={project === null}
-          >
-            ⏹
-          </button>
-          <button
-            className="button button--ghost"
-            style={{ padding: '2px 8px', minHeight: '26px' }}
-            aria-label="Step forward one frame"
-            title="Step forward 1 frame"
-            onClick={() => stepFrame('forward')}
-            disabled={project === null}
-          >
-            ⏭
-          </button>
-        </div>
+        <PlaybackTransport positionMs={editor.playheadMs} durationMs={durationMs} playing={editor.isPlaying} disabled={project === null || durationMs <= 0}
+          onSeek={editor.setPlayheadMs} onToggle={() => editor.setIsPlaying(!editor.isPlaying)} muted={previewMuted} onMute={() => setPreviewMuted(value => !value)} />
 
         {/* Right: view options */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 'var(--space-1)' }}>

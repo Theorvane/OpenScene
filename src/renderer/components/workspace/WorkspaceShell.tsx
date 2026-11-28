@@ -46,9 +46,12 @@ export interface WorkspaceShellProps {
   readonly safety: WorkspaceSafetyState;
   readonly canUndo?: boolean;
   readonly onUndo?: () => void;
+  readonly canRedo?: boolean;
+  readonly onRedo?: () => void;
   readonly onSave?: () => void;
   readonly saveScopeLabel?: string;
   readonly onStop: () => void;
+  readonly showAutomationStop?: boolean;
   readonly onOpenAssets?: () => void;
   readonly onOpenSettings?: () => void;
   readonly assetsDrawerContent?: ReactNode;
@@ -58,6 +61,11 @@ export interface WorkspaceShellProps {
   readonly children: ReactNode;
   /** Keep a live editor mounted when only its presentation changes. */
   readonly persistentContent?: boolean;
+  readonly videoList?: ReactNode;
+  readonly showProjectIdentity?: boolean;
+  readonly showSettingsShortcut?: boolean;
+  readonly onProjectSettings?: (() => void) | undefined;
+  readonly actions?: ReactNode;
 }
 
 function BrandMark(): ReactElement {
@@ -148,9 +156,17 @@ export function WorkspaceShell({
   onSelectCandidate,
   onSelectProject,
   onStop,
+  showAutomationStop = true,
   onUndo,
+  canRedo = false,
+  onRedo,
   projects,
   persistentContent = false,
+  videoList,
+  showProjectIdentity = true,
+  showSettingsShortcut = true,
+  onProjectSettings,
+  actions,
   safety,
   saveScopeLabel,
   showCandidateNavigation = true,
@@ -195,6 +211,7 @@ export function WorkspaceShell({
       >
         <header className="os-ws-header" data-cua-protected="chrome-menu" data-cua-protected-id="workspace-header">
           <div className="os-ws-header__left">
+            {showProjectIdentity && <>
             <span className="os-ws-brand">
               <BrandMark />
               <span>OpenScene</span>
@@ -214,6 +231,7 @@ export function WorkspaceShell({
                 {activeProject?.sourceFileName ?? projectDisplayName}
               </TooltipContent>
             </Tooltip>
+            </>}
           </div>
 
           <div className="os-ws-header__center">
@@ -246,6 +264,7 @@ export function WorkspaceShell({
               <DropdownMenuContent align="end">
                 <DropdownMenuLabel>프로젝트 작업</DropdownMenuLabel>
                 <DropdownMenuItem onSelect={onNewVideo}>새 영상 시작</DropdownMenuItem>
+                {onProjectSettings && <DropdownMenuItem onSelect={onProjectSettings}>프로젝트 설정</DropdownMenuItem>}
                 {onDuplicateProject !== undefined && (
                   <DropdownMenuItem onSelect={onDuplicateProject}>프로젝트 복제</DropdownMenuItem>
                 )}
@@ -268,8 +287,9 @@ export function WorkspaceShell({
               data-testid="workspace-undo-btn"
             >
               <UndoIcon />
-              <span>취소</span>
+              <span>실행 취소</span>
             </Button>
+            {onRedo && <Button variant="ghost" size="sm" disabled={!canRedo} onClick={onRedo} aria-label="다시 실행" data-testid="workspace-redo-btn">↪</Button>}
 
             <Button
               variant="primary"
@@ -282,8 +302,9 @@ export function WorkspaceShell({
             >
               저장
             </Button>
+            {actions}
 
-            <button
+            {showAutomationStop && safety.cuaStatus !== undefined && safety.cuaStatus !== 'idle' && <button
               type="button"
               className="os-ws-stop-btn"
               data-cua-stop="true"
@@ -293,8 +314,8 @@ export function WorkspaceShell({
               onClick={onStop}
             >
               <StopIcon />
-              <span>중지</span>
-            </button>
+              <span>자동 조작 중지</span>
+            </button>}
           </div>
         </header>
 
@@ -328,7 +349,7 @@ export function WorkspaceShell({
           <aside className="os-ws-sidebar" aria-label="프로젝트 및 후보 탐색" data-cua-protected="chrome-menu" data-cua-protected-id="workspace-sidebar">
             <ScrollArea className="os-ws-sidebar__scroll">
               <div className="os-ws-sidebar__inner">
-                <section className="os-ws-sidebar__section">
+                {videoList ?? <section className="os-ws-sidebar__section">
                   <div className="os-ws-sidebar__section-header">
                     <span className="os-ws-sidebar__heading">프로젝트</span>
                     <Button
@@ -360,7 +381,7 @@ export function WorkspaceShell({
                       </button>
                     ))
                   )}
-                </section>
+                </section>}
 
                 {showCandidateNavigation && <section className="os-ws-sidebar__section">
                   <div className="os-ws-sidebar__section-header">
@@ -402,7 +423,7 @@ export function WorkspaceShell({
                 <FolderIcon />
                 <span>자산</span>
               </Button>
-              <Button
+              {showSettingsShortcut && <Button
                 variant="ghost"
                 size="sm"
                 className="os-ws-sidebar__footer-btn"
@@ -411,7 +432,7 @@ export function WorkspaceShell({
               >
                 <SlidersIcon />
                 <span>설정 · Jev</span>
-              </Button>
+              </Button>}
             </div>
           </aside>
 

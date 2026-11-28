@@ -48,10 +48,11 @@ function AudioPicture({ projectId, asset }: { projectId: string; asset: MediaAss
   </div>;
 }
 
-export function VideoConnectionCanvas({ editor, locked, onPreview }: {
+export function VideoConnectionCanvas({ editor, locked, onPreview, showHistoryControls = true }: {
   editor: TimelineEditorController;
   locked: boolean;
   onPreview: () => void;
+  showHistoryControls?: boolean;
 }) {
   const project = editor.project!;
   const storageKey = `openvideo-canvas-layout-${project.id}`;
@@ -273,12 +274,12 @@ export function VideoConnectionCanvas({ editor, locked, onPreview }: {
         if (finalBlock) requestApply(finalBlock.id);
       }}>적용 영향 확인</button>
       <button type="button" onClick={onPreview}>Review timeline</button>
-      <button type="button" disabled={locked || !editor.canUndoTimeline} onClick={() => {
+      {showHistoryControls && <><button type="button" disabled={locked || !editor.canUndoTimeline} onClick={() => {
         editor.undoTimeline(); setFromId(null); setToId(null); setNotice('Canvas edit undone.');
       }}>Undo</button>
       <button type="button" disabled={locked || !editor.canRedoTimeline} onClick={() => {
         editor.redoTimeline(); setFromId(null); setToId(null); setNotice('Canvas edit restored.');
-      }}>Redo</button>
+      }}>Redo</button></>}
       <button type="button" disabled={locked} onClick={() => arrange()}>Auto arrange</button>
       <button type="button" onClick={fitView}>Fit</button>
       <button type="button" aria-label="Zoom out canvas" onClick={() => setZoom(Math.max(.2, zoom - .1))}>−</button>

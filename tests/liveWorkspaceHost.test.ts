@@ -5,15 +5,17 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 const fixture = vi.hoisted(() => ({
   stop: vi.fn(),
+  cuaPhase: 'idle',
   chat: { isBusy: false, pendingApproval: null, input: '', setInput: vi.fn() },
   shortcuts: vi.fn()
 }));
 vi.mock('../src/renderer/src/AgentChatContext', () => ({ useAgentChat: () => fixture.chat }));
-vi.mock('../src/renderer/src/cua/useCuaOverlay', () => ({ useCuaActing: () => false, useCuaOverlay: () => ({ state: { phase: 'idle' }, triggerStop: fixture.stop }) }));
+vi.mock('../src/renderer/src/cua/useCuaOverlay', () => ({ useCuaActing: () => false, useCuaOverlay: () => ({ state: { phase: fixture.cuaPhase }, triggerStop: fixture.stop }) }));
 vi.mock('../src/renderer/src/ThemeProvider', () => ({ useTheme: () => ({ mode: 'dark', preset: 'neutral', setPreset: vi.fn(), toggleTheme: vi.fn() }) }));
 vi.mock('../src/renderer/src/editor/useTimelineShortcuts', () => ({ useTimelineShortcuts: fixture.shortcuts }));
 vi.mock('../src/renderer/src/editor/useEditorNativeMenuCommands', () => ({ useEditorNativeMenuCommands: vi.fn() }));
 vi.mock('../src/renderer/src/editor/AssetMetadataProbeHost', () => ({ AssetMetadataProbeHost: () => null }));
+vi.mock('../src/renderer/src/editor/VideoResultsList', () => ({ VideoResultsList: () => null }));
 vi.mock('../src/renderer/src/editor/ExportPanel', () => ({ ExportPanel: () => null }));
 vi.mock('../src/renderer/src/editor/InspectorPanel', () => ({ InspectorPanel: () => null }));
 vi.mock('../src/renderer/src/editor/ProjectRail', () => ({ ProjectRail: () => null }));
@@ -40,11 +42,11 @@ beforeAll(() => {
 afterEach(() => { act(() => unmount?.()); unmount = undefined; vi.clearAllMocks(); });
 
 describe('mounted desktop workspace host', () => {
-  it('defaults to natural, retains real controller and mounted review/monitor/timeline across modes, and wires save/Undo/Stop', async () => {
+  it('uses one shared monitor and visible timeline across modes, with one project toolbar and no default shorts workflow', async () => {
     const modulePath = '../src/renderer/src/editor/TimelineEditor.tsx';
     const { TimelineEditor } = await import(modulePath) as { TimelineEditor: ComponentType<Record<string, unknown>> };
     const editor = {
-      project: { id: 'project', name: '긴 한국어 프로젝트 이름', assets: [{ id: 'asset', kind: 'video', displayName: 'Source take', metadata: { durationMs: 5000 } }], timeline: { tracks: [] } },
+      project: { id: 'project', name: '긴 한국어 프로젝트 이름', assets: [{ id: 'asset', kind: 'video', displayName: 'Source take', metadata: { durationMs: 5000 } }], timeline: { tracks: [{ id: 'v', kind: 'video', clips: [{ id: 'c' }] }] } },
       projects: [{ id: 'project', name: '긴 한국어 프로젝트 이름', updatedAt: '2026-11-26' }],
       selectedAsset: null, selectedClip: null, hasUnsavedTimeline: true, canUndoTimeline: true,
       isBusy: false, isSavingTimeline: false, timelineSaveStatus: 'idle', statusMessage: { tone: 'neutral', text: '' },
@@ -59,27 +61,28 @@ describe('mounted desktop workspace host', () => {
     const KeyboardEventCtor = (globalThis as unknown as { KeyboardEvent: new (name: string, opts: object) => Event }).KeyboardEvent;
     const changeMode = (mode: string) => act(() => { button(`mode-tab-${mode}`).dispatchEvent(new KeyboardEventCtor('keydown', { key: 'Enter', bubbles: true })); });
     expect(container.querySelector('[data-workspace-mode]')?.getAttribute('data-workspace-mode')).toBe('natural');
-    const shorts = container.querySelector('[data-probe="shorts"]')!;
-    const timeline = container.querySelector('[data-probe="timeline"]')!;
+    expect(container.querySelector('[data-probe="shorts"]')).toBeNull();
+    expect(container.querySelector('[data-testid="sidebar-settings-btn"]')).toBeNull();
+    expect(container.querySelector('[data-testid="workspace-project-name"]')).toBeNull();
+    expect(container.querySelector('.oc-editor-host__header')?.textContent).toBe('');
+    expect(container.querySelector('[data-testid="workspace-cua-stop-btn"]')).toBeNull();
     const monitor = container.querySelector('[data-probe="monitor"]')!;
-    expect(timeline.closest('[hidden]')).not.toBeNull();
-    expect(container.querySelector('.source-media-preview')?.closest('[hidden]')).toBeNull();
-    expect(container.querySelector('input[aria-label="원본 영상 재생 위치"]')?.getAttribute('max')).toBe('5000');
-    act(() => (shorts as unknown as { click: () => void }).click());
     for (const mode of ['precision', 'node', 'natural']) {
       changeMode(mode);
-      expect(container.querySelector('[data-probe="shorts"]')).toBe(shorts);
-      expect(container.querySelector('[data-probe="timeline"]')).toBe(timeline);
       expect(container.querySelector('[data-probe="monitor"]')).toBe(monitor);
-      expect(shorts.textContent).toBe('1');
       expect(monitor.textContent).toBe('1234:true');
-      expect(timeline.closest('[hidden]') === null).toBe(mode === 'precision');
+      const visibleTimelines = [...container.querySelectorAll('[data-probe="timeline"]')].filter(node => node.closest('[hidden]') === null);
+      expect(visibleTimelines).toHaveLength(mode === 'node' ? 0 : 1);
+      expect(container.querySelector('[data-probe="shorts"]')).toBeNull();
       expect(container.querySelector('[aria-label="Local analysis tools"]') !== null).toBe(mode === 'precision');
     }
-    expect(editor.setIsPlaying).not.toHaveBeenCalled();
+    expect(editor.setIsPlaying).toHaveBeenCalledWith(false);
+    fixture.cuaPhase = 'acting';
+    await act(async () => root.render(createElement(TimelineEditor, { editor })));
     const click = (id: string) => act(() => (button(id) as unknown as { click: () => void }).click());
-    click('workspace-save-btn'); click('workspace-undo-btn'); click('workspace-cua-stop-btn');
-    expect(editor.saveTimeline).toHaveBeenCalledOnce(); expect(editor.undoTimeline).toHaveBeenCalledOnce(); expect(fixture.stop).toHaveBeenCalledOnce();
+    click('workspace-save-btn'); click('workspace-undo-btn');
+    expect(editor.saveTimeline).toHaveBeenCalledOnce(); expect(editor.undoTimeline).toHaveBeenCalledOnce();
+    expect(container.querySelector('[data-testid="workspace-cua-stop-btn"]')).toBeNull(); // AppShell owns the single protected emergency stop.
     expect(container.textContent).toContain('저장되지 않은 변경 있음');
     expect(fixture.shortcuts).toHaveBeenLastCalledWith(expect.objectContaining({ isLocked: true }));
   });

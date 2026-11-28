@@ -29,6 +29,7 @@ import type { TimelineEditorController } from './useTimelineEditor';
 type TimelineCanvasProps = {
   readonly editor: TimelineEditorController;
   readonly id?: string;
+  readonly showHistoryControls?: boolean;
 };
 
 type TimelineDragPayload =
@@ -282,7 +283,7 @@ function ClipWaveform({
   );
 }
 
-export function TimelineCanvas({ editor, id }: TimelineCanvasProps): ReactElement {
+export function TimelineCanvas({ editor, id, showHistoryControls = true }: TimelineCanvasProps): ReactElement {
   const project = editor.project;
   const view = project === null ? null : buildTimelineView(project.timeline, project.assets);
   const playheadPercent = view === null ? 0 : (editor.playheadMs / view.durationMs) * 100;
@@ -823,7 +824,7 @@ export function TimelineCanvas({ editor, id }: TimelineCanvasProps): ReactElemen
               {ICONS.separateAudio}
             </button>
             <span aria-hidden="true" style={{ width: '1px', height: '18px', background: 'var(--border)', margin: '0 2px' }} />
-            <button
+            {showHistoryControls && <><button
               type="button"
               data-testid="timeline-undo-btn"
               onClick={editor.undoTimeline}
@@ -844,7 +845,7 @@ export function TimelineCanvas({ editor, id }: TimelineCanvasProps): ReactElemen
               title="Redo (Cmd/Ctrl+Shift+Z)"
             >
               {ICONS.redo}
-            </button>
+            </button></>}
           </div>
         </div>
 

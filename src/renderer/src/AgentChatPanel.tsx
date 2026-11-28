@@ -30,15 +30,16 @@ const CUA_ERROR_GUIDANCE: Readonly<Record<AgentCuaErrorCode, string>> = {
 };
 
 type AgentChatPanelProps = {
-  readonly width: number;
-  readonly onCollapse: () => void;
+  readonly width?: number;
+  readonly onCollapse?: () => void;
+  readonly inline?: boolean;
 };
 
 type AgentChatPanelStyle = CSSProperties & {
   readonly '--agent-chat-panel-width': string;
 };
 
-export function AgentChatPanel({ width, onCollapse }: AgentChatPanelProps): ReactElement {
+export function AgentChatPanel({ width = 360, onCollapse, inline = false }: AgentChatPanelProps): ReactElement {
   const {
     selectedModel,
     isLocalModel,
@@ -61,7 +62,8 @@ export function AgentChatPanel({ width, onCollapse }: AgentChatPanelProps): Reac
     sendMessage,
     respondToApproval,
     resetConversation,
-    compactConversation
+    compactConversation,
+    cancelConversation
   } = useAgentChat();
 
   const listEndRef = useRef<HTMLDivElement | null>(null);
@@ -86,7 +88,7 @@ export function AgentChatPanel({ width, onCollapse }: AgentChatPanelProps): Reac
   return (
     <aside
       id="app-shell-agent-chat"
-      className="agent-chat-panel-shell"
+      className={`agent-chat-panel-shell${inline ? ' agent-chat-panel-shell--inline' : ''}`}
       aria-label="OpenScene agent chat"
       data-cua-protected="agent-panel"
       data-cua-protected-id="agent-chat-panel"
@@ -104,7 +106,7 @@ export function AgentChatPanel({ width, onCollapse }: AgentChatPanelProps): Reac
             <Button variant="ghost" onClick={resetConversation} disabled={isBusy} title="Reset conversation" aria-label="Reset conversation">
               Reset
             </Button>
-            <Button
+            {onCollapse && <Button
               variant="ghost"
               onClick={onCollapse}
               title="Collapse agent chat"
@@ -113,7 +115,7 @@ export function AgentChatPanel({ width, onCollapse }: AgentChatPanelProps): Reac
               aria-expanded={true}
             >
               ⇥
-            </Button>
+            </Button>}
           </div>
         </div>
 
@@ -151,6 +153,8 @@ export function AgentChatPanel({ width, onCollapse }: AgentChatPanelProps): Reac
         </div>
 
         <div className="agent-chat-log" aria-live="polite">
+          <details className="agent-chat-control-mode">
+          <summary>에이전트 제어: {interactionMode === 'project-tools' ? '편집 도구' : '화면 자동 조작'}</summary>
           <div role="group" aria-label="Agent interaction mode">
             <Button variant={interactionMode === 'project-tools' ? 'primary' : 'ghost'} data-testid="agent-mode-project-tools"
               aria-pressed={interactionMode === 'project-tools'} disabled={isBusy || pendingApproval !== null}
@@ -159,7 +163,8 @@ export function AgentChatPanel({ width, onCollapse }: AgentChatPanelProps): Reac
               aria-pressed={interactionMode === 'self-window'} disabled={isBusy || pendingApproval !== null}
               onClick={() => { void changeInteractionMode('self-window'); }}>Window CUA (desktop)</Button>
           </div>
-          <p>Changing mode starts a new conversation after the current run settles. It does not save the project.</p>
+          <p>에이전트 제어 방식을 변경하면 새 대화를 시작합니다. 상단 자연어·정밀·노드 화면 전환은 같은 편집과 대화를 유지합니다.</p>
+          </details>
           {interactionMode === 'self-window' && <p>Window CUA observes live UI without automatically saving. Saved-project tools require an explicitly approved Save when the UI may be dirty.</p>}
 
           {!modelReady && (
@@ -375,14 +380,14 @@ export function AgentChatPanel({ width, onCollapse }: AgentChatPanelProps): Reac
               <div className="agent-chat-prompt-card__meta">
                 <AgentModelPicker reasoningEffort={reasoningEffort} onReasoningEffortChange={setReasoningEffort} />
               </div>
-              <Button
+              {isBusy ? <Button type="button" variant="stop" onClick={() => { void cancelConversation(); }}>요청 중지</Button> : <Button
                 type="submit"
                 variant="primary"
                 disabled={isBusy || !modelReady || pendingApproval !== null || input.trim().length === 0}
                 aria-label="Send Edit Agent prompt"
               >
-                {isBusy ? 'Working…' : 'Send'}
-              </Button>
+                Send
+              </Button>}
             </div>
           </div>
         </form>

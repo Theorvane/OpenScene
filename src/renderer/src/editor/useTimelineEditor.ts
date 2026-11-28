@@ -749,40 +749,42 @@ export function useTimelineEditor() {
     return false;
   }, [clearMetadataProbeFailure, project]);
 
-  // The Edit Agent writes the project on disk from the main process, so an open
-  // editor must reload — otherwise the change is invisible and the next local
-  // save silently overwrites it. The edit always lands: it was asked for. Local
-  // unsaved work is not discarded but pushed onto the undo stack, because
-  // refusing to load left the agent's result invisible after any local edit.
+  // Agent writes join the same history and playback session as manual/canvas edits.
   useEffect(() => {
     const openProjectId = project?.id;
     if (openProjectId === undefined) return;
-    return window.videoTool.onProjectTimelineChanged((changedProjectId) => {
+    let requestRevision = 0;
+    let live = true;
+    const unsubscribe = window.videoTool.onProjectTimelineChanged((changedProjectId) => {
       if (changedProjectId !== openProjectId) return;
+      const epoch = projectLoadEpochRef.current;
+      const generation = projectGenerationRef.current;
+      const request = ++requestRevision;
       void (async () => {
-        const response = await window.videoTool.openProject({ projectId: openProjectId });
-        if (!response.ok) {
-          setStatusMessage({ tone: 'danger', text: errorMessage(response.error) });
-          return;
+        try {
+          const response = await window.videoTool.openProject({ projectId: openProjectId });
+          if (!live || request !== requestRevision || projectRef.current?.id !== openProjectId || epoch !== projectLoadEpochRef.current) return;
+          if (generation !== projectGenerationRef.current) {
+            setStatusMessage({ tone: 'warning', text: 'The agent saved an update, but newer local edits are open. Review the saved project before replacing this draft.' });
+            return;
+          }
+          if (!response.ok) { setStatusMessage({ tone: 'danger', text: errorMessage(response.error) }); return; }
+          const snapshot = response.value;
+          if (snapshot.id !== openProjectId) return;
+          notifyExternalCuaTimelineMutation();
+          setProject(snapshot);
+          setTimelineHistory(current => current === null ? createTimelineHistory(snapshot.timeline) : pushTimelineHistory(current, snapshot.timeline));
+          playback.clampToTimeline(snapshot.timeline);
+          setHasUnsavedTimeline(false);
+          setHasSavedTimelineOnce(true);
+          setStatusMessage({ tone: 'success', text: 'Agent edits applied to the open timeline. Use Undo to restore the previous edit.' });
+        } catch {
+          if (live && request === requestRevision && projectRef.current?.id === openProjectId) setStatusMessage({ tone: 'danger', text: 'The saved agent edit could not be refreshed.' });
         }
-        const snapshot = response.value;
-        if (!hasUnsavedTimeline) {
-          setLoadedProject(snapshot);
-          setStatusMessage({ tone: 'success', text: 'Timeline updated by the Edit Agent.' });
-          return;
-        }
-        notifyExternalCuaTimelineMutation();
-        setProject(snapshot);
-        setTimelineHistory((current) => current === null
-          ? createTimelineHistory(snapshot.timeline)
-          : pushTimelineHistory(current, snapshot.timeline));
-        playback.clampToTimeline(snapshot.timeline);
-        // In memory now matches disk; undo restores the local work.
-        setHasUnsavedTimeline(false);
-        setStatusMessage({ tone: 'warning', text: 'Loaded the Edit Agent timeline. Your unsaved edits are one undo away.' });
       })();
     });
-  }, [hasUnsavedTimeline, playback, project?.id, setLoadedProject]);
+    return () => { live = false; unsubscribe(); };
+  }, [playback.clampToTimeline, project?.id, setProject]);
 
   const renameProject = useCallback(async (name: string): Promise<boolean> => {
     if (project === null || cuaSaveFreezeTokenRef.current !== null) return false;

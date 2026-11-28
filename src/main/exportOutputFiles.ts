@@ -4,6 +4,8 @@ import { basename, isAbsolute, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { createDeliveryProvenanceSidecar, type DeliveryProvenance } from '../shared/exportProvenance';
 import type { SubtitleSidecar } from '../shared/subtitleDelivery';
+import type { LocalExportJob } from '../shared/exportTypes';
+import { isPlainRecord } from '../shared/timelineValidationPrimitives';
 
 import { isInsideDirectory, isOpaqueId } from './projectStoreSupport';
 
@@ -26,6 +28,37 @@ async function secureRootPath(rootDirectory: string): Promise<string> {
     throw new ExportOutputError('Configured export root changed during access.');
   }
   return rootRealPath;
+}
+
+/** Recover only completed deliveries, binding the existing receipt to actual MP4 bytes. */
+export async function readCompletedExport(rootDirectory: string, jobId: string): Promise<{ job: LocalExportJob; outputPath: string } | null> {
+  if (!isAbsolute(rootDirectory) || !isOpaqueId(jobId)) return null;
+  try {
+    const root = await secureRootPath(rootDirectory);
+    const file = await open(resolve(root, `${jobId}.provenance.json`), constants.O_RDONLY | constants.O_NOFOLLOW);
+    let value: unknown;
+    try {
+      const stats = await file.stat();
+      if (!stats.isFile() || stats.size <= 0 || stats.size > 4 * 1024 * 1024) return null;
+      const buffer = Buffer.alloc(stats.size + 1);
+      const read = await file.read(buffer, 0, buffer.length, 0);
+      if (read.bytesRead !== stats.size || (await file.stat()).size !== stats.size) return null;
+      value = JSON.parse(buffer.subarray(0, read.bytesRead).toString('utf8'));
+    } finally { await file.close(); }
+    if (!isPlainRecord(value) || value.schemaVersion !== 2 || !isPlainRecord(value.projectRevision) || !isPlainRecord(value.delivery) || !isPlainRecord(value.delivery.output)) return null;
+    const projectId = value.projectRevision.projectId;
+    const exportedAt = value.delivery.exportedAt;
+    const output = value.delivery.output;
+    if (typeof projectId !== 'string' || !isOpaqueId(projectId) || typeof exportedAt !== 'string' || !Number.isFinite(Date.parse(exportedAt)) ||
+      output.fileName !== `${jobId}.mp4` || !Number.isSafeInteger(output.fileSizeBytes) || typeof output.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(output.sha256)) return null;
+    const outputPath = resolve(root, `${jobId}.mp4`);
+    const validated = await validateExportOutput(rootDirectory, outputPath);
+    if (validated.fileSizeBytes !== output.fileSizeBytes) return null;
+    const checksum = await hashExportOutput(outputPath);
+    if (checksum.sha256 !== output.sha256 || checksum.fileSizeBytes !== output.fileSizeBytes) return null;
+    return { outputPath, job: { id: jobId, projectId, createdAt: exportedAt, updatedAt: exportedAt,
+      state: { kind: 'completed', completedAt: exportedAt, fileName: `${jobId}.mp4`, fileSizeBytes: validated.fileSizeBytes, provenanceFileName: `${jobId}.provenance.json` } } };
+  } catch { return null; }
 }
 
 export async function prepareExportOutputPath(rootDirectory: string, jobId: string): Promise<string> {

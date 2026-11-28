@@ -24,13 +24,13 @@ it('plays and seeks the entire imported source, clears stale URLs on project cha
   Object.defineProperty(video, 'duration', { configurable: true, value: 120 });
   act(() => video.dispatchEvent(new Event('loadedmetadata')));
   const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(async function(this: HTMLMediaElement) { this.dispatchEvent(new Event('play')); });
-  const playButton = () => container.querySelector<HTMLButtonElement>('button[aria-label="원본 재생"]');
+  const playButton = () => container.querySelector<HTMLButtonElement>('button[aria-label="재생"]');
   await act(async () => playButton()!.click());
   expect(play).toHaveBeenCalledOnce();
-  expect(container.querySelector('button[aria-label="원본 일시정지"]')).not.toBeNull();
-  act(() => container.querySelector<HTMLButtonElement>('button[aria-label="원본 일시정지"]')!.click());
+  expect(container.querySelector('button[aria-label="일시정지"]')).not.toBeNull();
+  act(() => container.querySelector<HTMLButtonElement>('button[aria-label="일시정지"]')!.click());
   expect(playButton()).not.toBeNull();
-  act(() => container.querySelector<HTMLButtonElement>('button[aria-label="원본 소리 끄기"]')!.click());
+  act(() => container.querySelector<HTMLButtonElement>('button[aria-label="음소거"]')!.click());
   expect(video.muted).toBe(true);
   expect(container.querySelectorAll('[data-source-track]')).toHaveLength(3);
 
@@ -40,15 +40,15 @@ it('plays and seeks the entire imported source, clears stale URLs on project cha
   expect(video.currentTime).toBe(60);
   act(() => { video.currentTime = 80; video.dispatchEvent(new Event('timeupdate')); });
   expect(slider.value).toBe('80000');
-  act(() => container.querySelector<HTMLButtonElement>('button[aria-label="원본 5초 뒤로"]')!.click());
+  act(() => container.querySelector<HTMLButtonElement>('button[aria-label="5초 뒤로"]')!.click());
   expect(video.currentTime).toBe(75);
-  act(() => container.querySelector<HTMLButtonElement>('button[aria-label="원본 5초 앞으로"]')!.click());
+  act(() => container.querySelector<HTMLButtonElement>('button[aria-label="5초 앞으로"]')!.click());
   expect(video.currentTime).toBe(80);
-  act(() => container.querySelector<HTMLButtonElement>('button[aria-label="원본 끝으로"]')!.click());
+  act(() => container.querySelector<HTMLButtonElement>('button[aria-label="끝으로"]')!.click());
   expect(video.currentTime).toBe(120);
-  act(() => container.querySelector<HTMLButtonElement>('button[aria-label="원본 5초 앞으로"]')!.click());
+  act(() => container.querySelector<HTMLButtonElement>('button[aria-label="5초 앞으로"]')!.click());
   expect(video.currentTime).toBe(120);
-  act(() => container.querySelector<HTMLButtonElement>('button[aria-label="원본 처음으로"]')!.click());
+  act(() => container.querySelector<HTMLButtonElement>('button[aria-label="처음으로"]')!.click());
   expect(video.currentTime).toBe(0);
   Object.defineProperty(video, 'paused', { configurable: true, value: false });
   await act(async () => root.render(createElement(SourceMediaPreview, { projectId: 'p', assets, selectedAssetId: 'a', active: false })));

@@ -9,7 +9,8 @@ describe('program monitor source regressions', () => {
     const source = await readFile(PROGRAM_MONITOR_SOURCE_URL, 'utf8');
 
     expect(source).not.toContain('muted={activePlaybackClip !== null}');
-    expect(source).not.toMatch(/<video[^>]*\smuted=/s);
+    expect(source).toContain('const [previewMuted, setPreviewMuted] = useState(false)');
+    expect(source).toMatch(/<video[^>]*muted=\{previewMuted\}/s);
     expect(source).toContain('syncTimelineMediaVolume({ media: mediaRef.current, volume: mediaVolume })');
   });
 

@@ -22,6 +22,10 @@ import type { ExportIpcService } from './exportIpcService';
 import { discoverFfmpeg } from './ffmpegDiscovery';
 import type { ProjectStore } from './projectStore';
 import type { TranscriptionService } from './transcriptionService';
+import type { ShortsService } from './shortsService';
+import type { ShortsStartInput, ShortsJob } from '../shared/shortsTypes';
+import type { ApiResponse } from '../shared/models';
+import { fail } from './ipcResponses';
 import {
   extractVideoFrames,
   formatFrameTimestamp,
@@ -64,6 +68,34 @@ export class OpenVideoMcpServer {
   private exportIpcService: ExportIpcService | undefined;
   private watchFrameExtractor: WatchFrameExtractor = defaultWatchFrameExtractor;
   private transcriptionService: TranscriptionService | undefined;
+  private shortsService: Pick<ShortsService, 'start' | 'get' | 'list' | 'materialize' | 'export' | 'cancel'> | undefined;
+
+  public setShortsService(service: NonNullable<OpenVideoMcpServer['shortsService']>): void { this.shortsService = service; }
+
+  private async shortsCall<T>(action: keyof NonNullable<OpenVideoMcpServer['shortsService']>, payload: unknown): Promise<ApiResponse<T>> {
+    if (!this.shortsService) return fail('UNKNOWN_ERROR', 'The local shorts service is unavailable.');
+    try { return await this.shortsService[action](payload) as ApiResponse<T>; }
+    catch { return fail('UNKNOWN_ERROR', 'The local shorts operation failed. Inspect the retained job and retry explicitly.'); }
+  }
+
+  @McpTool({ description: 'Only when the user requests shorts/highlights: start evidence-based selection over an imported video, using the explicitly selected model/provider. May transcribe with the configured local engine and call that provider; requires approval. Returns a durable job, not finished videos. Never install models/services. Poll getShortsJob until cleanupComplete and stage=review; then review its candidate source ranges before proposing createShortsProjects.',
+    input: z.object({ projectId: z.string().min(1), assetId: z.string().min(1), modelId: z.string().min(1).max(200), openAiAuthMode: z.enum(['api-key', 'chatgpt']).optional(), ollamaBaseUrl: z.string().max(2000).optional(), reasoningEffort: z.string().max(50).optional(), requestedCount: z.number().int().min(1).max(5).optional(), minDurationMs: z.number().int().positive().optional(), maxDurationMs: z.number().int().positive().optional() }).strict() })
+  async startShortsSelection(params: ShortsStartInput) { return this.shortsCall<ShortsJob>('start', params); }
+
+  @McpTool({ description: 'Read a durable shorts job, source-clock candidate evidence, created project IDs and export job IDs. Read-only. cleanupComplete=false means work/cleanup is still running. Never claim completed MP4s from ready editable projects. After selection review, use separately approved createShortsProjects and exportShortsVideos. Do not restart a run merely because it is still processing.', input: z.object({ jobId: z.string().min(1).max(200) }).strict() })
+  async getShortsJob(params: { jobId: string }) { return this.shortsCall<ShortsJob>('get', params); }
+
+  @McpTool({ description: 'List retained shorts jobs and results belonging to an imported source project. Read-only; does not start analysis or rendering.', input: z.object({ projectId: z.string().min(1).max(200) }).strict() })
+  async listShortsJobs(params: { projectId: string }) { return this.shortsCall<readonly ShortsJob[]>('list', params); }
+
+  @McpTool({ description: 'After reviewing candidate evidence, create one to five separate editable shorts projects with the reviewed transcript captions and 9:16 contain framing. Requires approval. Source footage/project are preserved. Poll getShortsJob for ready resultProjectIds; creation is not MP4 export.', input: z.object({ jobId: z.string().min(1).max(200), candidateIds: z.array(z.string().min(1).max(200)).min(1).max(5) }).strict() })
+  async createShortsProjects(params: { jobId: string; candidateIds: string[] }) { return this.shortsCall<ShortsJob>('materialize', params); }
+
+  @McpTool({ description: 'Render the selected created shorts projects to real local MP4s using FFmpeg, as a separately approved export. Returns a new durable export run. Poll getShortsJob; only completed items are finished videos. Preserve partial successes; report failed/cancelled items accurately. Results appear in the video list.', input: z.object({ jobId: z.string().min(1).max(200), resultProjectIds: z.array(z.string().min(1).max(200)).min(1).max(5) }).strict() })
+  async exportShortsVideos(params: { jobId: string; resultProjectIds: string[] }) { return this.shortsCall<ShortsJob>('export', params); }
+
+  @McpTool({ description: 'Request cancellation of one shorts job and preserve existing successful results. Requires approval. Wait for cleanupComplete before starting a replacement action.', input: z.object({ jobId: z.string().min(1).max(200) }).strict() })
+  async cancelShortsJob(params: { jobId: string }) { return this.shortsCall<{ accepted: boolean }>('cancel', params); }
   private notifyProjectTimelineChanged: ((projectId: string) => void) | undefined;
 
   /**

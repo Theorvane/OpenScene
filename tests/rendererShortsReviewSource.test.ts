@@ -41,14 +41,13 @@ describe('renderer shorts review UI source & CUA contract', () => {
     expect(allShortsUiSource).not.toMatch(/\boutputPath\b|\bexecutablePath\b|\bargv\b/);
   });
 
-  it('refreshes project list before opening materialized resultProjectId and saves on return', () => {
-    expect(timelineEditorSource).toContain("mode === 'natural' ? 'shorts' : 'timeline'");
-    expect(timelineEditorSource).not.toContain("'shorts-review' : undefined");
-    expect(timelineEditorSource).toContain('await editor.refreshProjects()');
-    expect(timelineEditorSource).toContain("writeExportFramePreference(request.resultProjectId, 'portrait')");
-    expect(timelineEditorSource).toContain('data-testid="shorts-return-banner"');
-    expect(timelineEditorSource).toContain('data-testid="shorts-return-to-review-btn"');
-    expect(timelineEditorSource).toContain('editor.hasUnsavedTimeline && !(await editor.saveTimeline())');
+  it('opens requested results through the video list without a default shorts review screen', () => {
+    const results = readFileSync(new URL('../src/renderer/src/editor/VideoResultsList.tsx', import.meta.url), 'utf8');
+    expect(timelineEditorSource).not.toContain('<ShortsReviewWorkspace');
+    expect(results.indexOf('await editor.refreshProjects()')).toBeLessThan(results.indexOf('await editor.openProject(id)'));
+    expect(results).toContain("writeExportFramePreference(id, 'portrait')");
+    expect(results).toContain('editor.hasUnsavedTimeline && !await editor.saveTimeline()');
+    expect(results).toContain("exported.state.kind === 'completed'");
   });
 
   it('exposes stable CUA data-testid selectors, ARIA semantics, pointer drag, and keyboard contracts', () => {

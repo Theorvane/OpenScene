@@ -11,7 +11,7 @@ import type { AppPageId } from './appPages';
 import { APP_PAGE_BY_ID, getDefaultAppPageId, isProjectRequiredPageId, isWorkspacePageId } from './appPages';
 import type { AppWorkspaceId } from './appWorkspaces';
 import { APP_WORKSPACES, getDefaultAppWorkspaceId } from './appWorkspaces';
-import { TimelineEditor } from './editor/TimelineEditor';
+import { TimelineEditor, type EditorViewMode } from './editor/TimelineEditor';
 import { useTimelineEditor } from './editor/useTimelineEditor';
 import { readFirstRunOnboardingCompletion, resetFirstRunOnboardingCompletion, writeFirstRunOnboardingCompletion } from './firstRunOnboardingPreference';
 import { closeProjectTab, openProjectTab, pruneProjectTabs, type ProjectTab } from './projectTabs';
@@ -20,6 +20,7 @@ const [EDIT_WORKSPACE] = APP_WORKSPACES;
 
 export function App(): ReactElement {
   const editor = useTimelineEditor();
+  const [editorView, setEditorView] = useState<EditorViewMode>('shorts');
   const [activePageId, setActivePageId] = useState<AppPageId>(() => getDefaultAppPageId());
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<AppWorkspaceId>(() => getDefaultAppWorkspaceId());
   const [showFirstRunOnboarding, setShowFirstRunOnboarding] = useState(() => {
@@ -185,6 +186,7 @@ export function App(): ReactElement {
   const [projectSettingsOpen, setProjectSettingsOpen] = useState(false);
   return (
       <AppShell
+        inlineAgentChat={editorView === 'shorts'}
         activePage={activePage}
         hasActiveProject={hasActiveProject}
         onPageChange={setActivePage}
@@ -206,7 +208,7 @@ export function App(): ReactElement {
       <div className="app-page-stack">
           <section className="app-stack local-edit-bay" hidden={!workspaceIsVisible}
             id={EDIT_WORKSPACE.panelId} ref={setPagePanelRef('edit')} role="region" aria-label="Editing workspace" tabIndex={-1}>
-            <TimelineEditor editor={editor} active={workspaceIsVisible} onProjectSettings={() => setProjectSettingsOpen(true)} onOpenSettings={() => setActivePage('settings')}
+            <TimelineEditor editor={editor} editorView={editorView} onEditorViewChange={setEditorView} active={workspaceIsVisible} onProjectSettings={() => setProjectSettingsOpen(true)} onOpenSettings={() => setActivePage('settings')}
               onProjects={() => setActivePage('projects')} onSelectProject={(id) => { void selectProjectTab(id); }} />
           </section>
           <section

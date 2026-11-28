@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react';
-import { selectSourcePreviewAsset, sourcePreviewDurationMs, sourceTransportTargetMs } from '../../../shared/sourceMediaPreview';
+import { selectSourcePreviewAsset, sourcePreviewDurationMs } from '../../../shared/sourceMediaPreview';
 import { buildSourcePreviewTracks, sourcePreviewCaptions, type SourceAudioStatus, type SourceCaptionSnapshot } from '../../../shared/sourcePreviewTimeline';
 import type { SubtitleCue } from '../../../shared/narrationPlan';
 import { SourceTrackTimeline } from './SourceTrackTimeline';
-import { SourceTransportIcon } from './SourceTransportIcon';
-import { formatDuration } from '../format';
+import { PlaybackTransport } from './PlaybackTransport';
 
 type SourceAsset = {
   readonly id: string;
@@ -17,21 +16,22 @@ type Props = {
   readonly assets: readonly SourceAsset[];
   readonly selectedAssetId: string | null;
   readonly active: boolean;
+  readonly onSelectAsset?: (id: string) => void;
   readonly captionSource?: SourceCaptionSnapshot | null;
 };
 
 export function SourceMediaPreview(props: Props): ReactElement | null {
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const asset = selectSourcePreviewAsset(props.assets, selectedId ?? props.selectedAssetId);
+  const asset = selectSourcePreviewAsset(props.assets, props.onSelectAsset ? props.selectedAssetId : selectedId ?? props.selectedAssetId);
   if (asset === null) return null;
   return <div className="source-media-preview">
-    <header className="source-media-preview__header">
+    {!props.onSelectAsset && <header className="source-media-preview__header">
       <h2>원본 영상</h2>
-      <select aria-label="확인할 원본 영상" value={asset.id} onChange={event => setSelectedId(event.target.value)}>
+      {props.onSelectAsset ? <span>{asset.displayName}</span> : <select aria-label="확인할 원본 영상" value={asset.id} onChange={event => { setSelectedId(event.target.value); }}>
         {props.assets.filter(item => item.kind === 'video').map(item => <option key={item.id} value={item.id}>{item.displayName}</option>)}
-      </select>
+      </select>}
       <span>전체 길이 · 원본 확인</span>
-    </header>
+    </header>}
     <SourcePlayer key={`${props.projectId}:${asset.id}`} projectId={props.projectId} asset={asset} active={props.active} captions={sourcePreviewCaptions(props.captionSource, props.projectId, asset.id)} />
   </div>;
 }
@@ -88,17 +88,12 @@ function SourcePlayer({ projectId, asset, active, captions }: { readonly project
       onError={() => setError('이 영상을 미리 볼 수 없습니다. 파일과 지원 코덱을 확인하세요.')} />
     {error !== null && <div role="alert">{error} <button type="button" onClick={() => { setRetry(value => value + 1); videoRef.current?.load(); }}>다시 시도</button></div>}
     {url === null && error === null && <p>원본 영상 불러오는 중…</p>}
-    <div className="source-media-preview__transport" role="group" aria-label="원본 재생 제어">
-      <button type="button" aria-label="원본 처음으로" title="처음으로" disabled={disabled} onClick={() => seek(sourceTransportTargetMs(positionMs, durationMs, 'start'))}><SourceTransportIcon name="start" /></button>
-      <button type="button" aria-label="원본 5초 뒤로" title="5초 뒤로" disabled={disabled} onClick={() => seek(sourceTransportTargetMs(positionMs, durationMs, 'back'))}><SourceTransportIcon name="back" /></button>
-      <button type="button" aria-label={isPlaying ? '원본 일시정지' : '원본 재생'} title={isPlaying ? '일시정지' : '재생'} disabled={disabled} onClick={() => { void togglePlayback(); }}><SourceTransportIcon name={isPlaying ? 'pause' : 'play'} /></button>
-      <button type="button" aria-label="원본 5초 앞으로" title="5초 앞으로" disabled={disabled} onClick={() => seek(sourceTransportTargetMs(positionMs, durationMs, 'forward'))}><SourceTransportIcon name="forward" /></button>
-      <button type="button" aria-label="원본 끝으로" title="끝으로" disabled={disabled} onClick={() => seek(sourceTransportTargetMs(positionMs, durationMs, 'end'))}><SourceTransportIcon name="end" /></button>
-      <button type="button" aria-label={muted ? '원본 소리 켜기' : '원본 소리 끄기'} title={muted ? '소리 켜기' : '음소거'} aria-pressed={muted} disabled={disabled} onClick={() => {
-        const video = videoRef.current;
-        if (video !== null) { video.muted = !video.muted; setMuted(video.muted); }
-      }}><SourceTransportIcon name={muted ? 'muted' : 'sound'} /></button>
-      <span>{formatDuration(positionMs)} / {formatDuration(durationMs)}</span>
+    <div className="source-media-preview__transport">
+      <PlaybackTransport positionMs={positionMs} durationMs={durationMs} playing={isPlaying} disabled={disabled}
+        onSeek={seek} onToggle={() => { void togglePlayback(); }} muted={muted} onMute={() => {
+          const video = videoRef.current;
+          if (video !== null) { video.muted = !video.muted; setMuted(video.muted); }
+        }} />
     </div>
     <SourceTrackTimeline tracks={tracks} durationMs={durationMs} positionMs={positionMs} disabled={disabled} onSeek={seek} />
   </>;

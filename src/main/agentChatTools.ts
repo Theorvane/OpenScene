@@ -9,6 +9,8 @@ import type { CuaAgentOrchestrator } from './cuaAgentOrchestration';
 import type { CuaAgentSaveOrchestrator } from './cuaAgentSaveOrchestration';
 import { parseEditAgentProjectContext } from '../shared/editAgentContext';
 import { AGENT_CHAT_CUA_ACTION_TOOL_NAME, AGENT_CHAT_CUA_SAVE_TOOL_NAME } from '../shared/agentChat';
+import type { ShortsStartInput } from '../shared/shortsTypes';
+import { runShortsJobTool } from './shortsAgentTools';
 
 /**
  * The tools that read and change nothing.
@@ -35,6 +37,8 @@ export const AGENT_CHAT_READ_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set([
   'watchProjectVideo',
   'getEditingCapabilities',
   'planAutoClipEdit',
+  'getShortsJob',
+  'listShortsJobs',
   'getCanvasWorkflow',
   'observeEditorWindow'
 ]);
@@ -52,7 +56,27 @@ export function agentChatMutatingToolNames(tools: readonly { readonly name: stri
 export async function createAgentChatTools(instance: OpenVideoMcpServer, cua?: CuaAgentOrchestrator, cuaSave?: CuaAgentSaveOrchestrator): Promise<readonly DynamicStructuredTool[]> {
   const resolver: InstanceResolver<OpenVideoMcpServer> = { resolve: () => instance };
   const tools = await createLangChainTools(OpenVideoMcpServer, { resolver });
-  return [...tools, ...(cua ? createCuaAgentChatTools(cua) : []), ...(cuaSave ? createCuaSaveAgentChatTools() : [])];
+  // Provider selection comes from the authorized conversation, never invented tool arguments.
+  const selection = tool(async (args, config) => {
+    const selected = config?.configurable as Partial<Pick<ShortsStartInput, 'modelId' | 'openAiAuthMode' | 'ollamaBaseUrl' | 'reasoningEffort'>> | undefined;
+    if (!selected?.modelId) return JSON.stringify({ ok: false, error: { code: 'INVALID_INPUT', message: 'Select a model before requesting shorts.' } });
+    const response = await runShortsJobTool(instance, () => instance.startShortsSelection({ projectId: args.projectId, assetId: args.assetId, modelId: selected.modelId!,
+      ...(args.requestedCount === undefined ? {} : { requestedCount: args.requestedCount }),
+      ...(args.minDurationMs === undefined ? {} : { minDurationMs: args.minDurationMs }),
+      ...(args.maxDurationMs === undefined ? {} : { maxDurationMs: args.maxDurationMs }),
+      ...(selected.openAiAuthMode === undefined ? {} : { openAiAuthMode: selected.openAiAuthMode }),
+      ...(selected.ollamaBaseUrl === undefined ? {} : { ollamaBaseUrl: selected.ollamaBaseUrl }),
+      ...(selected.reasoningEffort === undefined ? {} : { reasoningEffort: selected.reasoningEffort }) }), config?.signal);
+    return JSON.stringify(response);
+  }, { name: 'startShortsSelection', description: 'Only when requested: analyze an imported video for shorts using this conversation’s selected model/provider and configured local transcription. Requires approval for provider use. Returns a durable job, not completed videos. Read getShortsJob, review evidence, then separately approve createShortsProjects and exportShortsVideos. Never install services/models.',
+    schema: z.object({ projectId: z.string().min(1), assetId: z.string().min(1), requestedCount: z.number().int().min(1).max(5).optional(), minDurationMs: z.number().int().positive().optional(), maxDurationMs: z.number().int().positive().optional() }).strict() });
+  const materialize = tool(async (args, config) => JSON.stringify(await runShortsJobTool(instance, () => instance.createShortsProjects(args), config?.signal)), {
+    name: 'createShortsProjects', description: 'After reviewing evidence and obtaining approval, create separate editable shorts projects with reviewed captions. Waits for completion and returns actual result project IDs. This is not MP4 rendering. Original media is preserved.',
+    schema: z.object({ jobId: z.string().min(1), candidateIds: z.array(z.string().min(1)).min(1).max(5) }).strict() });
+  const render = tool(async (args, config) => JSON.stringify(await runShortsJobTool(instance, () => instance.exportShortsVideos(args), config?.signal)), {
+    name: 'exportShortsVideos', description: 'Separately approved FFmpeg rendering of created result projects to actual local MP4 videos. Waits for completion; report completed/failed/cancelled items accurately. Results are in the video list. Do not claim all outputs completed on a partial run.',
+    schema: z.object({ jobId: z.string().min(1), resultProjectIds: z.array(z.string().min(1)).min(1).max(5) }).strict() });
+  return [...tools.filter(item => !['startShortsSelection', 'createShortsProjects', 'exportShortsVideos'].includes(item.name)), selection, materialize, render, ...(cua ? createCuaAgentChatTools(cua) : []), ...(cuaSave ? createCuaSaveAgentChatTools() : [])];
 }
 
 const point = z.object({ x: z.number().finite().nonnegative(), y: z.number().finite().nonnegative() }).strict();
@@ -103,4 +127,4 @@ export function createCuaAgentChatTools(cua: CuaAgentOrchestrator): DynamicStruc
  * reasonable answer to "may I trim this clip again", and an unreasonable one to
  * "may I charge your card whenever I like". Every charge stays visible.
  */
-export const AGENT_CHAT_SPEND_TOOL_NAMES: ReadonlySet<string> = new Set();
+export const AGENT_CHAT_SPEND_TOOL_NAMES: ReadonlySet<string> = new Set(['startShortsSelection']);

@@ -35,6 +35,7 @@ function AppShellBackground(): ReactElement {
 }
 
 type AppShellProps = {
+  readonly inlineAgentChat?: boolean;
   readonly activePage: AppPage;
   readonly children: ReactNode;
   readonly hasActiveProject: boolean;
@@ -80,7 +81,7 @@ function FolderIcon(): ReactElement {
   );
 }
 
-function AppShellContent({ activePage, children, hasActiveProject, onPageChange, activeProjectContext, contentRevision = 0, contentFingerprint = null, studioLayout = false, projectTabs = [], activeProjectId = null, onSelectProjectTab, onCloseProjectTab, chatRestoreRequest = null, canNavigateBack = false, onNavigateBack }: AppShellProps): ReactElement {
+function AppShellContent({ activePage, children, hasActiveProject, onPageChange, activeProjectContext, contentRevision = 0, contentFingerprint = null, studioLayout = false, projectTabs = [], activeProjectId = null, onSelectProjectTab, onCloseProjectTab, chatRestoreRequest = null, canNavigateBack = false, onNavigateBack, inlineAgentChat = false }: AppShellProps): ReactElement {
   const { isBusy, pendingApproval, cancelConversation } = useAgentChat();
   const cua = useCuaOverlayState({
     contentRevision,
@@ -101,7 +102,15 @@ function AppShellContent({ activePage, children, hasActiveProject, onPageChange,
   const chatPanelCollapsed = studioLayout ? !studioChatExpanded : layoutPreference.chatPanelCollapsed;
   const projectsIsActive = activePage.id === 'projects';
   const settingsIsActive = activePage.id === 'settings';
-  const showChatPanel = isWorkspacePageId(activePage.id);
+  const showChatPanel = isWorkspacePageId(activePage.id) && !inlineAgentChat;
+  const previousInlineChat = useRef(inlineAgentChat);
+  useEffect(() => {
+    if (previousInlineChat.current && !inlineAgentChat) {
+      setStudioChatExpanded(true);
+      updateLayoutPreference(current => ({ ...current, chatPanelCollapsed: false }));
+    }
+    previousInlineChat.current = inlineAgentChat;
+  }, [inlineAgentChat, updateLayoutPreference]);
 
   const setChatPanelWidth = (width: number): void => {
     const containerWidth = shellBodyRef.current?.getBoundingClientRect().width;
@@ -162,7 +171,7 @@ function AppShellContent({ activePage, children, hasActiveProject, onPageChange,
 
   return (
     <CuaOverlayProvider controller={cua}>
-    <main className={`app-shell${showChatPanel ? ' app-shell--workspace' : ''}`}>
+    <main className={`app-shell${isWorkspacePageId(activePage.id) ? ' app-shell--workspace' : ''}`}>
       <AppShellBackground />
       {/* Draggable window titlebar: the native frame is hidden on macOS, so this
           bar owns window dragging; interactive controls opt out via no-drag. */}
@@ -243,7 +252,7 @@ function AppShellContent({ activePage, children, hasActiveProject, onPageChange,
               </Button>
         </div>
       </header>
-      <div ref={shellBodyRef} className="app-shell__body">
+      <div ref={shellBodyRef} className={`app-shell__body${inlineAgentChat && isWorkspacePageId(activePage.id) ? ' app-shell__body--natural' : ''}`}>
         <div id="app-shell-workspace" className="agent-workspace-lock" aria-busy={isBusy} inert={workspaceInert}>
           <div className="agent-workspace-lock__content">{children}</div>
           {isBusy && !cua.isActing && !cua.isPreparing && cua.state.phase !== 'ready' && (
@@ -255,6 +264,7 @@ function AppShellContent({ activePage, children, hasActiveProject, onPageChange,
             </div>
           )}
         </div>
+        {inlineAgentChat && isWorkspacePageId(activePage.id) && <AgentChatPanel inline />}
         {showChatPanel && !chatPanelCollapsed && (
           <>
             <div
