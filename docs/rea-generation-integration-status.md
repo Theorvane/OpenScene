@@ -1,12 +1,48 @@
 # REA generation integration status
 
-Snapshot: 2026-11-27. This is the desktop offline implementation chain, not a live
+Snapshot: 2026-11-28. This is the desktop offline implementation chain, not a live
 generation receipt, production-quality assessment or authorization to spend.
-All four PRs remain Draft. The implementation owner retains review/CI fixes and
-must not ready or merge them. The initial base was current `origin/dev` at
-`199565aff4249873b4ffded9974409b2d93d12a9`; subsequent PRs are explicitly stacked.
+The coordinator authorized consolidating the four stages into representative
+PR #590 against `dev`, with normal integration, fresh CI and renewed independent
+approval before an exact-head squash. The initial base was `origin/dev` at
+`199565aff4249873b4ffded9974409b2d93d12a9`; the original stages were stacked.
+The former prohibition on owner readiness/merge was explicitly superseded by
+this conditional authorization; no bypass, force push or branch deletion is allowed.
 
-## Stage integration and exact CI evidence
+## Consolidated integration gate
+
+The actual normal merge integrates dev
+`3a9799469b5333f50311eb403c83bd61f6b7ff32` (Jev #568) into the representative
+branch. It completed without conflicts and preserves Jev's settings and judgment
+changes. A predicted merge tree is not a validation result. The successor to this
+documentation commit must receive its own CI and independent integration review;
+the approvals below do not authorize a different HEAD.
+
+All original heads are ancestors of representative pre-integration head
+`2cfe3c139521bc02a7659fea9db85a12c560e904`:
+
+| Original PR | Independently approved full HEAD | Actual review ID | Same-head CI run (four SUCCESS) |
+| --- | --- | --- | --- |
+| #584 | `4659bc2bb7bd2692a70ec9e6deee78500cd92434` | 6084730823 | 45952395057 |
+| #586 | `86864c3cec26b75181f65c00f918d94a22012cd0` | 6095977995 | 45955791079 |
+| #588 | `2bf686ec88a0540691affe0b4fb8674f5c63cc77` | 6096006448 | 46110751084 |
+| #590 | `2cfe3c139521bc02a7659fea9db85a12c560e904` | 6095999577 | 46110757499 |
+
+The default Node DNS P2 is fixed in `2bf686e`: `all:true` returns only the pinned
+IPv4 address in an array; the single-address callback remains supported. Actual
+production HTTPS options are captured without a socket, then exercised through
+Node v26.8.2 socket preparation with all IPv4/IPv6 dialing blocked. Old code yields
+`ERR_INVALID_IP_ADDRESS`; fixed default/true/false family selection reaches
+`ERR_IP_BLOCKED`. This is not Node 22, Electron or live-provider evidence.
+
+Fresh pre-integration local checks passed on #588 (266 files / 1779 tests) and
+#590 (267 files / 1787 tests), with root typecheck/build and mobile typecheck.
+Fresh integrated checks and public CI remain distinct receipts recorded on #590.
+After a conditional merge, original PRs may be closed as duplicates only after
+checking the resulting dev tree contains each stage's final product/docs/harness
+changes; their original branches must remain intact.
+
+## Historical stage integration and exact CI evidence
 
 The commits below identify the code and CI snapshots actually observed. This
 document is a documentation-only follow-up to the stage-4 code commit: its own
@@ -20,7 +56,7 @@ does not transfer a passing result from an old HEAD to that successor.
 | 3 / [#587](https://github.com/Theorvane/OpenScene/issues/587) / [#588](https://github.com/Theorvane/OpenScene/pull/588) | `616d0adc4aa60a4f508a60880053e820f54ed48b`; base `feat/585-rea-generation-review` | Main-only bounded CDN collector, actual MP4/PNG validation, provenance, fit/trim review, local playback and ordinary history import | [45955794534](https://github.com/Theorvane/OpenScene/actions/runs/45955794534): all four SUCCESS | Sequential independent specification/code review requested at this full pin; no verdict claimed |
 | 4 / [#589](https://github.com/Theorvane/OpenScene/issues/589) / [#590](https://github.com/Theorvane/OpenScene/pull/590) | `7a5fc68fe2e7050da022423c6fd5e4a1576e2254`; base `feat/587-rea-verified-results` | Fixed global PAYG transport/lazy key DI, main source identity revalidation, disabled submit and concrete gated observation/cancel/shutdown | [45957101697](https://github.com/Theorvane/OpenScene/actions/runs/45957101697): verify, ios-module, ios-export SUCCESS; android-module IN_PROGRESS at observation | Independent specification/code review requested; android completion and latest documentation-successor CI remain unconfirmed |
 
-Public GitHub reviews and threads were empty at the aggregate metadata receipt.
+Public GitHub reviews and threads were empty at the historical aggregate metadata receipt.
 Coordinator-delivered independent findings above are separate evidence; an empty
 public review list is not an independent approval. No CI was bypassed, no branch
 was force-pushed and no PR was self-readied or merged.
@@ -56,7 +92,7 @@ Final local runtime-source verification at stage-4 code pin:
   It shows the expected six moving synthetic pattern frames across the two-second
   review. This is local testsrc media, not a provider-generated quality sample.
 
-## Findings and remaining gates
+## Historical findings and remaining gates
 
 | Item | Resolution / required next action |
 | --- | --- |
