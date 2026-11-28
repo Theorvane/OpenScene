@@ -79,6 +79,8 @@ export class ReaGenerationJobStore {
     });
   }
   get(id: string, projectId: string): Promise<ReaGenerationReceipt> { return this.serialize(async () => this.receipt(this.find(id, projectId))); }
+  /** Main-only approved context; no IPC exposes arbitrary persisted plans. */
+  getPlan(id: string, projectId: string) { return this.serialize(async () => freezeGenerationPlan(this.find(id, projectId).plan)); }
   submit(id: string, approval: string, currentPlan: unknown, image?: Uint8Array): Promise<ReaGenerationReceipt> {
     // Capture caller-owned inputs before the first await.
     const plan = freezeGenerationPlan(currentPlan), bytes = image?.slice();

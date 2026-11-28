@@ -44,6 +44,14 @@ export class MinimaxVideoAdapter {
     // Signed URLs and provider error messages are never returned or persisted here.
     return response.status;
   }
+  /** Main-only collector handoff, never an IPC response or persisted receipt. */
+  async resultUrl(id: string, duration: number): Promise<string> {
+    taskId.parse(id);
+    const response = z.object({ task: taskSchema.extend({ content: z.object({ url: z.string().min(1).max(8192) }) }) })
+      .parse(await this.request('GET', `/v2/query/video_generation/${id}`)).task;
+    if (response.id !== id || response.duration !== duration || response.status !== 'succeeded') throw new Error('RESULT_NOT_READY');
+    return response.content.url;
+  }
   async cancelQueued(id: string): Promise<'cancelled' | 'deleted'> {
     taskId.parse(id);
     const r = z.strictObject({ task_id: taskId, action: z.enum(['cancelled', 'deleted']), status: z.enum(['cancelled', 'deleted']) }).parse(await this.request('DELETE', `/v2/video_generation/${id}`));

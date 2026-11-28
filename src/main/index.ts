@@ -10,6 +10,8 @@ import { ReaGenerationJobStore } from './reaGenerationJobStore';
 import { ReaGenerationService } from './reaGenerationService';
 import { registerReaGenerationIpc } from './reaGenerationIpc';
 import { REA_VIDEO_CREDENTIAL_SLOT } from '../shared/reaGenerationApi';
+import { ReaGenerationResultService } from './reaGenerationResultService';
+import { resolveGenerationReference } from './reaGenerationReference';
 import type { AppSettings, CaptureSource } from '../shared/models';
 import { SourceCatalog, type RawCaptureSource } from '../shared/sourceCatalog';
 import type { MediaKind } from '../shared/timelineTypes';
@@ -103,9 +105,15 @@ const generationDisabled = async (): Promise<never> => { throw new Error('PAID_E
 const reaGenerationJobs = new ReaGenerationJobStore(join(app.getPath('userData'), 'rea-generation'), {
   submit: generationDisabled, query: generationDisabled, cancelQueued: generationDisabled
 });
+const reaGenerationResults = new ReaGenerationResultService(join(app.getPath('userData'), 'rea-generation-results'), async () => {
+  const ffmpeg = await discoverFfmpeg(); if (ffmpeg.kind === 'unavailable') throw new Error('FFMPEG_UNAVAILABLE'); return ffmpeg.executablePath;
+}, assetLibraryStore);
 const reaGeneration = new ReaGenerationService(credentialStore, reaGenerationJobs, async (projectId, assetId) => {
   const asset = await projectStore.getAsset(projectId, assetId);
   return asset?.kind === 'video' && await assetLibraryStore.getPlaybackSource(projectId, assetId) !== null;
+}, reaGenerationResults, async (projectId, trackId) => Boolean((await projectStore.open(projectId))?.timeline.tracks.some(t => t.id === trackId && t.kind === 'video')), async (projectId, assetId) => {
+  const ffmpeg = await discoverFfmpeg(); if (ffmpeg.kind === 'unavailable') throw new Error('FFMPEG_UNAVAILABLE');
+  return (await resolveGenerationReference(assetLibraryStore, join(app.getPath('userData'), 'rea-generation-images'), ffmpeg.executablePath, projectId, assetId)).reference;
 });
 const jevService = createJevService({ store: credentialStore });
 const jevConfigStore = new JevConfigStore(app.getPath('userData'));
@@ -596,7 +604,7 @@ app.on('before-quit', event => {
   if (shortsShutdownComplete) return;
   event.preventDefault();
   exportIpcService.cancelAll();
-  void Promise.allSettled([cuaTarget?.driver.cancel('app-quit'), cuaTarget?.save.settleWrites(), shortsService.shutdown(), reaAnalysis.dispose()]).finally(() => {
+  void Promise.allSettled([cuaTarget?.driver.cancel('app-quit'), cuaTarget?.save.settleWrites(), shortsService.shutdown(), reaAnalysis.dispose(), reaGeneration.dispose()]).finally(() => {
     shortsShutdownComplete = true;
     app.quit();
   });
