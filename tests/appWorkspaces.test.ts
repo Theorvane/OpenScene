@@ -16,12 +16,12 @@ describe('app workspaces', () => {
     expect(workspaces.map((workspace) => workspace.statusLabel)).toEqual(['Local timeline']);
   });
 
-  it('returns a stable page model with Projects as the initial page and Settings outside workspaces', () => {
+  it('returns a stable page model with Editing as the initial page and Settings outside workspaces', () => {
     const pages = APP_PAGES;
 
     // The menu page is gone: workspace tabs replaced it.
     expect(APP_PAGE_IDS).toEqual(['projects', 'edit', 'settings']);
-    expect(getDefaultAppPageId()).toBe('projects');
+    expect(getDefaultAppPageId()).toBe('edit');
     expect(pages.map((page) => page.id)).toEqual(APP_PAGE_IDS);
     expect(pages.map((page) => page.label)).toEqual(['Projects', 'Editing', 'Settings']);
     expect(APP_PAGE_BY_ID.settings.panelId).toBe('app-page-panel-settings');
@@ -30,8 +30,8 @@ describe('app workspaces', () => {
     expect(isWorkspacePageId('settings')).toBe(false);
   });
 
-  it('requires an active project for Home and every workspace page, but never for Projects or Settings', () => {
-    expect(isProjectRequiredPageId('edit')).toBe(true);
+  it('allows the natural intake workspace before a project exists', () => {
+    expect(isProjectRequiredPageId('edit')).toBe(false);
     expect(isProjectRequiredPageId('projects')).toBe(false);
     expect(isProjectRequiredPageId('settings')).toBe(false);
   });

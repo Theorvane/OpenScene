@@ -12,7 +12,7 @@ import { EditScreen } from './src/screens/EditScreen';
 import { LibraryScreen } from './src/screens/LibraryScreen';
 import { ProjectsScreen } from './src/screens/ProjectsScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
-import { assetUri, readProject } from './src/lib/projectStore';
+import { assetUri, readProject, createProject, listProjects } from './src/lib/projectStore';
 import { useProject } from './src/lib/useProject';
 import { exportReviewSummary } from '@openvideo/shared/exportReview';
 import { deliverExport, exportTimeline } from './src/lib/exportComposition';
@@ -77,8 +77,8 @@ export default function App() {
 
 function Shell() {
   const insets = useSafeAreaInsets();
-  const [route, setRoute] = useState<Route>({ name: 'projects' });
-  const [preferredTab, setTab] = useState<ProjectTab>('edit');
+  const [route, setRoute] = useState<Route>(() => ({ name: 'project', projectId: listProjects()[0]?.id ?? createProject('Untitled cutdown', 'editing').id }));
+  const [preferredTab, setTab] = useState<ProjectTab>('agent');
   const selectTab = (next: ProjectTab): void => {
     if (['edit', 'canvas', 'agent', 'library'].includes(next)) setTab(next);
   };

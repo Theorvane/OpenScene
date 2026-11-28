@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { selectSourcePreviewAsset } from '@openvideo/shared/sourceMediaPreview';
+import { SourceMediaPreview } from '../components/SourceMediaPreview';
 import { STILL_DEFAULT_HOLD_MS } from '@openvideo/shared/timelineStills';
 import { FormScreen } from '../components/FormScreen';
 import { CloseIcon } from '../components/Icon';
@@ -42,6 +44,7 @@ export function LibraryScreen({
 }) {
   const [assets, setAssets] = useState<readonly MobileAsset[]>([]);
   const [usage, setUsage] = useState<Readonly<Record<string, number>>>({});
+  const [previewId, setPreviewId] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
 
   const refresh = useCallback((): void => {
@@ -115,6 +118,7 @@ export function LibraryScreen({
     );
   };
   const shown = assets;
+  const preview = selectSourcePreviewAsset(assets, previewId);
 
   return (
     <FormScreen topInset={topInset} keyboardOffset={keyboardOffset} contentStyle={styles.content}>
@@ -126,6 +130,8 @@ export function LibraryScreen({
 
 
 
+      {projectId !== null && preview !== null && <SourceMediaPreview key={`${projectId}:${preview.id}`}
+        uri={assetUri(projectId, preview)} name={preview.displayName} durationMs={preview.durationMs} />}
       {note !== null && (
         <Pressable accessibilityRole="button" onPress={() => setNote(null)} style={press(styles.note)}>
           <Text style={styles.noteText}>{note}</Text>
@@ -173,6 +179,9 @@ export function LibraryScreen({
               </View>
 
               <View style={styles.actions}>
+                {asset.kind === 'video' && <Pressable accessibilityRole="button" onPress={() => setPreviewId(asset.id)} style={press(styles.action)}>
+                  <Text style={styles.actionText}>Preview full source</Text>
+                </Pressable>}
                 <Pressable accessibilityRole="button" onPress={() => place(asset)} style={press(styles.action)}>
                   <Text style={styles.actionText}>Add & open editor</Text>
                 </Pressable>

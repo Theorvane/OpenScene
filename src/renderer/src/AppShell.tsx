@@ -220,12 +220,12 @@ function AppShellContent({ activePage, children, hasActiveProject, onPageChange,
                 <BackIcon />
               </Button>
               <Button
-                aria-controls="app-page-panel-projects"
+                aria-controls="app-workspace-panel-edit"
                 aria-current={projectsIsActive ? 'page' : undefined}
-                aria-label="Projects"
+                aria-label="Open project folder"
                 className="product-chrome__nav-button"
                 onClick={() => onPageChange('projects')}
-                title="Projects"
+                title="Open project folder"
                 variant={projectsIsActive ? 'primary' : 'ghost'}
               >
                 <FolderIcon />

@@ -25,12 +25,13 @@ describe('app page shell source contract', () => {
     expect(app).toContain('hidden={!workspaceIsVisible}');
   });
 
-  it('opens Projects and Settings from product chrome instead of workspace navigation', async () => {
+  it('opens project folders and Settings from product chrome without a project selection page', async () => {
     const [app, appShell] = await Promise.all([readSource(APP_SOURCE_URL), readSource(APP_SHELL_SOURCE_URL)]);
 
     expect(appShell).toContain('onPageChange: (pageId: AppPageId) => void;');
     expect(appShell).not.toContain('app-page-panel-home');
-    expect(appShell).toContain('aria-controls="app-page-panel-projects"');
+    expect(appShell).toContain('aria-label="Open project folder"');
+    expect(app).not.toContain('<ProjectsPage');
     expect(appShell).toContain('aria-controls="app-page-panel-settings"');
     expect(appShell).toContain("onClick={() => onPageChange('settings')}");
     expect(app).not.toContain('AppWorkspaceNavigation');
@@ -42,7 +43,7 @@ describe('app page shell source contract', () => {
 
     expect(app).toContain('const hasActiveProject = editor.project !== null;');
     expect(app).toContain('if (isProjectRequiredPageId(pageId) && !hasActiveProject) {');
-    expect(app).toContain("navigateToPage('projects');");
+    expect(app).toContain("navigateToPage('edit');");
     expect(app).toContain('if (hasActiveProject || !isProjectRequiredPageId(activePageId)) return;');
     expect(app).toContain("const opened = await editor.openProjectFolder('editing');");
     expect(app).toContain('const opened = await editor.openProject(projectId);');

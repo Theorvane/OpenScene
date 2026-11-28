@@ -28,9 +28,11 @@ vi.mock('../src/renderer/src/editor/shorts/ShortsReviewWorkspace', () => ({ Shor
 
 let unmount: (() => void) | undefined;
 beforeAll(() => {
+  vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
   const storage = new Map<string, string>();
   const localStorage = { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => storage.set(key, value) };
   vi.stubGlobal('localStorage', localStorage);
+  Object.assign(window, { videoTool: { getAssetPlaybackUrl: vi.fn().mockResolvedValue({ ok: true, value: { url: 'asset://source' } }) } });
   Object.defineProperty((globalThis as unknown as { window: object }).window, 'localStorage', { configurable: true, value: localStorage });
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true,
     ResizeObserver: class { observe(): void {} unobserve(): void {} disconnect(): void {} } });
@@ -42,7 +44,7 @@ describe('mounted desktop workspace host', () => {
     const modulePath = '../src/renderer/src/editor/TimelineEditor.tsx';
     const { TimelineEditor } = await import(modulePath) as { TimelineEditor: ComponentType<Record<string, unknown>> };
     const editor = {
-      project: { id: 'project', name: '긴 한국어 프로젝트 이름', assets: [{ id: 'asset', metadata: { durationMs: 5000 } }], timeline: { tracks: [] } },
+      project: { id: 'project', name: '긴 한국어 프로젝트 이름', assets: [{ id: 'asset', kind: 'video', displayName: 'Source take', metadata: { durationMs: 5000 } }], timeline: { tracks: [] } },
       projects: [{ id: 'project', name: '긴 한국어 프로젝트 이름', updatedAt: '2026-11-26' }],
       selectedAsset: null, selectedClip: null, hasUnsavedTimeline: true, canUndoTimeline: true,
       isBusy: false, isSavingTimeline: false, timelineSaveStatus: 'idle', statusMessage: { tone: 'neutral', text: '' },
@@ -61,6 +63,8 @@ describe('mounted desktop workspace host', () => {
     const timeline = container.querySelector('[data-probe="timeline"]')!;
     const monitor = container.querySelector('[data-probe="monitor"]')!;
     expect(timeline.closest('[hidden]')).not.toBeNull();
+    expect(container.querySelector('.source-media-preview')?.closest('[hidden]')).toBeNull();
+    expect(container.querySelector('input[aria-label="원본 영상 재생 위치"]')?.getAttribute('max')).toBe('5000');
     act(() => (shorts as unknown as { click: () => void }).click());
     for (const mode of ['precision', 'node', 'natural']) {
       changeMode(mode);

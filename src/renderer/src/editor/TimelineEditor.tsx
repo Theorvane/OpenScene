@@ -27,6 +27,7 @@ import {
 } from './editorLayoutPreferences';
 import { ExportPanel } from './ExportPanel';
 import { InspectorPanel } from './InspectorPanel';
+import { SourceMediaPreview } from './SourceMediaPreview';
 import { ProgramMonitor } from './ProgramMonitor';
 import { ProjectRail } from './ProjectRail';
 import { TimelineCanvas } from './TimelineCanvas';
@@ -320,7 +321,10 @@ export function TimelineEditor({ active = true, editor, onProjectSettings, onOpe
       saveScopeLabel="현재 프로젝트 타임라인"
       activeProjectId={editor.project?.id ?? null}
       onSelectProject={(id) => onSelectProject?.(id)}
-      onNewVideo={() => onProjects?.()}
+      onNewVideo={() => { void (async () => {
+        if (editor.hasUnsavedTimeline && !await editor.saveTimeline()) return;
+        await editor.createProject();
+      })(); }}
       onOpenAssets={() => { selectEditorView('timeline'); setLeftDockTabId('media'); updateLayoutPreference((current) => ({ ...current, leftDockVisible: true })); }}
       onOpenSettings={() => onOpenSettings?.()}
       canUndo={editor.canUndoTimeline && !isAgentBusy && !editor.isBusy}
@@ -424,8 +428,11 @@ export function TimelineEditor({ active = true, editor, onProjectSettings, onOpe
             locked={(isAgentBusy && !isCuaActing) || editor.isBusy} onPreview={() => selectEditorView('timeline')} />}
         </div>
         <div className="editor-view" hidden={!shortsMode}>
-          <NaturalStudioView liveReviewSlot={<>
-          <div className="os-ws-live-stage" hidden={intakeComplete || editor.project === null}>
+          <NaturalStudioView liveReviewSlot={<div className="natural-source-workspace">
+          {editor.project !== null && <SourceMediaPreview key={`${editor.project.id}:${editor.selectedAsset?.id ?? ""}`} projectId={editor.project.id}
+            assets={editor.project.assets} selectedAssetId={editor.selectedAsset?.id ?? null} active={active && shortsMode} />}
+          <div className="natural-source-workspace__body">
+          <div className="os-ws-live-stage" hidden={intakeComplete}>
             <WorkspaceIntakeView pickerOnly prompt={chat.input} onPromptChange={chat.setInput} presets={[]}
               recentProjects={workspaceProjects} selectedFileName={editor.project?.assets[0]?.displayName ?? null}
               starting={editor.isBusy} errorMessage={editor.statusMessage.tone === 'danger' ? editor.statusMessage.text : null}
@@ -444,7 +451,7 @@ export function TimelineEditor({ active = true, editor, onProjectSettings, onOpe
               onOpenMaterializedProject={openMaterializedShortInEditor}
             />
           </div>
-          </>} />
+          </div></div>} />
         </div>
         <div className="editor-view editor-view--precision" hidden={fullStageMode}>
             {active && !fullStageMode && <ReaEditorAnalysisHost editor={editor} locked={isAgentBusy || editor.isBusy} />}

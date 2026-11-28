@@ -1,12 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 
-import type { AgentChatHistoryEntry } from '../../shared/agentChat';
 import type { EditAgentProjectContext } from '../../shared/editAgentContext';
 import type { AgentChatRestoreRequest } from './AgentChatContext';
 import { AppShell } from './AppShell';
 import { FirstRunOnboarding } from './FirstRunOnboarding';
 import { ProjectSettingsDialog } from './ProjectSettingsDialog';
-import { ProjectsPage } from './ProjectsPage';
 import { SettingsWorkspace } from './SettingsWorkspace';
 import { popPageHistory, pushPageHistory } from './appNavigationHistory';
 import type { AppPageId } from './appPages';
@@ -30,7 +28,6 @@ export function App(): ReactElement {
   });
   const pagePanelRefs = useRef<Partial<Record<AppPageId, HTMLElement>>>({});
   const pendingFocusPageRef = useRef<AppPageId | null>(null);
-  const [chatHistory, setChatHistory] = useState<readonly AgentChatHistoryEntry[]>([]);
   const [chatRestoreRequest, setChatRestoreRequest] = useState<AgentChatRestoreRequest | null>(null);
   const [pageHistory, setPageHistory] = useState<readonly AppPageId[]>([]);
   const activePage = APP_PAGE_BY_ID[activePageId];
@@ -90,15 +87,21 @@ export function App(): ReactElement {
   }, [editor.project, pageHistory, requestPageFocus]);
 
   const setActivePage = useCallback((pageId: AppPageId): void => {
-    // Stage flow guard: Home (Menu) and workspaces need an active project,
-    // so project-less navigation lands on Projects instead.
+    if (pageId === 'projects') {
+      void (async () => {
+        if (editor.hasUnsavedTimeline && !await editor.saveTimeline()) return;
+        const opened = await editor.openProjectFolder('editing');
+        if (opened) navigateToPage('edit');
+      })();
+      return;
+    }
     if (isProjectRequiredPageId(pageId) && !hasActiveProject) {
-      navigateToPage('projects');
+      navigateToPage('edit');
       return;
     }
 
     navigateToPage(pageId);
-  }, [hasActiveProject, navigateToPage]);
+  }, [editor, hasActiveProject, navigateToPage]);
 
 
   const completeFirstRunOnboarding = useCallback((): void => {
@@ -121,25 +124,11 @@ export function App(): ReactElement {
 
   useEffect(() => {
     // If the active project disappears (deleted or failed to load) while on a
-    // project-required page, fall back to the Projects stage.
+    // project-required page, keep the natural intake visible.
     if (hasActiveProject || !isProjectRequiredPageId(activePageId)) return;
 
-    navigateToPage('projects');
+    navigateToPage('edit');
   }, [activePageId, hasActiveProject, navigateToPage]);
-
-  useEffect(() => {
-    // Refresh the home screen chat history whenever Projects is shown (and as
-    // the known project list changes underneath it).
-    if (activePageId !== 'projects') return;
-    let cancelled = false;
-    void window.videoTool.agentChatHistoryList().then((response) => {
-      if (cancelled || !response.ok) return;
-      setChatHistory(response.value);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [activePageId, editor.projects]);
 
   const removeProject = useCallback(async (projectId: string): Promise<void> => {
     // Removing the open project has to clear the editor too, which
@@ -151,38 +140,7 @@ export function App(): ReactElement {
       if (!response.ok) return;
       await editor.refreshProjects();
     }
-    const chats = await window.videoTool.agentChatHistoryList();
-    if (chats.ok) setChatHistory(chats.value);
   }, [editor]);
-
-  const deleteChatFromHistory = useCallback(async (entry: AgentChatHistoryEntry): Promise<void> => {
-    const response = await window.videoTool.agentChatHistoryDelete({
-      projectId: entry.projectId,
-      conversationId: entry.conversationId
-    });
-    if (!response.ok) return;
-    setChatHistory((current) => current.filter((item) =>
-      item.projectId !== entry.projectId || item.conversationId !== entry.conversationId
-    ));
-  }, []);
-
-  const openChatFromHistory = useCallback(async (entry: AgentChatHistoryEntry): Promise<void> => {
-    const opened = await editor.openProject(entry.projectId);
-    if (!opened) return;
-    const conversation = await window.videoTool.agentChatHistoryGet({
-      projectId: entry.projectId,
-      conversationId: entry.conversationId
-    });
-    if (conversation.ok && conversation.value !== null) {
-      setChatRestoreRequest({ conversationId: conversation.value.id, messages: conversation.value.messages });
-    }
-    // The project is open at this point, so enter the editor workspace
-    // directly (the guarded setters still see the pre-open project state).
-    setPageHistory((current) => pushPageHistory(current, activePageId));
-    requestPageFocus(EDIT_WORKSPACE.id);
-    setActiveWorkspaceId(EDIT_WORKSPACE.id);
-    setActivePageId(EDIT_WORKSPACE.id);
-  }, [activePageId, editor, requestPageFocus]);
 
   const clearChatRestoreRequest = useCallback((): void => {
     setChatRestoreRequest(null);
@@ -219,7 +177,7 @@ export function App(): ReactElement {
     setProjectTabs(next.tabs);
     if (editor.project?.id !== projectId) return;
     if (next.activeId === null) {
-      navigateToPage('projects');
+      navigateToPage('edit');
       return;
     }
     await editor.openProject(next.activeId);
@@ -246,34 +204,6 @@ export function App(): ReactElement {
         onNavigateBack={navigateBack}
       >
       <div className="app-page-stack">
-          <section
-            aria-labelledby="projects-page-title"
-            className="app-page app-page--projects"
-            hidden={activePageId !== 'projects'}
-            id="app-page-panel-projects"
-            ref={setPagePanelRef('projects')}
-            role="region"
-            tabIndex={-1}
-          >
-            <ProjectsPage
-              project={editor.project}
-              projects={editor.projects}
-              chats={chatHistory}
-              onOpenProject={async (projectId) => {
-                const opened = await editor.openProject(projectId);
-                if (opened) { navigateToPage('edit'); }
-              }}
-              onOpenProjectFolder={async () => {
-                const opened = await editor.openProjectFolder('editing');
-                if (opened) { navigateToPage('edit'); }
-              }}
-              onOpenChat={openChatFromHistory}
-              onRemoveProject={removeProject}
-              onDeleteChat={deleteChatFromHistory}
-              errorText={editor.statusMessage.tone === 'danger' ? editor.statusMessage.text : undefined}
-              isBusy={editor.isBusy}
-            />
-          </section>
           <section className="app-stack local-edit-bay" hidden={!workspaceIsVisible}
             id={EDIT_WORKSPACE.panelId} ref={setPagePanelRef('edit')} role="region" aria-label="Editing workspace" tabIndex={-1}>
             <TimelineEditor editor={editor} active={workspaceIsVisible} onProjectSettings={() => setProjectSettingsOpen(true)} onOpenSettings={() => setActivePage('settings')}

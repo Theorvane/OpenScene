@@ -40,7 +40,7 @@ export const APP_PAGE_BY_ID = {
 } as const satisfies Readonly<Record<AppPageId, AppPage>>;
 
 export function getDefaultAppPageId(): AppPageId {
-  return 'projects';
+  return 'edit';
 }
 
 export function isWorkspacePageId(pageId: AppPageId): pageId is WorkspacePageId {
@@ -56,14 +56,12 @@ export function isWorkspacePageId(pageId: AppPageId): pageId is WorkspacePageId 
 }
 
 /**
- * Stage flow: Projects → the editing workspace, whose tabs cover editing and
- * generation. The workspace operates on the active project, so it is
- * unreachable until one is open; Projects and Settings stay reachable always.
+ * The natural workspace is the entry surface even without a project.
+ * Import creates a project on demand; project management stays optional.
  */
 export function isProjectRequiredPageId(pageId: AppPageId): boolean {
   switch (pageId) {
     case 'edit':
-      return true;
     case 'projects':
     case 'settings':
       return false;

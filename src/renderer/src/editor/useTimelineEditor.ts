@@ -249,12 +249,12 @@ export function useTimelineEditor() {
     return false;
   }, [invokeWhileBusy, setLoadedProject]);
 
-  const createProject = useCallback(async (): Promise<boolean> => {
+  const createProjectForImport = useCallback(async (): Promise<LocalProjectSnapshot | null> => {
     const response = await invokeWhileBusy(() => window.videoTool.createProject({ name: newProjectName }), 'The project could not be created.');
-    if (response === null) return false;
+    if (response === null) return null;
     if (response.ok) {
       if (response.value.cancelled) {
-        return false;
+        return null;
       }
       const project = response.value.project;
       setLoadedProject(project);
@@ -263,11 +263,13 @@ export function useTimelineEditor() {
       setHasUnsavedTimeline(false);
       await refreshProjects();
       setStatusMessage({ tone: 'success', text: `Created ${project.name} in its own folder.` });
-      return true;
+      return project;
     }
     setStatusMessage({ tone: 'danger', text: errorMessage(response.error) });
-    return false;
+    return null;
   }, [invokeWhileBusy, newProjectName, refreshProjects, setLoadedProject]);
+
+  const createProject = useCallback(async (): Promise<boolean> => (await createProjectForImport()) !== null, [createProjectForImport]);
 
   const openProjectFolder = useCallback(async (projectType: import('../../../shared/projectTypes').ProjectType = 'editing'): Promise<boolean> => {
     const response = await invokeWhileBusy(() => window.videoTool.openProjectFolder({ projectType }), 'The project folder could not be opened.');
@@ -311,7 +313,7 @@ export function useTimelineEditor() {
     notifyExternalCuaTimelineMutation();
     setProject(next);
   }, []);
-  const { importAssets, importRecordingResult } = useProjectAssetImports({ project, setIsBusy, setProject: setProjectFromExternalImport, setSelectedAssetId, setStatusMessage });
+  const { importAssets, importRecordingResult } = useProjectAssetImports({ project, createProjectForImport, setIsBusy, setProject: setProjectFromExternalImport, setSelectedAssetId, setStatusMessage });
 
   const replaceTimeline = useCallback((update: TimelineUpdate, successText: string, rejectionText?: string): TimelineDocument | null => {
     if (project === null || cuaSaveFreezeTokenRef.current !== null) return null;

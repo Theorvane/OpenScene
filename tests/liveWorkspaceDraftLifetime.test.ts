@@ -16,6 +16,7 @@ vi.mock('../src/renderer/src/editor/ExportPanel', () => ({ ExportPanel: () => nu
 vi.mock('../src/renderer/src/editor/InspectorPanel', () => ({ InspectorPanel: () => null }));
 vi.mock('../src/renderer/src/editor/ProjectRail', () => ({ ProjectRail: () => null }));
 vi.mock('../src/renderer/src/editor/TimelineEditorLeftDock', () => ({ TimelineEditorLeftDock: () => null }));
+vi.mock('../src/renderer/src/editor/SourceMediaPreview', () => ({ SourceMediaPreview: () => null }));
 vi.mock('../src/renderer/src/editor/ProgramMonitor', () => ({ ProgramMonitor: () => null }));
 vi.mock('../src/renderer/src/editor/TimelineCanvas', () => ({ TimelineCanvas: () => null }));
 vi.mock('../src/renderer/src/editor/VideoConnectionCanvas', () => ({ VideoConnectionCanvas: () => null }));
