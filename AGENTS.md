@@ -99,6 +99,18 @@ typecheck/device requirements unless the user explicitly reopens that scope.
 
 ## Required Issue, Branch, And PR Workflow
 
+### GitHub identity preflight
+
+Follow [CONTRIBUTING.md](CONTRIBUTING.md#github-identity-boundary) before every
+GitHub operation. Use `node scripts/github-personal.mjs` for repository API
+requests: it selects only explicit `sjungwon03` credentials and asserts
+`gh api user` in the same invocation before sending any target request.
+`sjungwon03-imbc` is forbidden; never inspect company tokens, switch global
+authentication, or fall back to default credentials. Independent reviews use
+only `sjungwon03-ai`, with their own same-command identity assertion. Verify
+personal Git author and committer separately, and never rewrite history or
+delete historical records to repair account misuse.
+
 Every change after the initial repository bootstrap follows this sequence. Never commit directly to protected `dev` or `main`.
 
 1. Inspect open GitHub Issues and pull requests, then create or update one focused GitHub Issue before branching.

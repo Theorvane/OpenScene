@@ -46,3 +46,46 @@ A pull request should have one clear purpose, include tests or a rationale when 
 ## Conduct
 
 By participating, you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+## GitHub identity boundary
+
+For human and coding-agent activity on Theorvane/OpenScene, use only explicit
+personal `sjungwon03` credentials. `sjungwon03-imbc` is forbidden here. Never
+inspect or use company tokens, switch global GitHub authentication, or fall back
+to the default `gh` account. Independent reviews must be performed by a separate
+reviewer using `sjungwon03-ai`; an author must never approve their own work.
+
+Use the fail-closed API wrapper for repository requests:
+
+```sh
+node scripts/github-personal.mjs repos/Theorvane/OpenScene/issues --jq '.[] | {number,title}'
+node scripts/github-personal.mjs repos/Theorvane/OpenScene/issues --method POST -f title='Focused issue' -F body=@/absolute/path/body.md
+```
+
+The wrapper reads only the explicitly named personal credential from `gh`, clears
+ambient GitHub credentials and debug settings, calls `gh api user`, and requires
+the exact `sjungwon03` login before dispatching the target with the same token
+and fixed github.com host. Missing credentials, failed identity checks and
+mismatches stop before any target request. It rejects host/header/cache overrides
+and endpoints outside this repository. It does not authorize the requested
+action: follow the task's scope and approval requirements. Do not log tokens.
+
+For operations outside this API wrapper (including Git transport), explicitly
+select the personal credential and assert `gh api user` in the same command
+before the operation, with the identical credential and host. Never rely on an
+earlier identity check or change global credential helpers. Independent reviewers
+must apply the equivalent exact `sjungwon03-ai` assertion themselves.
+
+Before committing, check `git var GIT_AUTHOR_IDENT` and
+`git var GIT_COMMITTER_IDENT` against the intended personal identity. Git commit
+metadata and GitHub authentication are separate. Correct local configuration
+when necessary; do not rewrite historical commits to repair attribution.
+
+The wrapper is local repository tooling, not a machine-wide interceptor. Another
+machine or agent is protected only after it receives and verifies these files.
+Record delivery receipts and verification; a missing reachable Orca connection
+does not establish remote correction. Preserve historical issues and comments;
+coordinate any attribution correction separately.
+
+Run `npm run typecheck`, `npm test`, and `npm run build`. The guard's negative
+tests use injected subprocesses and make no live target requests.
