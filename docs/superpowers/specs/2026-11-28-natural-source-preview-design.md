@@ -1,7 +1,11 @@
 # Natural workspace source preview
 
-Approved by the user: selecting a video shows full-source preview and a seek timeline within natural mode. Playback must not add clips or modify the edit timeline. Keep import cancellation, project changes, and explicit start/approval boundaries intact. Only this session implements.
+Approved by the user: selecting a video shows the full original video and a source timeline within natural mode. The app opens natural editing directly, skipping project selection. Desktop supports empty intake and creates a project via the existing local folder flow at first import. Existing projects remain reachable through the workspace list or folder button. Mobile opens Agent for the latest local project or a new empty project.
 
-Approaches: switching to precision hides the requested natural flow; automatically inserting clips changes the saved edit. Instead show a source-only preview with local playback state, native controls, and a full-duration range. Keep it available on reopening and in review. Shared pure source selection/duration logic also drives a mobile library preview using its platform player.
+## One transport and separate source lanes
+The latest user request removes native controls from the video image. A single custom transport below the image supplies play/pause, first/last position, five-second backward/forward jumps, mute and source seeking. Aligned video, sound and subtitle lanes share the original source clock. Subtitle clips come from the selected review job only when project and asset identities match. Do not trigger transcription or synthesize captions or waveforms. Unknown audio state stays explicit when the runtime cannot report embedded audio. Mobile uses the same source-track builder with platform playback and custom controls.
 
-User addition: enter natural editing directly at startup, skipping the project selection screen. Desktop supports empty intake and creates a local project only when importing. Mobile starts in Agent for the latest local project, or a new empty project. Project management remains available on demand.
+## Alternatives and boundaries
+Switching to precision hides the natural workflow. Automatically inserting clips changes the saved edit. Instead, source-only playback is read-only and never adds or modifies timeline clips. Native media controls duplicate the custom timeline, so they are disabled. Preserve originals, import cancellation, project switching, explicit analysis/start approvals and compatibility identifiers. Only this session implements and reviews; no second implementing session.
+
+FFmpeg scope clarified by the user: install on this computer for local running/tests only. No app-level automatic installation feature. FFmpeg and FFprobe 9.1 were installed through Homebrew.

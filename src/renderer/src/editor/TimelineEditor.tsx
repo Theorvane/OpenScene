@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties, type ReactElement, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactElement, type ReactNode } from 'react';
 import { ReaEditorAnalysisHost } from "./ReaEditorAnalysisHost";
 import { EditorWorkspace } from '../../../../external/opencut/apps/web/src/components/editor/editor-workspace';
 import { EditorHeader } from './EditorWorkbenchHeader';
@@ -27,6 +27,7 @@ import {
 } from './editorLayoutPreferences';
 import { ExportPanel } from './ExportPanel';
 import { InspectorPanel } from './InspectorPanel';
+import type { SourceCaptionSnapshot } from '../../../shared/sourcePreviewTimeline';
 import { SourceMediaPreview } from './SourceMediaPreview';
 import { ProgramMonitor } from './ProgramMonitor';
 import { ProjectRail } from './ProjectRail';
@@ -113,6 +114,8 @@ function getDefaultInspectorTabId({ selectedAssetId, selectedClipId }: Inspector
 }
 
 export function TimelineEditor({ active = true, editor, onProjectSettings, onOpenSettings, onProjects, onSelectProject }: TimelineEditorProps): ReactElement {
+  const [sourceCaptionSnapshot, setSourceCaptionSnapshot] = useState<SourceCaptionSnapshot | null>(null);
+  const updateSourceCaptions = useCallback((snapshot: SourceCaptionSnapshot | null) => setSourceCaptionSnapshot(snapshot), []);
   const [editorView, setEditorView] = useState<EditorViewMode>('shorts');
   const [shortsReturnContext, setShortsReturnContext] = useState<ShortsOpenEditorRequest | null>(null);
   const [restoredShortsTarget, setRestoredShortsTarget] = useState<{
@@ -430,7 +433,7 @@ export function TimelineEditor({ active = true, editor, onProjectSettings, onOpe
         <div className="editor-view" hidden={!shortsMode}>
           <NaturalStudioView liveReviewSlot={<div className="natural-source-workspace">
           {editor.project !== null && <SourceMediaPreview key={`${editor.project.id}:${editor.selectedAsset?.id ?? ""}`} projectId={editor.project.id}
-            assets={editor.project.assets} selectedAssetId={editor.selectedAsset?.id ?? null} active={active && shortsMode} />}
+            assets={editor.project.assets} selectedAssetId={editor.selectedAsset?.id ?? null} active={active && shortsMode} captionSource={sourceCaptionSnapshot} />}
           <div className="natural-source-workspace__body">
           <div className="os-ws-live-stage" hidden={intakeComplete}>
             <WorkspaceIntakeView pickerOnly prompt={chat.input} onPromptChange={chat.setInput} presets={[]}
@@ -448,6 +451,7 @@ export function TimelineEditor({ active = true, editor, onProjectSettings, onOpe
               returnReloadToken={restoredShortsTarget !== null && restoredShortsTarget.sourceProjectId === editor.project?.id ? restoredShortsTarget.token : 0}
               returnReloadProjectId={restoredShortsTarget !== null && restoredShortsTarget.sourceProjectId === editor.project?.id ? restoredShortsTarget.resultProjectId : null}
               onOpenSettings={onOpenSettings}
+              onSourceCaptionsChange={updateSourceCaptions}
               onOpenMaterializedProject={openMaterializedShortInEditor}
             />
           </div>

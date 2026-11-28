@@ -22,3 +22,9 @@ Canceled import retains preview; missing metadata uses decoded duration; project
 User addition: enter natural editing directly at startup, skipping the project selection screen. Desktop supports empty intake and creates a local project only when importing. Mobile starts in Agent for the latest local project, or a new empty project. Project management remains available on demand.
 
 Verification and limits: ../specs/2026-11-28-natural-source-preview-verification.md. Review performed by this session only; independent review required before merging.
+
+## Task 2: Single source transport and component lanes
+- [x] Add failing tests for native controls absence, custom play/pause/mute/restart, lane/source timing, captions clamping and cross-project/asset isolation.
+- [x] Build shared source-track model; render aligned video/audio/subtitle lanes and one transport on desktop and mobile.
+- [x] Publish active review captions through a scoped snapshot to the source preview, retaining existing job/approval boundaries.
+- [x] Run focused regression tests, root typecheck/test/build and mobile typecheck; inspect desktop layout. No other implementing session.

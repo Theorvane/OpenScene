@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react';
-import { selectSourcePreviewAsset, sourcePreviewDurationMs } from '../../../shared/sourceMediaPreview';
+import { selectSourcePreviewAsset, sourcePreviewDurationMs, sourceTransportTargetMs } from '../../../shared/sourceMediaPreview';
+import { buildSourcePreviewTracks, sourcePreviewCaptions, type SourceAudioStatus, type SourceCaptionSnapshot } from '../../../shared/sourcePreviewTimeline';
+import type { SubtitleCue } from '../../../shared/narrationPlan';
+import { SourceTrackTimeline } from './SourceTrackTimeline';
 import { formatDuration } from '../format';
 
 type SourceAsset = {
@@ -13,6 +16,7 @@ type Props = {
   readonly assets: readonly SourceAsset[];
   readonly selectedAssetId: string | null;
   readonly active: boolean;
+  readonly captionSource?: SourceCaptionSnapshot | null;
 };
 
 export function SourceMediaPreview(props: Props): ReactElement | null {
@@ -27,17 +31,20 @@ export function SourceMediaPreview(props: Props): ReactElement | null {
       </select>
       <span>전체 길이 · 원본 확인</span>
     </header>
-    <SourcePlayer key={`${props.projectId}:${asset.id}`} projectId={props.projectId} asset={asset} active={props.active} />
+    <SourcePlayer key={`${props.projectId}:${asset.id}`} projectId={props.projectId} asset={asset} active={props.active} captions={sourcePreviewCaptions(props.captionSource, props.projectId, asset.id)} />
   </div>;
 }
 
-function SourcePlayer({ projectId, asset, active }: { readonly projectId: string; readonly asset: SourceAsset; readonly active: boolean }): ReactElement {
+function SourcePlayer({ projectId, asset, active, captions }: { readonly projectId: string; readonly asset: SourceAsset; readonly active: boolean; readonly captions: readonly SubtitleCue[] }): ReactElement {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [url, setUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
   const [decodedDuration, setDecodedDuration] = useState(0);
   const [positionMs, setPositionMs] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [muted, setMuted] = useState(false);
+  const [audioStatus, setAudioStatus] = useState<SourceAudioStatus>('unknown');
   const durationMs = sourcePreviewDurationMs(asset.metadata?.durationMs, decodedDuration);
   useEffect(() => {
     let live = true;
@@ -56,22 +63,42 @@ function SourcePlayer({ projectId, asset, active }: { readonly projectId: string
     try { video.currentTime = Math.max(0, Math.min(value, durationMs)) / 1000; setPositionMs(video.currentTime * 1000); }
     catch { setError('아직 이동할 수 없습니다. 영상 로딩 후 다시 시도하세요.'); }
   };
+  const disabled = url === null || durationMs <= 0 || error !== null;
+  const togglePlayback = async (): Promise<void> => {
+    const video = videoRef.current;
+    if (video === null || disabled || !active) return;
+    if (isPlaying) { video.pause(); return; }
+    if (video.ended || positionMs >= durationMs) seek(0);
+    try { await video.play(); } catch { setError('재생을 시작하지 못했습니다. 다시 시도하세요.'); }
+  };
+  const tracks = buildSourcePreviewTracks({ durationMs, fileName: asset.displayName, audioStatus, captions });
   return <>
-    <video ref={videoRef} src={url ?? undefined} controls playsInline preload="metadata" aria-label={`원본 미리보기: ${asset.displayName}`}
-      onLoadedMetadata={event => setDecodedDuration(event.currentTarget.duration)}
+    <video ref={videoRef} src={url ?? undefined} controls={false} disablePictureInPicture disableRemotePlayback playsInline preload="metadata" aria-label={`원본 미리보기: ${asset.displayName}`}
+      onLoadedMetadata={event => {
+        const video = event.currentTarget as HTMLVideoElement & { readonly audioTracks?: { readonly length: number } };
+        setDecodedDuration(video.duration);
+        setAudioStatus(video.audioTracks === undefined ? 'unknown' : video.audioTracks.length > 0 ? 'present' : 'absent');
+      }}
+      onPlay={event => { if (!active) event.currentTarget.pause(); else setIsPlaying(true); }}
+      onPause={() => setIsPlaying(false)} onEnded={() => setIsPlaying(false)}
+      onVolumeChange={event => setMuted(event.currentTarget.muted)}
       onDurationChange={event => setDecodedDuration(event.currentTarget.duration)}
       onTimeUpdate={event => setPositionMs(Math.round(event.currentTarget.currentTime * 1000))}
       onError={() => setError('이 영상을 미리 볼 수 없습니다. 파일과 지원 코덱을 확인하세요.')} />
     {error !== null && <div role="alert">{error} <button type="button" onClick={() => { setRetry(value => value + 1); videoRef.current?.load(); }}>다시 시도</button></div>}
     {url === null && error === null && <p>원본 영상 불러오는 중…</p>}
-    <div className="source-media-preview__timeline">
-      <div className="source-media-preview__ruler" aria-hidden="true"><span>0:00</span><span>{formatDuration(durationMs / 2)}</span><span>{formatDuration(durationMs)}</span></div>
-      <label>원본 전체 타임라인
-        <input type="range" min={0} max={durationMs} step={1} value={Math.min(positionMs, durationMs)} disabled={url === null || durationMs <= 0 || error !== null}
-          aria-label="원본 영상 재생 위치" aria-valuetext={`${formatDuration(positionMs)} / ${formatDuration(durationMs)}`}
-          onChange={event => seek(Number(event.target.value))} />
-      </label>
-      <div className="source-media-preview__ruler"><span className="os-ui-truncate">{asset.displayName}</span><span>{formatDuration(positionMs)} / {formatDuration(durationMs)}</span></div>
+    <div className="source-media-preview__transport" role="group" aria-label="원본 재생 제어">
+      <button type="button" aria-label="원본 처음으로" disabled={disabled} onClick={() => seek(sourceTransportTargetMs(positionMs, durationMs, 'start'))}>처음으로</button>
+      <button type="button" aria-label="원본 5초 뒤로" disabled={disabled} onClick={() => seek(sourceTransportTargetMs(positionMs, durationMs, 'back'))}>−5초</button>
+      <button type="button" aria-label={isPlaying ? '원본 일시정지' : '원본 재생'} disabled={disabled} onClick={() => { void togglePlayback(); }}>{isPlaying ? '일시정지' : '재생'}</button>
+      <button type="button" aria-label="원본 5초 앞으로" disabled={disabled} onClick={() => seek(sourceTransportTargetMs(positionMs, durationMs, 'forward'))}>+5초</button>
+      <button type="button" aria-label="원본 끝으로" disabled={disabled} onClick={() => seek(sourceTransportTargetMs(positionMs, durationMs, 'end'))}>끝으로</button>
+      <button type="button" aria-label={muted ? '원본 소리 켜기' : '원본 소리 끄기'} aria-pressed={muted} disabled={disabled} onClick={() => {
+        const video = videoRef.current;
+        if (video !== null) { video.muted = !video.muted; setMuted(video.muted); }
+      }}>{muted ? '소리 켜기' : '음소거'}</button>
+      <span>{formatDuration(positionMs)} / {formatDuration(durationMs)}</span>
     </div>
+    <SourceTrackTimeline tracks={tracks} durationMs={durationMs} positionMs={positionMs} disabled={disabled} onSeek={seek} />
   </>;
 }
