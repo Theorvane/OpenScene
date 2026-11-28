@@ -21,6 +21,7 @@ const [EDIT_WORKSPACE] = APP_WORKSPACES;
 export function App(): ReactElement {
   const editor = useTimelineEditor();
   const [editorView, setEditorView] = useState<EditorViewMode>('shorts');
+  const projectPickerPending = useRef(false);
   const [activePageId, setActivePageId] = useState<AppPageId>(() => getDefaultAppPageId());
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<AppWorkspaceId>(() => getDefaultAppWorkspaceId());
   const [showFirstRunOnboarding, setShowFirstRunOnboarding] = useState(() => {
@@ -89,10 +90,14 @@ export function App(): ReactElement {
 
   const setActivePage = useCallback((pageId: AppPageId): void => {
     if (pageId === 'projects') {
+      if (projectPickerPending.current) return;
+      projectPickerPending.current = true;
       void (async () => {
-        if (editor.hasUnsavedTimeline && !await editor.saveTimeline()) return;
-        const opened = await editor.openProjectFolder('editing');
-        if (opened) navigateToPage('edit');
+        try {
+          if (editor.hasUnsavedTimeline && !await editor.saveTimeline()) return;
+          const opened = await editor.openProjectFolder('editing');
+          if (opened) navigateToPage('edit');
+        } finally { projectPickerPending.current = false; }
       })();
       return;
     }

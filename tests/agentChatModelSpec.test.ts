@@ -49,9 +49,10 @@ describe('agent chat model provider resolution', () => {
     );
   });
 
-  it('keeps local catalog models and unknown custom models on the Ollama client', () => {
+  it('routes explicit Ollama IDs and retained legacy aliases while rejecting unknown models', () => {
     expect(resolveAgentChatModelSpec('qwen2.5-coder')).toEqual({ kind: 'ollama' });
-    expect(resolveAgentChatModelSpec('my-custom-local-model')).toEqual({ kind: 'ollama' });
+    expect(resolveAgentChatModelSpec('local_ollama/my-custom-model')).toEqual({ kind: 'ollama' });
+    expect(() => resolveAgentChatModelSpec('my-custom-local-model')).toThrow();
   });
 
   it('resolves explicit ChatGPT authentication to a private Responses API Codex client spec', () => {

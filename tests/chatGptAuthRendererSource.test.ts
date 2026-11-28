@@ -67,7 +67,7 @@ describe('unified OpenAI provider renderer contract', () => {
     expect(picker).toContain('createPortal(popover, document.body)');
     // Context size is not shown on model rows.
     expect(picker).not.toContain('contextWindow');
-    expect(picker).toContain('No models resolved — restart the app');
-    expect(picker).toContain('Connect a provider in Settings → Providers to add its models here.');
+    expect(picker).toContain('모델 제공자 연결이 필요합니다.');
+    expect(picker).toContain('제공자 설정 열기');
   });
 });

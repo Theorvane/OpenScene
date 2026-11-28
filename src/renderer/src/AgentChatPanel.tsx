@@ -33,16 +33,17 @@ type AgentChatPanelProps = {
   readonly width?: number;
   readonly onCollapse?: () => void;
   readonly inline?: boolean;
+  readonly onOpenSettings?: (() => void) | undefined;
 };
 
 type AgentChatPanelStyle = CSSProperties & {
   readonly '--agent-chat-panel-width': string;
 };
 
-export function AgentChatPanel({ width = 360, onCollapse, inline = false }: AgentChatPanelProps): ReactElement {
+export function AgentChatPanel({ width = 360, onCollapse, inline = false, onOpenSettings }: AgentChatPanelProps): ReactElement {
   const {
     selectedModel,
-    isLocalModel,
+    hasConnectedProvider,
     modelReady,
     input,
     setInput,
@@ -99,7 +100,7 @@ export function AgentChatPanel({ width = 360, onCollapse, inline = false }: Agen
           <div className="agent-chat-panel__title">
             <p className="agent-chat-panel__title-label">OpenScene Assistant</p>
             <span className="agent-chat-panel__title-meta">
-              {selectedModel.label} · {selectedModel.providerLabel} · {isLocalModel ? 'Local' : modelReady ? 'Connected' : 'Not connected'}
+              {modelReady ? `${selectedModel.providerLabel} · ${selectedModel.label}` : '제공자 연결 및 모델 선택 필요'}
             </span>
           </div>
           <div className="agent-chat-panel__actions">
@@ -153,7 +154,8 @@ export function AgentChatPanel({ width = 360, onCollapse, inline = false }: Agen
         </div>
 
         <div className="agent-chat-log" aria-live="polite">
-          <details className="agent-chat-control-mode">
+          {!modelReady && <div className="status-card" role="status"><p>{hasConnectedProvider ? '연결된 제공자에서 사용할 편집 모델을 선택하세요.' : '모델 제공자 연결이 필요합니다. 연결 후 사용할 모델을 직접 선택하세요.'}</p>{onOpenSettings && <Button type="button" onClick={onOpenSettings}>모델 제공자 설정</Button>}</div>}
+          {modelReady && <details className="agent-chat-control-mode">
           <summary>에이전트 제어: {interactionMode === 'project-tools' ? '편집 도구' : '화면 자동 조작'}</summary>
           <div role="group" aria-label="Agent interaction mode">
             <Button variant={interactionMode === 'project-tools' ? 'primary' : 'ghost'} data-testid="agent-mode-project-tools"
@@ -164,19 +166,11 @@ export function AgentChatPanel({ width = 360, onCollapse, inline = false }: Agen
               onClick={() => { void changeInteractionMode('self-window'); }}>Window CUA (desktop)</Button>
           </div>
           <p>에이전트 제어 방식을 변경하면 새 대화를 시작합니다. 상단 자연어·정밀·노드 화면 전환은 같은 편집과 대화를 유지합니다.</p>
-          </details>
+          </details>}
           {interactionMode === 'self-window' && <p>Window CUA observes live UI without automatically saving. Saved-project tools require an explicitly approved Save when the UI may be dirty.</p>}
 
-          {!modelReady && (
-            <div className="agent-chat-hint-card agent-chat-hint-card--warning">
-              <span className="agent-chat-hint-card__icon">⚠️</span>
-              <p className="agent-chat-hint-card__text">
-                {selectedModel.providerLabel} is not connected. Connect it in Settings → Providers, or pick a local model below.
-              </p>
-            </div>
-          )}
 
-          {messages.length === 0 && (
+          {modelReady && messages.length === 0 && (
             <div className="agent-chat-hint-card agent-chat-hint-card--welcome">
               <span className="agent-chat-hint-card__icon">✦</span>
               <p className="agent-chat-hint-card__text">
@@ -378,7 +372,7 @@ export function AgentChatPanel({ width = 360, onCollapse, inline = false }: Agen
             />
             <div className="agent-chat-prompt-card__toolbar">
               <div className="agent-chat-prompt-card__meta">
-                <AgentModelPicker reasoningEffort={reasoningEffort} onReasoningEffortChange={setReasoningEffort} />
+                <AgentModelPicker reasoningEffort={reasoningEffort} onReasoningEffortChange={setReasoningEffort} onOpenSettings={onOpenSettings} />
               </div>
               {isBusy ? <Button type="button" variant="stop" onClick={() => { void cancelConversation(); }}>요청 중지</Button> : <Button
                 type="submit"

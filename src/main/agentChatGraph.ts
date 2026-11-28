@@ -21,6 +21,7 @@ import type { AgentToolCallProposal, AgentToolApprovalDecision } from '../shared
 import { parseEditAgentProjectContext, type EditAgentContextAsset, type EditAgentProjectContext } from '../shared/editAgentContext';
 import type { OpenAiAuthMode, ReasoningEffort } from '../shared/openAiAuth';
 import { getLlmModel } from '../shared/llmModels';
+import { discoveredOllamaModel } from './ollamaDiscovery';
 
 export const EXISTING_FOOTAGE_EDIT_POLICY =
   'Existing-footage montages are local timeline edits. When a project already has imported video assets and the user asks for a montage, frag movie, highlight reel, or cut, work with those assets. ' +
@@ -346,6 +347,7 @@ export function buildAgentChatGraph(options: BuildAgentChatGraphOptions) {
       const visualEvidence: HumanMessage[] = [];
       const modelId = config?.configurable?.modelId;
       const model = typeof modelId === 'string' ? getLlmModel(modelId) : undefined;
+      const ollamaModel = typeof modelId === 'string' ? discoveredOllamaModel(modelId, config?.configurable?.ollamaBaseUrl) : undefined;
       for (const call of last.tool_calls) {
         if (!call.id) continue;
         const policyError = state.toolPolicyErrors[call.id];
@@ -363,7 +365,7 @@ export function buildAgentChatGraph(options: BuildAgentChatGraphOptions) {
           continue;
         }
 
-        if (call.name === 'watchProjectVideo' && model !== undefined && model.vision !== true) {
+        if (call.name === 'watchProjectVideo' && model !== undefined && (ollamaModel?.vision ?? model.vision) !== true) {
           results.push(new ToolMessage({ content: 'This model cannot inspect video frames. Switch to a vision model or use speech inspection.', tool_call_id: call.id, name: call.name }));
           continue;
         }

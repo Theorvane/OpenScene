@@ -1,3 +1,4 @@
+import { ollamaNativeModelId } from '../shared/ollamaModels';
 import type { CredentialStore } from './credentialStore';
 import { getLlmModel, parseLlmModelKey } from '../shared/llmModels';
 import { getLlmProvider, type LlmProviderInfo } from '../shared/llmProviders';
@@ -93,7 +94,7 @@ export class LlmExecutionAdapter {
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
         body: JSON.stringify({
-          model: modelId,
+          model: ollamaNativeModelId(modelId) ?? modelId,
           messages: [
             ...(request.systemPrompt ? [{ role: 'system', content: request.systemPrompt }] : []),
             { role: 'user', content: request.prompt }

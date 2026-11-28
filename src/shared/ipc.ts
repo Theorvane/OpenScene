@@ -1,4 +1,5 @@
 export const IPC_CHANNELS = {
+  ollamaDiscover: 'llm:ollama-discover',
   cuaGetState: 'cua:get-state',
   cuaAckCancel: 'cua:ack-cancel',
   cuaAckActionSettlement: 'cua:ack-action-settlement',

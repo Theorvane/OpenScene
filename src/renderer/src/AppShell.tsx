@@ -264,7 +264,7 @@ function AppShellContent({ activePage, children, hasActiveProject, onPageChange,
             </div>
           )}
         </div>
-        {inlineAgentChat && isWorkspacePageId(activePage.id) && <AgentChatPanel inline />}
+        {inlineAgentChat && isWorkspacePageId(activePage.id) && <AgentChatPanel inline onOpenSettings={() => onPageChange('settings')} />}
         {showChatPanel && !chatPanelCollapsed && (
           <>
             <div
@@ -286,7 +286,7 @@ function AppShellContent({ activePage, children, hasActiveProject, onPageChange,
               tabIndex={0}
               title="Drag to resize Edit Agent chat panel"
             />
-            <AgentChatPanel width={chatPanelWidth} onCollapse={() => setChatPanelCollapsed(true)} />
+            <AgentChatPanel width={chatPanelWidth} onCollapse={() => setChatPanelCollapsed(true)} onOpenSettings={() => onPageChange('settings')} />
           </>
         )}
       </div>

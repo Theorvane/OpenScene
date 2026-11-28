@@ -7,12 +7,12 @@ import { LLM_CATALOG, type LlmCatalogProvider } from './llmCatalog.generated';
 
 /**
  * Provider registry: a provider is a source of models with its
- * own connection method. The local Ollama engine is always usable; every cloud
+ * own connection method. Ollama requires explicit endpoint discovery; every cloud
  * provider from the generated models.dev catalog connects by storing an API
  * key in main-process safe storage and stays listed (but disabled) until
  * connected.
  */
-export type LlmProviderKind = 'local' | 'cloud';
+export type LlmProviderKind = 'endpoint' | 'cloud';
 export type LlmProviderAuth = 'none' | 'api-key' | 'oauth';
 export type LlmProviderAdapter = 'ollama' | 'openai-compatible' | 'anthropic' | 'gemini' | 'media';
 
@@ -44,11 +44,11 @@ const KEY_PLACEHOLDERS: Readonly<Record<string, string>> = {
 export const OLLAMA_PROVIDER: LlmProviderInfo = {
   id: 'local_ollama',
   label: 'Ollama',
-  kind: 'local',
+  kind: 'endpoint',
   auth: 'none',
   adapter: 'ollama',
   baseUrlConfigurable: true,
-  description: 'Local engine over HTTP. No account or key; models run on this machine.'
+  description: 'Connect to a user-managed Ollama endpoint and discover its models. OpenScene does not install or run models.'
 };
 
 export const AGENT_ROUTER_PROVIDER: LlmProviderInfo = {
@@ -112,7 +112,7 @@ export function getLlmCatalogProvider(id: string): LlmCatalogProvider | undefine
 }
 
 /**
- * A provider is connected when it needs no credential (local) or its API key
+ * A provider is connected when its endpoint was verified or its API key
  * is present in safe storage. The renderer only ever sees the boolean status
  * map, never key material.
  */
@@ -122,6 +122,6 @@ export function isProviderConnected(
 ): boolean {
   const provider = getLlmProvider(providerId);
   if (provider === undefined) return false;
-  if (provider.auth === 'none') return true;
+  if (provider.auth === 'none') return credentialStatus[provider.id] === true;
   return provider.credentialKey !== undefined && credentialStatus[provider.credentialKey] === true;
 }

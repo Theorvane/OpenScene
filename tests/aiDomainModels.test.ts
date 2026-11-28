@@ -12,8 +12,9 @@ import {
 
 describe('AI domain model catalog', () => {
 
-  it('keeps the local model as the edit-agent default ahead of cloud providers', () => {
-    expect(getAvailableDomainModels('edit-agent')[0]?.executionPath).toBe('local');
+  it('leaves model selection empty until the user chooses a connected provider model', () => {
+    expect(getDefaultDomainModelId('edit-agent')).toBe('');
+    expect(getAvailableDomainModels('edit-agent').every(model => model.executionPath === 'api')).toBe(true);
   });
 
   it('normalizes a legacy OpenAI Codex edit-agent preference before availability validation', () => {

@@ -31,6 +31,7 @@ interface AgentChatController {
   readonly changeInteractionMode: (mode: AgentChatInteractionMode) => Promise<void>;
   readonly selectedModel: AiDomainModelConfig;
   readonly isLocalModel: boolean;
+  readonly hasConnectedProvider: boolean;
   /** True when the selected model's provider is usable: local, or cloud with a stored key. */
   readonly modelReady: boolean;
   /** Thinking effort chosen for the active model (undefined = provider default). */
@@ -81,7 +82,7 @@ export function AgentChatProvider({ activeProject, prepareProject, hasUnsavedTim
   const [interactionMode, setInteractionMode] = useState<AgentChatInteractionMode>('project-tools');
   const { providerConfig, credentialStatus } = useLlmModel();
   const chatGptAuth = useChatGptAuth();
-  const { selectedModel: getSelectedDomainModel } = useAiDomainModel();
+  const { selectedModel: getSelectedDomainModel, hasConnectedProvider } = useAiDomainModel();
   const selectedModel = getSelectedDomainModel('edit-agent');
   const conversationIdRef = useRef<string>(createConversationId());
 
@@ -131,10 +132,8 @@ export function AgentChatProvider({ activeProject, prepareProject, hasUnsavedTim
       return next;
     });
   };
-  const modelReady =
-    isLocalModel ||
-    openAiAuthMode === 'chatgpt' ||
-    isProviderConnected(selectedModel.providerId, credentialStatus);
+  const modelReady = selectedModel.available && selectedModel.id.length > 0 &&
+    (openAiAuthMode === 'chatgpt' || isProviderConnected(selectedModel.providerId, credentialStatus));
 
   useEffect(() => {
     if (restoreRequest === null) return;
@@ -430,6 +429,7 @@ export function AgentChatProvider({ activeProject, prepareProject, hasUnsavedTim
       finally { setIsBusy(false); }
     },
     selectedModel,
+    hasConnectedProvider,
     isLocalModel,
     modelReady,
     reasoningEffort,

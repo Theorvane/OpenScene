@@ -22,7 +22,8 @@ describe('persistent agent control surface', () => {
       readSource(STYLES_SOURCE_URL)
     ]);
 
-    expect(appShell).toContain('<AgentChatPanel width={chatPanelWidth} onCollapse={() => setChatPanelCollapsed(true)} />');
+    expect(appShell).toContain('<AgentChatPanel width={chatPanelWidth} onCollapse={() => setChatPanelCollapsed(true)}');
+    expect(appShell).toContain('onOpenSettings={() => onPageChange(');
     expect(appShell).toContain('aria-expanded={!chatPanelCollapsed}');
     expect(appShell).toContain('{showChatPanel && !chatPanelCollapsed && (');
     expect(appShell).toContain('onClick={() => setChatPanelCollapsed(!chatPanelCollapsed)}');

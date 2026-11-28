@@ -70,6 +70,7 @@ type AssetPlaybackUrl = {
 };
 
 export interface VideoToolApi extends JevCredentialApi, JevConfigApi {
+  discoverOllama(input: { readonly baseUrl: string }): Promise<ApiResponse<import('../shared/ollamaModels').OllamaDiscovery>>;
   reaAnalysisRuntime(): Promise<ApiResponse<ReaAnalysisRuntime>>;
   reaAnalysisStart(input: ReaAnalysisInput): Promise<ApiResponse<ReaAnalysisJob>>;
   reaAnalysisGet(input: { readonly jobId: string }): Promise<ApiResponse<ReaAnalysisJob>>;
@@ -178,6 +179,7 @@ function parseUpdaterSnapshot(payload: unknown): UpdaterSnapshot | null {
 }
 
 const videoTool: VideoToolApi = {
+  discoverOllama: (input) => ipcRenderer.invoke(IPC_CHANNELS.ollamaDiscover, input),
   reaAnalysisRuntime: () => ipcRenderer.invoke(REA_ANALYSIS_CHANNELS.runtime),
   reaAnalysisStart: input => ipcRenderer.invoke(REA_ANALYSIS_CHANNELS.start, input),
   reaAnalysisGet: input => ipcRenderer.invoke(REA_ANALYSIS_CHANNELS.get, input),

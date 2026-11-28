@@ -1278,9 +1278,9 @@ body:has(.app-shell--workspace) { min-width: 0; min-height: 0; }
 .source-track-timeline__label { color: var(--os-ui-fg-secondary); }
 .source-track-timeline__lanes { display: flex; flex-direction: column; gap: 4px; }
 .source-track-timeline__lane { position: relative; min-height: 32px; background: var(--os-ui-canvas); border: 1px solid var(--os-ui-border); overflow: hidden; }
-.source-track-timeline__clip { position: absolute; inset-block: 2px; min-width: 1px; padding: 2px 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: start; color: var(--os-ui-fg); background: #233541; border: 1px solid #507184; border-radius: 3px; cursor: pointer; }
-[data-source-track="audio"] .source-track-timeline__clip { background: #263a30; border-color: #547660; }
-[data-source-track="subtitle"] .source-track-timeline__clip { background: #3a3026; border-color: #80684b; }
+.source-track-timeline__clip { position: absolute; inset-block: 2px; min-width: 1px; padding: 2px 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: start; color: var(--os-ui-fg); background: color-mix(in srgb, #507184 20%, var(--os-ui-canvas)); border: 1px solid #507184; border-radius: 3px; cursor: pointer; }
+[data-source-track="audio"] .source-track-timeline__clip { background: color-mix(in srgb, #547660 20%, var(--os-ui-canvas)); border-color: #547660; }
+[data-source-track="subtitle"] .source-track-timeline__clip { background: color-mix(in srgb, #80684b 20%, var(--os-ui-canvas)); border-color: #80684b; }
 .source-track-timeline__empty { display: block; padding: 8px; color: var(--os-ui-fg-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .source-track-timeline__playhead { position: absolute; inset-block: 0; width: 1px; background: var(--os-ui-cta-bg); pointer-events: none; }
 .source-media-preview__transport button:focus-visible, .source-track-timeline__clip:focus-visible { outline: 2px solid var(--os-ui-fg); outline-offset: -2px; z-index: 1; }

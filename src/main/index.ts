@@ -65,6 +65,7 @@ import { TranscriptionService } from './transcriptionService';
 import { ShortsService } from './shortsService';
 import { createShortsCandidateProvider } from './shortsCandidateProvider';
 import { discoverFfmpeg } from './ffmpegDiscovery';
+import { discoverOllama } from './ollamaDiscovery';
 import { measureExportedFile } from './exportMeasurement';
 
 try {
@@ -432,6 +433,7 @@ async function installIpcHandlers(): Promise<void> {
   registerExportIpcHandlers(ipcMain, exportIpcService);
   registerReaAnalysisIpc({ service: reaAnalysis, ipcMain, getOwnWindow: () => reaAnalysisWindow });
   ipcMain.handle(IPC_CHANNELS.shortsStart, (_event, payload: unknown) => shortsService.start(payload));
+  ipcMain.handle(IPC_CHANNELS.ollamaDiscover, (_event, payload: unknown) => discoverOllama(payload));
   ipcMain.handle(IPC_CHANNELS.shortsGet, (_event, payload: unknown) => shortsService.get(payload));
   ipcMain.handle(IPC_CHANNELS.shortsList, (_event, payload: unknown) => shortsService.list(payload));
   ipcMain.handle(IPC_CHANNELS.shortsCancel, (_event, payload: unknown) => shortsService.cancel(payload));
