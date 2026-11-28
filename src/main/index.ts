@@ -6,6 +6,17 @@ import { join } from 'node:path';
 import { IPC_CHANNELS } from '../shared/ipc';
 import { ReaVideoAnalysisService } from './reaVideoAnalysisService';
 import { registerReaAnalysisIpc } from './reaVideoAnalysisIpc';
+import { ReaGenerationJobStore } from './reaGenerationJobStore';
+import { ReaGenerationService } from './reaGenerationService';
+import { registerReaGenerationIpc } from './reaGenerationIpc';
+import { REA_VIDEO_CREDENTIAL_SLOT } from '../shared/reaGenerationApi';
+import { ReaGenerationResultService } from './reaGenerationResultService';
+import { resolveGenerationReference } from './reaGenerationReference';
+import { MinimaxPaygVideoTransport } from './minimaxVideoTransport';
+import { MinimaxVideoAdapter } from './minimaxVideoAdapter';
+import { captureGenerationSourceIdentity, ReaGenerationSubmission } from './reaGenerationSubmission';
+import { REA_GENERATION_POLICY, type ReaGenerationPlan } from '../shared/reaGeneration';
+import { ReaGenerationRunner } from './reaGenerationRunner';
 import type { AppSettings, CaptureSource } from '../shared/models';
 import { SourceCatalog, type RawCaptureSource } from '../shared/sourceCatalog';
 import type { MediaKind } from '../shared/timelineTypes';
@@ -94,6 +105,28 @@ const reaAnalysis = new ReaVideoAnalysisService(async ({ projectId, assetId }) =
 const audioDetachService = new AudioDetachService({ projects: projectStore, assets: assetLibraryStore });
 const exportJobStore = new ExportJobStore();
 const credentialStore = new CredentialStore(app.getPath('userData'));
+// No user preference can enable this gate. Provider calls require a separate reviewed decision.
+const generationExecutionAllowed = () => REA_GENERATION_POLICY.paidExecutionAllowed;
+const reaVideoAdapter = new MinimaxVideoAdapter(new MinimaxPaygVideoTransport(generationExecutionAllowed,
+  () => credentialStore.getCredentialValue(REA_VIDEO_CREDENTIAL_SLOT)), generationExecutionAllowed);
+const reaGenerationJobs = new ReaGenerationJobStore(join(app.getPath('userData'), 'rea-generation'), reaVideoAdapter);
+const generationFfmpeg = async () => { const ffmpeg = await discoverFfmpeg(); if (ffmpeg.kind === 'unavailable') throw new Error('FFMPEG_UNAVAILABLE'); return ffmpeg.executablePath; };
+const generationSourceIdentity = async (plan: ReaGenerationPlan) => captureGenerationSourceIdentity(assetLibraryStore, await generationFfmpeg(), plan);
+const reaGenerationSubmission = new ReaGenerationSubmission(generationExecutionAllowed, reaGenerationJobs, generationSourceIdentity, async plan => {
+  if (!plan.referenceImage) return undefined;
+  return (await resolveGenerationReference(assetLibraryStore, join(app.getPath('userData'), 'rea-generation-images'), await generationFfmpeg(), plan.projectId, plan.referenceImage.assetId)).bytes;
+});
+const reaGenerationResults = new ReaGenerationResultService(join(app.getPath('userData'), 'rea-generation-results'), async () => {
+  const ffmpeg = await discoverFfmpeg(); if (ffmpeg.kind === 'unavailable') throw new Error('FFMPEG_UNAVAILABLE'); return ffmpeg.executablePath;
+}, assetLibraryStore);
+const reaGenerationObserver = new ReaGenerationRunner(reaGenerationJobs, reaVideoAdapter, reaGenerationResults, generationExecutionAllowed);
+const reaGeneration = new ReaGenerationService(credentialStore, reaGenerationJobs, async (projectId, assetId) => {
+  const asset = await projectStore.getAsset(projectId, assetId);
+  return asset?.kind === 'video' && await assetLibraryStore.getPlaybackSource(projectId, assetId) !== null;
+}, reaGenerationResults, async (projectId, trackId) => Boolean((await projectStore.open(projectId))?.timeline.tracks.some(t => t.id === trackId && t.kind === 'video')), async (projectId, assetId) => {
+  const ffmpeg = await discoverFfmpeg(); if (ffmpeg.kind === 'unavailable') throw new Error('FFMPEG_UNAVAILABLE');
+  return (await resolveGenerationReference(assetLibraryStore, join(app.getPath('userData'), 'rea-generation-images'), ffmpeg.executablePath, projectId, assetId)).reference;
+}, reaGenerationSubmission, generationSourceIdentity, reaGenerationObserver);
 const jevService = createJevService({ store: credentialStore });
 const jevConfigStore = new JevConfigStore(app.getPath('userData'));
 let jevCredentialWindow: BrowserWindow | null = null;
@@ -431,6 +464,7 @@ async function installIpcHandlers(): Promise<void> {
   });
   registerExportIpcHandlers(ipcMain, exportIpcService);
   registerReaAnalysisIpc({ service: reaAnalysis, ipcMain, getOwnWindow: () => reaAnalysisWindow });
+  registerReaGenerationIpc({ service: reaGeneration, ipcMain, getOwnWindow: () => reaAnalysisWindow });
   ipcMain.handle(IPC_CHANNELS.shortsStart, (_event, payload: unknown) => shortsService.start(payload));
   ipcMain.handle(IPC_CHANNELS.shortsGet, (_event, payload: unknown) => shortsService.get(payload));
   ipcMain.handle(IPC_CHANNELS.shortsList, (_event, payload: unknown) => shortsService.list(payload));
@@ -453,6 +487,7 @@ async function installIpcHandlers(): Promise<void> {
   ipcMain.handle(IPC_CHANNELS.getProviderCredentials, async () => {
     try {
       const status = await credentialStore.getCredentialStatus();
+      delete status[REA_VIDEO_CREDENTIAL_SLOT];
       return ok(status);
     } catch (err) {
       return fail('UNKNOWN_ERROR', err instanceof Error ? err.message : 'Failed to retrieve credential status');
@@ -461,6 +496,7 @@ async function installIpcHandlers(): Promise<void> {
 
   ipcMain.handle(IPC_CHANNELS.setProviderCredential, async (_event, provider: any, apiKey: string) => {
     if (typeof provider !== 'string') return fail('INVALID_INPUT', 'Invalid credential provider.');
+    if (provider === REA_VIDEO_CREDENTIAL_SLOT) return fail('PERMISSION_DENIED', 'Use the dedicated video credential operation.');
     if (provider === 'typesafe-jev') return fail('PERMISSION_DENIED', 'Use the dedicated Jev credential operation.');
     try {
       await credentialStore.setCredential(provider, apiKey);
@@ -580,7 +616,7 @@ app.on('before-quit', event => {
   if (shortsShutdownComplete) return;
   event.preventDefault();
   exportIpcService.cancelAll();
-  void Promise.allSettled([cuaTarget?.driver.cancel('app-quit'), cuaTarget?.save.settleWrites(), shortsService.shutdown(), reaAnalysis.dispose()]).finally(() => {
+  void Promise.allSettled([cuaTarget?.driver.cancel('app-quit'), cuaTarget?.save.settleWrites(), shortsService.shutdown(), reaAnalysis.dispose(), reaGeneration.dispose()]).finally(() => {
     shortsShutdownComplete = true;
     app.quit();
   });

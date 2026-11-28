@@ -1,5 +1,6 @@
 import { useId, useRef, useState } from 'react';
 import { ReaVideoAnalysisWorkspace } from '../../components/workspace/ReaVideoAnalysisWorkspace';
+import { ReaGenerationPanel } from '../../components/workspace/ReaGenerationPanel';
 import type { TimelineEditorController } from './useTimelineEditor';
 
 const REGION_SCROLL_KEYS = new Set(['Home', 'End', 'PageUp', 'PageDown', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' ']);
@@ -37,6 +38,12 @@ export function ReaEditorAnalysisHost({ editor, locked }: { editor: TimelineEdit
           const current = live.current;
           if (!current.open || current.locked || current.projectId !== expected.projectId || current.sourceEpoch !== expected.sourceEpoch || current.trackId !== expected.trackId || current.atMs !== expected.atMs) return;
           editor.applyEditingOperations(operations);
+        }} />
+      <ReaGenerationPanel key={`${project.id}:${sourceEpoch}`} projectId={project.id} sourceEpoch={sourceEpoch} assets={project.assets} trackId={trackId} atMs={editor.playheadMs}
+        onImport={prepared => {
+          const current = live.current, expected = prepared.scope;
+          if (!current.open || current.locked || current.projectId !== expected.projectId || current.sourceEpoch !== expected.sourceEpoch || current.trackId !== expected.trackId || current.atMs !== expected.atMs) return;
+          editor.applyGeneratedImport(prepared);
         }} />
     </div>}
   </section>;

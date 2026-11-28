@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import { REA_ANALYSIS_CHANNELS, type ReaAnalysisInput, type ReaAnalysisJob, type ReaAnalysisRuntime, type ReaPrepareImportInput } from '../shared/reaVideoAnalysis';
+import { REA_GENERATION_CHANNELS, type ReaGenerationApi } from '../shared/reaGenerationApi';
 import type { CuaActionSettlementAck, CuaActionSettlementTag, CuaCancelAck, CuaPrepareAck, CuaState, CuaStopResult, CuaSurfaceSnapshot } from '../shared/cua';
 import type { CuaSaveCommitAck, CuaSaveReadyAck, CuaSaveReadyRequest, CuaSaveResult, CuaSaveSnapshotReport, CuaSaveSnapshotRequest } from '../shared/cuaSave';
 
@@ -69,7 +70,7 @@ type AssetPlaybackUrl = {
   readonly url: string;
 };
 
-export interface VideoToolApi extends JevCredentialApi, JevConfigApi {
+export interface VideoToolApi extends JevCredentialApi, JevConfigApi, ReaGenerationApi {
   reaAnalysisRuntime(): Promise<ApiResponse<ReaAnalysisRuntime>>;
   reaAnalysisStart(input: ReaAnalysisInput): Promise<ApiResponse<ReaAnalysisJob>>;
   reaAnalysisGet(input: { readonly jobId: string }): Promise<ApiResponse<ReaAnalysisJob>>;
@@ -179,6 +180,17 @@ function parseUpdaterSnapshot(payload: unknown): UpdaterSnapshot | null {
 
 const videoTool: VideoToolApi = {
   reaAnalysisRuntime: () => ipcRenderer.invoke(REA_ANALYSIS_CHANNELS.runtime),
+  reaGenerationStatus: () => ipcRenderer.invoke(REA_GENERATION_CHANNELS.status),
+  reaGenerationSetCredential: input => ipcRenderer.invoke(REA_GENERATION_CHANNELS.setCredential, input),
+  reaGenerationClearCredential: () => ipcRenderer.invoke(REA_GENERATION_CHANNELS.clearCredential),
+  reaGenerationPrepare: input => ipcRenderer.invoke(REA_GENERATION_CHANNELS.prepare, input),
+  reaGenerationGet: input => ipcRenderer.invoke(REA_GENERATION_CHANNELS.get, input),
+  reaGenerationCancel: input => ipcRenderer.invoke(REA_GENERATION_CHANNELS.cancel, input),
+  reaGenerationGetResult: input => ipcRenderer.invoke(REA_GENERATION_CHANNELS.getResult, input),
+  reaGenerationAssemble: input => ipcRenderer.invoke(REA_GENERATION_CHANNELS.assemble, input),
+  reaGenerationPrepareImport: input => ipcRenderer.invoke(REA_GENERATION_CHANNELS.prepareImport, input),
+  reaGenerationReference: input => ipcRenderer.invoke(REA_GENERATION_CHANNELS.reference, input),
+  reaGenerationSubmit: input => ipcRenderer.invoke(REA_GENERATION_CHANNELS.submit, input),
   reaAnalysisStart: input => ipcRenderer.invoke(REA_ANALYSIS_CHANNELS.start, input),
   reaAnalysisGet: input => ipcRenderer.invoke(REA_ANALYSIS_CHANNELS.get, input),
   reaAnalysisCancel: input => ipcRenderer.invoke(REA_ANALYSIS_CHANNELS.cancel, input),
