@@ -35,7 +35,12 @@ export const officialGenerationDownloadTransport: GenerationDownloadTransport = 
   open: (url, pinnedAddress, signal) => new Promise((resolve, reject) => {
     const req = request(url, {
       method: 'GET', agent: false, signal, headers: { Accept: 'video/mp4', 'Accept-Encoding': 'identity' },
-      lookup: (_hostname, _options, callback) => callback(null, pinnedAddress, 4)
+      lookup: (_hostname, options, callback) => {
+        // Node autoSelectFamily requests all:true and requires an address array.
+        // Both forms return only the already validated, pinned IPv4 address.
+        if (options.all) callback(null, [{ address: pinnedAddress, family: 4 }]);
+        else callback(null, pinnedAddress, 4);
+      }
     }, response => {
       resolve({ status: response.statusCode ?? 0, mimeType: response.headers['content-type'] ?? '',
         contentLength: response.headers['content-length'] === undefined ? null : Number(response.headers['content-length']),
