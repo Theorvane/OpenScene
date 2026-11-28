@@ -13,10 +13,11 @@
 .desktop-shell__content { display: flex; flex-direction: column; flex: 1 1 0; min-inline-size: 0; min-block-size: 0; }
 .desktop-shell__workspace { flex: 1 1 0; min-block-size: 0; min-inline-size: 0; display: flex; flex-direction: column; }
 .desktop-shell__workspace > .app-page-stack { flex: 1 1 0; min-block-size: 0; }
-.desktop-shell__chat { flex: 0 1 38%; min-block-size: 230px; display: flex; flex-direction: column; border-block-start: 1px solid var(--border); }
+.desktop-shell__chat { flex: 0 1 38%; min-block-size: 260px; display: flex; flex-direction: column; border-block-start: 1px solid var(--border); }
 .desktop-shell__chat > * { flex: 1 1 0; min-block-size: 0; }
-.desktop-shell .desktop-shell__chat .agent-chat-panel-shell--inline { flex: 1 1 0; min-block-size: 0; block-size: 100%; overflow: auto; }
-.desktop-shell .desktop-shell__chat .agent-chat-panel { min-block-size: 0; block-size: 100%; }
+.desktop-shell .desktop-shell__chat .agent-chat-panel-shell--inline { flex: 1 1 0; min-block-size: 0; block-size: 100%; inline-size: 100%; min-inline-size: 0; max-inline-size: none; overflow: hidden; }
+.desktop-shell .desktop-shell__chat .agent-chat-panel { min-block-size: 0; block-size: 100%; inline-size: 100%; grid-template-rows: auto auto auto minmax(0, 1fr) auto; }
+.desktop-shell .desktop-shell__chat .agent-chat-log { min-block-size: 0; padding-block: 4px; }
 .desktop-navigation-error { position: absolute; z-index: 2; inset-block-start: 48px; inset-inline: 12px; padding: 8px 12px; border: 1px solid var(--destructive); border-radius: 6px; background: var(--card); color: var(--foreground); }
 .desktop-projects__heading { display: flex; align-items: center; justify-content: space-between; padding: 3px 7px 9px; color: var(--muted-foreground); font-size: 12px; }
 .desktop-projects__actions { display: flex; gap: 4px; }
@@ -43,6 +44,7 @@
 .desktop-shell .os-ws-safety-strip { min-block-size: 24px; padding-block: 3px; font-size: 11px; }
 .desktop-shell .os-ws-main { min-inline-size: 0; }
 .desktop-shell .editor-view--natural .source-media-preview video { block-size: clamp(90px, 14vh, 180px); }
+.desktop-shell .editor-view--natural .program-monitor { block-size: clamp(120px, 18vh, 180px); }
 .desktop-shell .agent-chat-log > .status-card { padding: 10px; }
 .desktop-shell .agent-chat-log > .status-card::before { display: none; }
 .desktop-shell .agent-chat-log > .status-card p { margin-block: 0 6px; }

@@ -18,6 +18,7 @@ export { getEditorNativeMenuState } from './editorNativeMenuState';
 type EditorNativeMenuCommandsInput = {
   readonly editor: TimelineEditorController;
   readonly isAgentBusy: boolean;
+  readonly timelinePlaybackAvailable?: boolean;
   readonly canvasMode: boolean;
   readonly shortcutPreferences: EditorShortcutPreferences;
   readonly layoutPreference: EditorLayoutPreference;
@@ -54,6 +55,7 @@ export function useEditorNativeMenuCommands(input: EditorNativeMenuCommandsInput
     hasUnsavedTimeline: editor.hasUnsavedTimeline,
     isBusy: editor.isBusy || input.isAgentBusy,
     isPlaying: editor.isPlaying,
+    timelinePlaybackAvailable: input.timelinePlaybackAvailable !== false,
     layoutPreference: layout
   }), [
     editor.canRedoTimeline,
@@ -61,6 +63,7 @@ export function useEditorNativeMenuCommands(input: EditorNativeMenuCommandsInput
     editor.hasUnsavedTimeline,
     editor.isBusy,
     input.isAgentBusy,
+    input.timelinePlaybackAvailable,
     editor.isPlaying,
     editor.project,
     editor.selectedClip,

@@ -237,7 +237,8 @@ export function TimelineEditor({ sourcePreview, onSourcePreviewChange, editorVie
 
   useTimelineShortcuts({
     canSplit: editor.selectedClip !== null,
-    isLocked: isAgentBusy || fullStageMode,
+    isLocked: isAgentBusy || fullStageMode || !active,
+    timelinePlaybackAvailable: active && !inspectingSource,
     clearSelection: editor.clearSelection,
     deleteSelectedClip: editor.deleteSelectedClip,
     duplicateSelectedClip: editor.duplicateSelectedClip,
@@ -259,6 +260,7 @@ export function TimelineEditor({ sourcePreview, onSourcePreviewChange, editorVie
 
   useEditorNativeMenuCommands({
     editor,
+    timelinePlaybackAvailable: active && !inspectingSource,
     canvasMode,
     shortcutPreferences,
     isAgentBusy,

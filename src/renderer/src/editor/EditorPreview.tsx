@@ -12,7 +12,7 @@ export function EditorPreview({ editor, active, onSourceModeChange, sourceMode }
   const source = sourceMode ?? (hasVideo && (inspectSource || !hasClips));
   const transcript = project?.ai?.transcriptionDraft;
   useEffect(() => { setInspectSource(false); }, [project?.id]);
-  useEffect(() => { if (!active || source) editor.setIsPlaying(false); }, [active, source, editor.setIsPlaying]);
+  useEffect(() => { if ((!active || source) && editor.isPlaying) editor.setIsPlaying(false); }, [active, source, editor.isPlaying, editor.setIsPlaying]);
   return <section className="editor-preview" aria-label="영상 미리보기">
     <div className="editor-preview__toolbar">
       <div role="group" aria-label="미리보기 대상">

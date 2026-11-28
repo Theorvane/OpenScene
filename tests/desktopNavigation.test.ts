@@ -2,7 +2,8 @@
 import { act, createElement, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { expect, it, vi } from 'vitest';
-vi.mock('../src/renderer/src/AgentChatContext', () => ({ AgentChatProvider: ({ children }: { children: ReactNode }) => children, useAgentChat: () => ({ isBusy: false, pendingApproval: null }) }));
+const approval = vi.hoisted(() => ({ pending: null as object | null }));
+vi.mock('../src/renderer/src/AgentChatContext', () => ({ AgentChatProvider: ({ children }: { children: ReactNode }) => children, useAgentChat: () => ({ isBusy: false, pendingApproval: approval.pending }) }));
 vi.mock('../src/renderer/src/AgentChatPanel', () => ({ AgentChatPanel: () => createElement('textarea', { 'aria-label': 'Chat draft', defaultValue: '' }) }));
 const shellPath = '../src/renderer/src/AppShell';
 const { AppShell } = await import(shellPath);
@@ -21,5 +22,11 @@ it('keeps the natural chat draft mounted but hides chat and its toggle in detail
     expect(host.querySelector('textarea')).toBe(draft);
     expect(draft.value).toBe('Keep my cut request');
     expect(draft.closest('[hidden]')).toBeNull();
-  } finally { act(() => root.unmount()); host.remove(); }
+    approval.pending = { toolCallId: 'awaiting-edit' };
+    await act(async () => root.render(createElement(AppShell, { ...props, inlineAgentChat: true }, 'Workspace')));
+    expect(host.querySelector('#desktop-sidebar')?.hasAttribute('inert')).toBe(true);
+    approval.pending = null;
+    await act(async () => root.render(createElement(AppShell, { ...props, inlineAgentChat: true }, 'Workspace')));
+    expect(host.querySelector('#desktop-sidebar')?.hasAttribute('inert')).toBe(false);
+  } finally { approval.pending = null; act(() => root.unmount()); host.remove(); }
 });

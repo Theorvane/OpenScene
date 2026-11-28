@@ -15,6 +15,7 @@ const CLIP_NUDGE_MS = 100;
 type TimelineShortcutInput = {
   readonly canSplit: boolean;
   readonly isLocked: boolean;
+  readonly timelinePlaybackAvailable?: boolean;
   readonly clearSelection: () => void;
   readonly deleteSelectedClip: () => void;
   readonly duplicateSelectedClip: () => void;
@@ -76,6 +77,7 @@ export function useTimelineShortcuts(latestInput: TimelineShortcutInput): void {
         const bindings = getEditorShortcutBindings(input.shortcutPreferences);
         const matchedBinding = bindings.find((binding) => isEditorShortcutBindingMatch(event, binding));
         if (matchedBinding === undefined) return;
+        if (input.timelinePlaybackAvailable === false && ['playPause', 'stepBackward', 'stepForward', 'goToStart', 'goToEnd'].includes(matchedBinding.actionId)) return;
         if (matchedBinding.actionId !== 'splitSelection' || input.canSplit) {
           event.preventDefault();
           actionHandlers[matchedBinding.actionId](input);

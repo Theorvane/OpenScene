@@ -66,3 +66,38 @@ transcription service or actual ASR validation.
 
 Independent specification/code-quality approval and exact-head CI are required
 before a normal squash merge to `dev`. No bypass, force merge or release is allowed.
+
+## Integration review and renderer follow-up
+
+Independent review reproduced two P2 defects against the initial integration
+head `e48c0a15`: an A-project approval could prepare project B after navigation,
+and native playback could advance the hidden edited clock during source inspection.
+The regression tests failed against that head and pass with the fixes. Pending
+approvals now retain their project/conversation owner, lock sidebar navigation and
+revalidate identity both before and after asynchronous save preparation. Tests
+cover switching before approval and during preparation. Hidden source/Settings
+contexts disable edited-clock menu/shortcut playback; preview also settles an
+attempted hidden playback restart. Save and history remain available in source
+inspection.
+
+Fresh Orca embedded-browser verification used the built renderer with an isolated
+in-memory bridge and a generated four-second 640×360 video served only on loopback.
+CSP and throwing fetch/XHR/WebSocket/EventSource boundaries blocked external
+network; no model/discovery/approval request was made. The onboarding dialog was
+modal at exactly (0,0,980,680), and Next/Skip worked. Actual video decoded at
+readyState 4 and advanced during playback. Natural showed one chat; Precision and
+Nodes showed zero while retaining the same prompt/monitor elements. One project
+creation control, disconnected-provider guidance and disabled Send were observed.
+No page horizontal overflow occurred at 980×680 or 1440×1000.
+
+This verification found a legacy sidebar width/grid layout clipping the natural
+composer. The bottom chat now fills the workspace width, accounts for all five
+rows and reserves composer space; at 980×680 Send ends at y=666, within the viewport.
+The compact preview leaves the timeline reachable alongside chat. Screenshots
+were visually inspected and contain synthetic media only.
+
+These are browser renderer observations, not native Electron/IPC verification.
+Native preflight returned `screen_locked`; no native launch, focus restore or
+blind retry followed. The coordinator requires native verification after unlock
+before merge. Temporary loopback server/tab ownership and cleanup are recorded by
+the integration worker; no user project, media, model setting or account was used.

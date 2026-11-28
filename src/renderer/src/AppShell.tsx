@@ -32,7 +32,8 @@ type AppShellProps = {
 };
 
 function AppShellContent({ activePage, children, sidebar, onPageChange, activeProjectContext, inlineAgentChat = false, hasUnsavedTimeline }: AppShellProps): ReactElement {
-  const { isBusy } = useAgentChat();
+  const { isBusy, pendingApproval } = useAgentChat();
+  const navigationLocked = isBusy || pendingApproval !== null;
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const naturalVisible = inlineAgentChat && isWorkspacePageId(activePage.id);
   return <main className="app-shell desktop-shell app-shell--workspace" data-sidebar-open={sidebarOpen}>
@@ -40,11 +41,11 @@ function AppShellContent({ activePage, children, sidebar, onPageChange, activePr
       <button type="button" className="desktop-icon-button" aria-label="프로젝트 사이드바 전환" title="프로젝트 사이드바" aria-controls="desktop-sidebar" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(value => !value)}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/></svg>
       </button>
-      <ApplicationMenuBar editorActive={activePage.id === 'edit'} onProjects={() => onPageChange('projects')} onSettings={() => onPageChange('settings')} onToggleAssistant={() => {}} assistantVisible={naturalVisible} canToggleAssistant={false} />
+      <ApplicationMenuBar editorActive={activePage.id === 'edit'} onProjects={() => { if (!navigationLocked) onPageChange('projects'); }} onSettings={() => { if (!navigationLocked) onPageChange('settings'); }} onToggleAssistant={() => {}} assistantVisible={naturalVisible} canToggleAssistant={false} />
       <span className="desktop-shell__title">{activePage.id === 'settings' ? '설정' : activeProjectContext?.name ?? 'OpenScene'}{hasUnsavedTimeline && activePage.id !== 'settings' ? ' ·' : ''}</span>
     </header>
     <div className="desktop-shell__layout">
-      <aside id="desktop-sidebar" className="desktop-sidebar" aria-label="프로젝트 탐색" hidden={!sidebarOpen} inert={isBusy}>
+      <aside id="desktop-sidebar" className="desktop-sidebar" aria-label="프로젝트 탐색" hidden={!sidebarOpen} inert={navigationLocked}>
         <div className="desktop-sidebar__scroll">{sidebar}</div>
         <button className="desktop-sidebar__settings" type="button" aria-current={activePage.id === 'settings' ? 'page' : undefined} onClick={() => onPageChange(activePage.id === 'settings' ? 'edit' : 'settings')}>{activePage.id === 'settings' ? '편집으로 돌아가기' : '설정'}</button>
       </aside>

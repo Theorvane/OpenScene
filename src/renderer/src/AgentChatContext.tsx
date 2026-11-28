@@ -84,7 +84,16 @@ export function AgentChatProvider({ activeProject, prepareProject, hasUnsavedTim
 
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<readonly AgentChatDisplayMessage[]>([]);
-  const [pendingApproval, setPendingApproval] = useState<AgentToolCallProposal | null>(null);
+  const [pendingApproval, setPendingApprovalState] = useState<AgentToolCallProposal | null>(null);
+  const activeProjectIdRef = useRef<string | null>(null);
+  activeProjectIdRef.current = activeProject?.projectId ?? null;
+  const approvalScopeRef = useRef<{ projectId: string | null; conversationId: string } | null>(null);
+  const setPendingApproval = (proposal: AgentToolCallProposal | null, scope = {
+    projectId: activeProjectIdRef.current, conversationId: conversationIdRef.current
+  }): void => {
+    approvalScopeRef.current = proposal === null ? null : scope;
+    setPendingApprovalState(proposal);
+  };
   const [status, setStatus] = useState<AgentChatStatus>('idle');
   const [error, setError] = useState<string | undefined>(undefined);
   const [isBusy, setIsBusy] = useState(false);
@@ -209,6 +218,7 @@ export function AgentChatProvider({ activeProject, prepareProject, hasUnsavedTim
 
   const sendMessage = async (text: string): Promise<void> => {
     if (text.trim().length === 0 || isBusy || pendingApproval || !modelReady) return;
+    const requestScope = { projectId: activeProjectIdRef.current, conversationId: conversationIdRef.current };
 
     // Echo the turn immediately. The main-process round trip takes as long as
     // the model does, so waiting for it leaves the panel looking like the
@@ -229,6 +239,9 @@ export function AgentChatProvider({ activeProject, prepareProject, hasUnsavedTim
     try {
       if (activeProject !== null && !await prepareProjectForAgentSend(interactionMode, prepareProject)) {
         throw new Error('Save the open timeline before asking the agent to edit it.');
+      }
+      if (activeProjectIdRef.current !== requestScope.projectId || conversationIdRef.current !== requestScope.conversationId) {
+        throw new Error('The active project changed. Send the request again from the intended project.');
       }
       const response = await window.videoTool.agentChatSend({
         conversationId: conversationIdRef.current,
@@ -252,7 +265,7 @@ export function AgentChatProvider({ activeProject, prepareProject, hasUnsavedTim
             ? mergePendingUserMessage(response.value.messages, pendingUserMessage)
             : response.value.messages
         );
-        setPendingApproval(response.value.pendingApproval);
+        setPendingApproval(response.value.pendingApproval, requestScope);
         setStatus(response.value.status);
         setError(response.value.error);
 
@@ -274,17 +287,26 @@ export function AgentChatProvider({ activeProject, prepareProject, hasUnsavedTim
 
   const respondToApproval = async (decision: AgentToolApprovalDecision, feedback?: string): Promise<void> => {
     if (!pendingApproval || isBusy) return;
+    const proposal = pendingApproval;
+    const scope = approvalScopeRef.current;
+    const assertApprovalScope = (): void => {
+      if (scope === null || approvalScopeRef.current !== scope || activeProjectIdRef.current !== scope.projectId || conversationIdRef.current !== scope.conversationId) {
+        throw new Error('The approval belongs to another project or conversation. Cancel it before continuing.');
+      }
+    };
 
     setIsBusy(true);
     setError(undefined);
 
     try {
-      if (activeProject !== null && !await prepareProjectForAgentApproval(pendingApproval.toolName, decision, prepareProject, interactionMode)) {
+      assertApprovalScope();
+      if (activeProject !== null && !await prepareProjectForAgentApproval(proposal.toolName, decision, prepareProject, interactionMode)) {
         throw new Error('Save the open timeline before approving the agent edit.');
       }
+      assertApprovalScope();
       const response = await window.videoTool.agentChatApprove({
-        conversationId: conversationIdRef.current,
-        toolCallId: pendingApproval.toolCallId,
+        conversationId: scope!.conversationId,
+        toolCallId: proposal.toolCallId,
         decision,
         ...(feedback === undefined || feedback.trim().length === 0 ? {} : { feedback })
       });
@@ -292,7 +314,7 @@ export function AgentChatProvider({ activeProject, prepareProject, hasUnsavedTim
       if (response.ok) {
         setContextUsage(response.value.contextUsage);
         setMessages(response.value.messages);
-        setPendingApproval(response.value.pendingApproval);
+        setPendingApproval(response.value.pendingApproval, scope!);
         setStatus(response.value.status);
         setError(response.value.error);
 
