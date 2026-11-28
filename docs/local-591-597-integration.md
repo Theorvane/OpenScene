@@ -101,3 +101,27 @@ Native preflight returned `screen_locked`; no native launch, focus restore or
 blind retry followed. The coordinator requires native verification after unlock
 before merge. Temporary loopback server/tab ownership and cleanup are recorded by
 the integration worker; no user project, media, model setting or account was used.
+
+The user subsequently redirected native QA to the currently connected Linux host;
+Mac unlock is no longer a prerequisite. Supported inventory and Infra confirmed
+`llm-server`, environment `d70cab04-190a-485d-a5b0-60751a703a5c`, display `:2`.
+The coordinator authorized a new disposable staging directory beneath
+`/home/ubuntu/gui-validation/item188-pr599-81f623b8` and reserved this worker as sole
+GUI operator. No shared desktop, GPU, pairing, permission or model service changed.
+
+An exact-commit sanitized source archive, including pinned submodule sources, was
+transferred using strict host verification. Existing Linux dependencies have the
+same package-lock SHA-256 `81e13871580d4d0d1bcc9d3aa8f81b21f8f14e352563a4eb6fb61aab30f74521`;
+the existing Electron runtime is 43.1.1 and the existing portable Node is 24.22.1.
+The source built on Linux without downloads or installs. The isolated profile
+contains only generated synthetic footage and projects; fail-closed network
+tripwires are installed and negatively tested before importing the actual main
+process. Native screenshots and supported Orca app observation identified a real
+OpenScene window with decoded synthetic video. Native edit/Undo/Redo/save and
+mode/chat lifetime checks ran through the actual main/preload/renderer boundary.
+
+Native visual inspection additionally found long project names expanding the
+sidebar's intrinsic minimum width. The sidebar now permits shrinking to its
+declared width so project-name ellipsis preserves the workspace. Final exact-head
+native results, artifact paths, limitations and owned-process cleanup are recorded
+in the PR receipt. Browser and native evidence remain distinct.

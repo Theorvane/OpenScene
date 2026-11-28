@@ -6,7 +6,7 @@
 .desktop-icon-button svg { inline-size: 19px; block-size: 19px; }
 .desktop-icon-button:hover { background: var(--accent); color: var(--foreground); }
 .desktop-shell__layout { display: flex; flex: 1 1 0; min-block-size: 0; min-inline-size: 0; }
-.desktop-sidebar { display: flex; flex-direction: column; flex: 0 0 232px; min-block-size: 0; background: var(--card); border-inline-end: 1px solid var(--border); }
+.desktop-sidebar { display: flex; flex-direction: column; flex: 0 0 232px; min-inline-size: 0; min-block-size: 0; background: var(--card); border-inline-end: 1px solid var(--border); }
 .desktop-sidebar[hidden], .desktop-shell__chat[hidden] { display: none; }
 .desktop-sidebar__scroll { flex: 1 1 0; min-block-size: 0; overflow: auto; scrollbar-gutter: stable; padding: 12px 8px; }
 .desktop-sidebar__settings { flex: 0 0 auto; text-align: start; padding: 12px 16px; color: var(--muted-foreground); background: transparent; border: 0; border-block-start: 1px solid var(--border); cursor: pointer; }
