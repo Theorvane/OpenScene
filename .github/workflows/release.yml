@@ -50,24 +50,10 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            mobile/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Install dependencies
         if: steps.version.outputs.already-released == 'false'
-        run: npm ci
-
-      # The same install ci.yml needs, for the same two reasons: the mobile app
-      # has a typecheck of its own that every change touching it must pass, and
-      # the tests covering mobile rules import those modules, which makes esbuild
-      # read `mobile/tsconfig.json` and resolve the Expo base it extends. Without
-      # it the suite fails on a tsconfig before a single assertion runs — and it
-      # did, silently passing 773 of 816 tests and calling that a verified
-      # release.
-      - name: Install mobile dependencies
-        if: steps.version.outputs.already-released == 'false'
-        working-directory: mobile
         run: npm ci
 
       # The export and import tests drive a real FFmpeg binary rather than a
@@ -89,11 +75,6 @@ jobs:
           npm run typecheck
           npm test
           npm run build
-
-      - name: Typecheck the mobile app
-        if: steps.version.outputs.already-released == 'false'
-        working-directory: mobile
-        run: npm run typecheck
 
   build:
     needs: check
@@ -187,28 +168,8 @@ jobs:
             dist/*.blockmap
           if-no-files-found: error
 
-  app-store-connect:
-    needs: [check, build]
-    if: needs.check.outputs.already-released == 'false'
-    uses: ./.github/workflows/ios-app-store-connect.yml
-    secrets: inherit
-
-  # Last, and after iOS on purpose. The iOS job uploads a build and submits
-  # nothing; Play may commit a production-track edit that waits for a manual
-  # Send for review action in Play Console. Running these jobs in parallel once
-  # left a Play change committed after iOS failed and the tag job was skipped.
-  # See mobile/RELEASING.md for the remaining recovery procedure.
-  google-play:
-    needs: [check, build, app-store-connect]
-    if: needs.check.outputs.already-released == 'false'
-    uses: ./.github/workflows/android-google-play.yml
-    with:
-      track: production
-      release_status: completed
-    secrets: inherit
-
   release:
-    needs: [check, build, app-store-connect, google-play]
+    needs: [check, build]
     if: needs.check.outputs.already-released == 'false'
     runs-on: ubuntu-latest
     # The one job that writes: the tag and the GitHub release.

@@ -262,22 +262,4 @@ describe('what the phone is told', () => {
     expect(buildCompositionPlan({ timeline: twoClips(), width: 320, height: 240, frameRate: 24 }).dips).toEqual([]);
   });
 
-  it('is forwarded by the bridge rather than recomputed or dropped', async () => {
-    const bridge = await readFile(new URL('../mobile/src/lib/exportComposition.ts', import.meta.url), 'utf8');
-    expect(bridge).toContain('dips: plan.dips.map(');
-  });
-
-  it('is drawn by both native modules', async () => {
-    const kotlin = await readFile(
-      new URL('../mobile/modules/video-export/android/src/main/java/expo/modules/videoexport/VideoExportModule.kt', import.meta.url),
-      'utf8'
-    );
-    // A black overlay whose alpha rises and falls, because Media3 has no
-    // cross-dissolve and does not need one for clips that never overlap.
-    expect(kotlin).toContain('private fun dipOverlay(');
-    expect(kotlin).toContain('setAlphaScale(alpha)');
-
-    const swift = await readFile(new URL('../mobile/modules/video-export/ios/VideoComposer.swift', import.meta.url), 'utf8');
-    expect(swift).toContain('setOpacityRamp(');
-  });
 });

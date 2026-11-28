@@ -11,7 +11,6 @@ import { AGENT_SCOPE_POLICY } from '../src/shared/agentScope';
  */
 
 const DESKTOP_GRAPH = new URL('../src/main/agentChatGraph.ts', import.meta.url);
-const MOBILE_AGENT = new URL('../mobile/src/screens/AgentScreen.tsx', import.meta.url);
 
 describe('agent scope policy', () => {
   it('says what is in scope, what is not, and how to decline', async () => {
@@ -29,20 +28,15 @@ describe('agent scope policy', () => {
     expect(AGENT_SCOPE_POLICY).toContain('do not answer the question anyway');
   });
 
-  it('is carried by both surfaces from the shared core', async () => {
-    const [desktop, mobile] = await Promise.all([
+  it('is carried by the desktop from the shared core', async () => {
+    const [desktop] = await Promise.all([
       readFile(DESKTOP_GRAPH, 'utf8'),
-      readFile(MOBILE_AGENT, 'utf8')
     ]);
 
     expect(desktop).toContain("import { AGENT_SCOPE_POLICY } from '../shared/agentScope';");
     expect(desktop).toContain('AGENT_SCOPE_POLICY +');
 
-    expect(mobile).toContain("import { AGENT_SCOPE_POLICY } from '@openvideo/shared/agentScope';");
-    expect(mobile).toContain('AGENT_SCOPE_POLICY;');
-
     // Neither surface may restate it in its own words.
     expect(desktop).not.toContain('out of scope —');
-    expect(mobile.split('AGENT_SCOPE_POLICY')[0]).not.toContain('Scope.');
   });
 });

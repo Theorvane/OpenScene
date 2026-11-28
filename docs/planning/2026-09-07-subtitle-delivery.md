@@ -13,7 +13,7 @@ Issue: [#330](https://github.com/Theorvane/openscene/issues/330)
 
 ## Shared contract
 
-`src/shared/subtitleDelivery.ts` owns caption selection, the burn-in timeline projection, delivery validation, and UTF-8 SRT/VTT/ASS serialization. Desktop and mobile both call the same burn-in projection.
+`src/shared/subtitleDelivery.ts` owns caption selection, the burn-in timeline projection, delivery validation, and UTF-8 SRT/VTT/ASS serialization. Desktop export uses this burn-in projection.
 
 The delivery contract is bounded to 5,000 cues, 500 characters per cue, and two hours. WebVTT markup and ASS override syntax are neutralized so caption text cannot become subtitle control syntax.
 
@@ -25,13 +25,13 @@ The delivery contract is bounded to 5,000 cues, 500 characters per cue, and two 
 - A sidecar write/validation failure fails the whole job and removes the partial MP4 and any sidecar created by that attempt.
 - Existing exports without `subtitleDelivery` retain their behavior: all timeline titles are burned and no sidecar is created.
 
-## Mobile boundary
+## Platform scope
 
-Mobile uses the same shared decision to include or omit automatic captions from its native composition. Its More menu makes that choice visible. SRT/VTT/ASS file delivery is explicitly disabled because the mobile delivery path currently saves one MP4 to Photos or a share sheet; it does not silently promise a second file.
+Mobile support is deferred by the 2026-11-28 desktop-first decision. Native mobile caption delivery is not an active implementation or verification requirement.
 
 ## Verification
 
-Run focused subtitle/export tests and both surfaces' type checks after changes. Verify burn-only, sidecar-only, both and neither against the saved timeline. Manual titles must remain; requesting a sidecar without automatic captions must fail before starting a job. Check native mobile burn choice on a development device and keep sidecar delivery explicitly unavailable there.
+Run focused subtitle/export tests and root type checks after changes. Verify burn-only, sidecar-only, both and neither against the saved timeline. Manual titles must remain; requesting a sidecar without automatic captions must fail before starting a job.
 
 The latest revision-specific suite and app results are in [canvas/export verification](../canvas-export-verification.md). Historical Windows failures are not the current verification status.
 

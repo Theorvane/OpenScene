@@ -10,7 +10,7 @@ Coding agents use its probe, plan, edit and verification workflow for authorized
 
 The app exposes typed editing tools. Frame inspection uses local FFmpeg to extract timestamped JPEG images. The conversation carries the actual images for multimodal review. Local whisper.cpp transcribes bounded audio ranges. Saved timeline edits and MP4 export use the existing editing pipeline.
 
-The app's editing agent discovers its implemented blocks and batch operations through `getEditingCapabilities` and inspects graphs through `getCanvasWorkflow`. `editProject` applies shared canvas, layout and timeline edits atomically. This does not dynamically expose all bundled Python scripts as chat tools. Mobile uses the same editing rules with native export; desktop frame/speech inspection has no mobile chat equivalent.
+The app's editing agent discovers its implemented blocks and batch operations through `getEditingCapabilities` and inspects graphs through `getCanvasWorkflow`. `editProject` applies shared canvas, layout and timeline edits atomically. This does not dynamically expose all bundled Python scripts as chat tools. Mobile implementation and verification are deferred; active frame/speech inspection and export work targets desktop.
 
 The bundled Python tool collection remains a coding-agent skill. Originals are preserved and output inspection establishes which results can be reported as verified.
 

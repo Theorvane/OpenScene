@@ -16,7 +16,7 @@ Start with your own local video files. One core workflow turns an imported video
 
 Timeline is the sequence used for playback and export. Canvas already supports saved node graphs, four quick starts and 12 processing blocks; **Apply workflow** materializes a branch into timeline tracks. Changing a node does not start a render. Quick-start recipes are fixed starting configurations, not automatic semantic highlight detection or a general recipe marketplace.
 
-The desktop **Shorts** workspace provides candidate review, editable result projects and batch export. Results use portrait framing with contain fit; automatic subject tracking is not implemented. Model quality and mobile-device behavior require separate validation. The dedicated multi-shorts workspace is desktop-only today; mobile shares the timeline, Canvas and approved editing core. See [current shorts scope](docs/local-shorts-backend.md) and [recorded verification limits](docs/shorts-media-validation.md).
+The desktop **Shorts** workspace provides candidate review, editable result projects and batch export. Results use portrait framing with contain fit; automatic subject tracking is not implemented. Model quality requires separate validation. Active development targets the desktop app; mobile support is deferred. See [current shorts scope](docs/local-shorts-backend.md) and [recorded verification limits](docs/shorts-media-validation.md).
 
 **Roadmap:** app-window computer-use automation (CUA) and Jev integration are separate work in progress, not capabilities promised by this introduction. Existing node editing and quick starts are available now; broader reusable recipe workflows remain a product direction.
 
@@ -76,24 +76,19 @@ For local transcription, explicitly run `npm run setup:transcription`. This down
 npm run typecheck
 npm test
 npm run build
-cd mobile
-npm ci
-npm run typecheck
 ```
 
-Media tests need executable FFmpeg and FFprobe. The [Linux verification environment](docs/media-analysis-environment.md) runs the full suite and both surfaces' type checks using a committed Git snapshot and separate dependencies. With Docker Desktop running, use `npm run verify:media-analysis`; add `-- -AnalyzeEditor` for optional current-build analysis.
+Media tests need executable FFmpeg and FFprobe. The [Linux verification environment](docs/media-analysis-environment.md) runs the full suite and desktop type checks using a committed Git snapshot and separate dependencies. With Docker Desktop running, use `npm run verify:media-analysis`; add `-- -AnalyzeEditor` for optional current-build analysis.
 
 [Latest recorded workflow verification](docs/canvas-export-verification.md): actual Windows canvas editing and agent-tool export, Linux FFprobe verification, and 1,191 Linux tests passing with no failures or skips at commit `1d68304`. This is that revision's result; run checks for subsequent changes.
 
-## Mobile
+## Platform scope
 
-Mobile provides **Edit**, **Canvas**, **Library** and an editing assistant over the shared core. Its graph fills the workspace with pannable/zoomable cards and connections, a floating add/library button and contextual bottom sheets. It includes the same blocks, quick starts, saved node layout and batch operations. Chat-based frame inspection and speech analysis remain desktop capabilities.
-
-Mobile rendering uses native AVFoundation/Media3 modules and needs a development build; Expo Go cannot load the exporter. See the [mobile guide](mobile/README.md). Desktop verification does not establish mobile device behavior.
+OpenScene currently focuses on desktop: macOS, Windows and Linux. Mobile implementation and mobile release automation are suspended; mobile support may be reconsidered later. See [desktop-first scope](docs/desktop-focus.md).
 
 ## Local storage and compatibility
 
-Projects, imported media and desktop exports remain on the device. Model requests are explicit network operations. Mobile reports anonymous usage counts to the publisher's OpenPanel instance; Settings provides an off switch. Event properties are limited to numbers, booleans and null, excluding prompts, media paths and credentials.
+Projects, imported media and desktop exports remain on the device. Model requests are explicit network operations.
 
 Earlier projects retain their assets, timelines and legacy metadata. The current product edits supplied media; video generation, production boards and voice synthesis are not active workflows. Compatibility identifiers remain stable.
 

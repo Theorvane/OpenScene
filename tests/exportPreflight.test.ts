@@ -191,27 +191,4 @@ describe('both surfaces ask before they render', () => {
     expect(service).toContain("fail('EXPORT_REFUSED'");
   });
 
-  it('the phone asks with what its own build reports it can do', async () => {
-    const composition = await readRepo('mobile/src/lib/exportComposition.ts');
-    expect(composition).toContain('stills: areStillsRenderable');
-    expect(composition).toContain('layeredVideo: areLayersComposited');
-  });
-
-  it('each renderer says whether it composites, rather than the phone assuming', async () => {
-    const android = await readRepo(
-      'mobile/modules/video-export/android/src/main/java/expo/modules/videoexport/VideoExportModule.kt'
-    );
-    const ios = await readRepo('mobile/modules/video-export/ios/VideoExportModule.swift');
-    expect(android).toContain('Property("supportsLayeredVideo") { false }');
-    expect(ios).toContain('Property("supportsLayeredVideo") { true }');
-
-    // The Android renderer keeps its own refusal as a backstop: the preflight
-    // makes it unreachable from the app, not from anything else that calls in.
-    expect(android).toContain('ERR_LAYERED_VIDEO');
-  });
-
-  it('a build that was never asked reports no, which is what the older ones mean', async () => {
-    const bridge = await readRepo('mobile/modules/video-export/index.ts');
-    expect(bridge).toContain("nativeModule?.supportsLayeredVideo === true");
-  });
 });

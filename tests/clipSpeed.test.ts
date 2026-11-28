@@ -248,11 +248,9 @@ describe('why a retime is refused', () => {
     expect(updateClipEffects(timeline, { clipId: 'clip-a', effects: { speed: 1.75 } })).not.toBeNull();
   });
 
-  it('is said out loud on both surfaces', async () => {
+  it('is said out loud on the desktop', async () => {
     const room = 'A slower clip needs more room';
-    const mobile = await readFile(new URL('../mobile/src/lib/editorState.ts', import.meta.url), 'utf8');
     const desktop = await readFile(new URL('../src/renderer/src/editor/useTimelineEditor.ts', import.meta.url), 'utf8');
-    expect(mobile).toContain(room);
     expect(desktop).toContain(room);
   });
 });
@@ -350,35 +348,4 @@ describe('a rendered retime', () => {
     // picture that had already finished.
     expect(await read('a')).toBeLessThan(2.2);
   }, 60_000);
-});
-
-/**
- * The phone renderers, and the bridge between them.
- *
- * Source assertions, which are weak — but the failure they guard against is the
- * one this codebase has had three times: a value computed by the shared plan and
- * dropped before it reached anything that draws.
- */
-describe('what the phone is told', () => {
-  const read = (path: string) => readFile(new URL(`../mobile/${path}`, import.meta.url), 'utf8');
-
-  it('carries the rate on both picture and sound', async () => {
-    const bridge = await read('src/lib/exportComposition.ts');
-    expect(bridge).toContain('speed: segment.speed');
-    expect(bridge).toContain('gain: segment.gain, speed: segment.speed');
-  });
-
-  it('retimes both on Android', async () => {
-    const kotlin = await read('modules/video-export/android/src/main/java/expo/modules/videoexport/VideoExportModule.kt');
-    expect(kotlin).toContain('SpeedChangeEffect(');
-    // Sonic, so the sound is retimed rather than left running behind a picture
-    // that has already finished.
-    expect(kotlin).toContain('SonicAudioProcessor()');
-  });
-
-  it('retimes both on iOS', async () => {
-    const swift = await read('modules/video-export/ios/VideoComposer.swift');
-    // Once for the picture, once for the sound.
-    expect(swift.match(/scaleTimeRange\(/g)?.length).toBe(2);
-  });
 });

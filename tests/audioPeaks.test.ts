@@ -57,38 +57,7 @@ describe('turning peaks into bars', () => {
  * checks the reading follows it.
  */
 describe('the surfaces', () => {
-  const readMobile = (path: string) => readFile(new URL(`../mobile/${path}`, import.meta.url), 'utf8');
   const readDesktop = (path: string) => readFile(new URL(`../src/${path}`, import.meta.url), 'utf8');
-
-  it('reads peaks natively on Android', async () => {
-    const kotlin = await readMobile(
-      'modules/video-export/android/src/main/java/expo/modules/videoexport/VideoExportModule.kt'
-    );
-    // Decoded rather than estimated: nothing in a file's metadata says where it
-    // is loud.
-    expect(kotlin).toContain('readAudioPeaks');
-    expect(kotlin).toContain('MediaCodec.createDecoderByType');
-  });
-
-  it('reads them on iOS with something a macOS test can run', async () => {
-    const swift = await readMobile('modules/video-export/ios/AudioPeaks.swift');
-    expect(swift).toContain('AVAssetReaderTrackOutput');
-    // No ExpoModulesCore, which is what lets the composer tests exercise it.
-    expect(swift).not.toContain('import ExpoModulesCore');
-  });
-
-  it('draws the sound of video clips, not only of audio ones', async () => {
-    // The phone cannot import an audio file at all, so almost every sound in a
-    // cut is a video clip's own.
-    const clip = await readMobile('src/components/TimelineClip.tsx');
-    expect(clip).toContain('useAudioPeaks');
-    expect(clip).toContain('waveformStrip');
-  });
-
-  it('treats a file it cannot read as a clip drawn the way it was', async () => {
-    const bridge = await readMobile('modules/video-export/index.ts');
-    expect(bridge).toMatch(/readAudioPeaks[\s\S]{0,400}return \[\]/);
-  });
 
   it('draws the same shape on the desktop, read the way that surface can', async () => {
     // The phone drew this first, which left the desktop editing audio blind —

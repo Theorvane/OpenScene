@@ -3,7 +3,6 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const workflow = readFileSync(resolve(process.cwd(), '.github/workflows/release.yml'), 'utf8');
-const androidStoreWorkflow = readFileSync(resolve(process.cwd(), '.github/workflows/android-google-play.yml'), 'utf8');
 const builderConfig = readFileSync(resolve(process.cwd(), 'electron-builder.yml'), 'utf8');
 const packageJson = JSON.parse(readFileSync(resolve(process.cwd(), 'package.json'), 'utf8')) as {
   readonly version: string;
@@ -20,11 +19,11 @@ describe('release workflow', () => {
     // publish again, so every later step is gated on the tag being absent.
     expect(workflow).toContain('if git rev-parse -q --verify "refs/tags/${TAG}"');
     expect(workflow).toContain("already-released=true");
-    // Packaging, store distribution, and publishing are separate jobs, so each
+    // Desktop packaging and publishing are separate jobs, so each
     // has to be gated too; a job without the guard would run on any push to main.
     expect(workflow).toContain("if: needs.check.outputs.already-released == 'false'");
     const jobGates = workflow.match(/if: needs\.check\.outputs\.already-released == 'false'/g) ?? [];
-    expect(jobGates.length).toBe(4);
+    expect(jobGates.length).toBe(2);
   });
 
   it('verifies the exact commit it packages', () => {
@@ -114,21 +113,6 @@ describe('release workflow', () => {
       if (use.includes('uses: ./.github/workflows/')) continue;
       expect(use).toMatch(/@[0-9a-f]{40}/);
     }
-  });
-
-  it('pins every action that runs with Google Play credentials', () => {
-    const uses = androidStoreWorkflow.match(/uses: [^\n]+/g) ?? [];
-    expect(uses.length).toBeGreaterThan(0);
-    for (const use of uses) expect(use).toMatch(/@[0-9a-f]{40}/);
-    expect(androidStoreWorkflow).toContain('actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3');
-  });
-
-  it('distributes mobile stores only as part of a new main release', () => {
-    expect(workflow).toContain('uses: ./.github/workflows/ios-app-store-connect.yml');
-    expect(workflow).toContain('uses: ./.github/workflows/android-google-play.yml');
-    expect(workflow).toContain('track: production');
-    expect(workflow).toContain('release_status: completed');
-    expect(workflow).toContain('needs: [check, build, app-store-connect, google-play]');
   });
 
   it('keeps packaging able to run locally with the same inputs', () => {

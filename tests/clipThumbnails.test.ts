@@ -61,18 +61,10 @@ describe('the cache key', () => {
  * that noticed nothing when the clip effects went missing three times over.
  */
 describe('the two timelines', () => {
-  const readMobile = (path: string) => readFile(new URL(`../mobile/${path}`, import.meta.url), 'utf8');
   const readDesktop = (path: string) => readFile(new URL(`../src/${path}`, import.meta.url), 'utf8');
 
   it('samples with the shared rule rather than each inventing its own', async () => {
-    expect(await readMobile('src/lib/thumbnails.ts')).toContain("from '@openvideo/shared/clipThumbnails'");
     expect(await readDesktop('renderer/src/editor/clipThumbnails.ts')).toContain("from '../../../shared/clipThumbnails'");
-  });
-
-  it('draws them on the phone, with the media the clip actually points at', async () => {
-    const clip = await readMobile('src/components/TimelineClip.tsx');
-    expect(clip).toContain('useClipThumbnails');
-    expect(await readMobile('src/screens/EditScreen.tsx')).toContain('assetUri={');
   });
 
   it('draws them on the desktop', async () => {
@@ -86,7 +78,6 @@ describe('the two timelines', () => {
   it('never lets a failed decode stop an edit', async () => {
     // Both caches swallow the failure and return nothing rather than throwing
     // into a render.
-    expect(await readMobile('src/lib/thumbnails.ts')).toContain('return null;');
     expect(await readDesktop('renderer/src/editor/clipThumbnails.ts')).toContain('return [];');
   });
 });

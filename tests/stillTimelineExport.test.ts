@@ -152,32 +152,3 @@ describe('a still on the timeline', () => {
     expect(Number(stdout.trim())).toBeGreaterThan(1.5);
   });
 });
-
-describe('a still on a phone', () => {
-  const readMobile = (path: string) => readFile(new URL(`../mobile/${path}`, import.meta.url), 'utf8');
-
-  it('is encoded before the composition rather than dropped from it', async () => {
-    // A photograph has no visual track, so `loadTracks` came back empty and the
-    // segment was skipped — the export succeeded and was simply shorter than the
-    // cut, with nothing saying why. Encoding it first makes it an ordinary
-    // source, which is what lets the trim, the retime, the placement and the
-    // transitions apply to it with no second implementation of any of them.
-    const composer = await readMobile('modules/video-export/ios/VideoComposer.swift');
-    expect(composer).toContain('func stillMovie(');
-    expect(composer).toContain('if segment.still {');
-    // Held for the source window, not the timeline length: the frames are
-    // trimmed and then retimed, which is the number the desktop passes to `-t`.
-    expect(composer).toContain('holdingForMs: segment.sourceEndMs');
-    // And the temporary movies do not outlive the export.
-    expect(composer).toContain('defer { try? FileManager.default.removeItem(at: stillsDirectory) }');
-  });
-
-  it('is only offered once the renderer can actually hold one', async () => {
-    // `areStillsRenderable` is what stops an export that would silently drop the
-    // still, and it reads this property. Turning it on before the hold worked
-    // would have shipped exactly the failure the refusal exists for.
-    const module = await readMobile('modules/video-export/ios/VideoExportModule.swift');
-    expect(module).toContain('Property("supportsStills") { true }');
-    expect(module).toContain('@Field var still: Bool = false');
-  });
-});

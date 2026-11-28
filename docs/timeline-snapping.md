@@ -2,7 +2,7 @@
 
 Snapping refines clip timing in Timeline/Edit after manual placement or Canvas application. Node alignment and spacing affect only graph coordinates; their controls are described in [canvas workflows](canvas-workflows.md).
 
-Desktop and mobile use the same magnetic snapping rule for clip moves and
+The desktop uses the shared magnetic snapping rule for clip moves and
 edge trims. Snap targets are the playhead, timeline zero and other clips'
 starts/ends across tracks. Moving aligns either end of the clip; trimming
 aligns only the dragged edge. Speed-adjusted timeline durations are used.
@@ -13,7 +13,6 @@ still reject overlaps and invalid source bounds; snapping never changes those
 rules or overwrites a neighbouring clip.
 
 - Desktop: use the snapping toggle, or hold Alt while dropping to bypass it.
-- Mobile: use **Snap: On / Snap: Off** in the editing toolbar.
 - With snapping off, positions retain millisecond precision rather than a
   100ms or 10ms grid.
 - Mobile drag previews follow the finger; magnetic alignment is applied when

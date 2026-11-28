@@ -10,7 +10,6 @@ git submodule update --init
 npm run typecheck
 npm test
 npm run build
-cd mobile && npm ci && npm run typecheck
 ```
 
 After building, run the test-only entry from the repository root:
@@ -71,7 +70,7 @@ The Save DTO, separate authority and main runtime are implemented and unit-teste
 
 ## Coordinated final-app launch handoff
 
-Do not start a focus-wait run until the coordinator supplies the final Frontend content-counter/preparing-ACK/Save-hook commit and arranges the user selection. Normally merge that pin with the Backend and agent branches, record `git rev-parse HEAD` and clean `git status --short`, and rerun root typecheck/tests/build and mobile typecheck before launching. The temporary `content-revision-unavailable` implementation is failclosed and cannot establish input success.
+Do not start a focus-wait run until the coordinator supplies the final Frontend content-counter/preparing-ACK/Save-hook commit and arranges the user selection. Normally merge that pin with the Backend and agent branches, record `git rev-parse HEAD` and clean `git status --short`, and rerun root typecheck/tests/build before launching. The temporary `content-revision-unavailable` implementation is failclosed and cannot establish input success.
 
 From the repository root, after that coordination:
 

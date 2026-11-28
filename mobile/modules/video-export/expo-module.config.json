@@ -1,5 +1,0 @@
-{
-  "platforms": ["apple", "android"],
-  "apple": { "modules": ["VideoExportModule"] },
-  "android": { "modules": ["expo.modules.videoexport.VideoExportModule"] }
-}

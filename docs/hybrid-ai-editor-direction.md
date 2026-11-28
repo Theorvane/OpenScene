@@ -64,11 +64,11 @@ The main process resolves project/asset IDs to authorized files. Credentials, ex
 
 The selected model may receive project context, sampled frames and transcripts for the authorized operation. Local media processing does not make an external provider request local. Report the active provider's limits and charges accurately.
 
-## Export and mobile
+## Desktop export
 
 A job ID means started. Inspect the final job state and verification before saying a video is complete. An unmeasured export is not a verified export, and a passing metadata review is not a subjective quality judgment.
 
-Mobile tools are `describe_timeline`, `get_editing_capabilities`, `get_canvas_workflow`, `edit_project` and `export_project`. They use the shared core and existing approval UI. `canvas.move` supports both source and block node positions without changing clip timing. Export uses the native module and user-controlled Photos/share delivery. Chat-based source frame and speech inspection remain desktop capabilities. Desktop scripted tool execution does not prove an external model conversation or a mobile-device export succeeded.
+Mobile support and its tool adapters are deferred. Active agent work targets the desktop editing core and existing approval UI. `canvas.move` supports both source and block node positions without changing clip timing. Desktop scripted tool execution does not establish that an external model conversation succeeded.
 
 ## AutoClip highlight planning
 

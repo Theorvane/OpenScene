@@ -1,6 +1,6 @@
 # Contributing to OpenScene
 
-OpenScene is a local video editor with Timeline, a node Canvas and an editing agent. Desktop and mobile share the project editing rules. Keep media storage and rendering on the user's device; model requests use the explicitly chosen provider and existing approval gates.
+OpenScene is a local video editor with Timeline, a node Canvas and an editing agent. Active development targets the Electron desktop app; mobile support is deferred. Keep media storage and rendering on the user's device; model requests use the explicitly chosen provider and existing approval gates.
 
 ## Before You Start
 
@@ -26,7 +26,7 @@ OpenScene is a local video editor with Timeline, a node Canvas and an editing ag
    npm run build
    ```
    FFmpeg-backed tests require a local `ffmpeg` executable on `PATH` or `VIDEO_TOOL_FFMPEG_PATH`; do not skip or weaken media tests.
-   Initialize `external/opencut` before these checks. Also run `npm ci` and `npm run typecheck` in `mobile/`. Editing behavior belongs in `src/shared/` and must be exposed in both surfaces and agent capability discovery. Exercise affected mobile screens in a development client and report any unverified device behavior.
+   Initialize `external/opencut` before these checks. Editing behavior belongs in `src/shared/` and must be exposed through desktop UI and agent capability discovery. Exercise affected desktop flows and report any unverified platform behavior.
 5. Push the branch and open a pull request **to `dev`**. Complete the pull request template, link the issue, and describe validation performed.
 
 Releases are prepared separately through reviewed pull requests from **`dev` to `main`**. Do not target feature work directly at `main`.

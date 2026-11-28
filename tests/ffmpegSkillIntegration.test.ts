@@ -78,20 +78,11 @@ describe('pinned ffmpeg-skill integration', () => {
     const session = new AgentChatSessionManager(bundle);
     await session.sendMessage({ conversationId: 'ffmpeg-workflow', text: 'Review this cut', modelId: 'test-model' });
     expect(systemText).toContain(FFMPEG_EDITING_WORKFLOW);
+    expect(systemText).toContain('42 tools are NOT registered in-app tools');
+    expect(systemText).toContain('An export job ID means started, not completed or verified');
+    expect(systemText).toContain('respecting every approval gate');
+    expect(systemText).toContain('Keep original media unchanged');
+    expect(systemText).toContain('do not promise lossless output');
   });
 
-  it('shares the same policy with mobile while keeping editing behind tool approval', () => {
-    const mobile = read('mobile/src/screens/AgentScreen.tsx');
-    expect(mobile).toContain('@openvideo/shared/ffmpegEditingWorkflow');
-    expect(mobile).toMatch(/FFMPEG_EDITING_WORKFLOW\s*\+\s*'\\n\\n'\s*\+\s*AGENT_SCOPE_POLICY/);
-    expect(mobile).toContain('edit_project');
-    expect(mobile).toContain('export_project');
-    expect(mobile).toContain('approval');
-    expect(mobile).toContain('Video frame and speech inspection through chat are available in the desktop Edit Agent');
-    expect(FFMPEG_EDITING_WORKFLOW).toContain('42 tools are NOT registered in-app tools');
-    expect(FFMPEG_EDITING_WORKFLOW).toContain('An export job ID means started, not completed or verified');
-    expect(FFMPEG_EDITING_WORKFLOW).toContain('respecting every approval gate');
-    expect(FFMPEG_EDITING_WORKFLOW).toContain('Keep original media unchanged');
-    expect(FFMPEG_EDITING_WORKFLOW).toContain('do not promise lossless output');
-  });
 });
