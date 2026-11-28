@@ -84,6 +84,13 @@ describe('Jev explicit observation advisory', () => {
     const f = fixture(); f.fetch.mockImplementation(async () => { f.setConfig({ minSelectedProbability: 0.98 }); return Response.json(answer()); });
     expect(await f.call()).toBeNull();
   });
+  it.each(['disable', 'model-change'])('discards response after %s in flight', async mode => {
+    const f = fixture(); f.fetch.mockImplementation(async () => {
+      f.setConfig(mode === 'disable' ? { enabled: false } : { model: 'unsupported-model' as typeof JEV_MODEL });
+      return Response.json(answer());
+    });
+    expect(await f.call()).toBeNull(); expect(f.release).toHaveBeenCalledTimes(1);
+  });
   it('drops stale network responses', async () => {
     const f = fixture(); f.fetch.mockImplementation(async () => { f.setContext({ currentFrame: { ...frame, contentRevision: 2 } }); return Response.json(answer()); });
     expect(await f.call()).toBeNull();

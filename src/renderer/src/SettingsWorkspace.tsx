@@ -15,6 +15,12 @@ import { useTheme } from './ThemeProvider';
 import { Button, MetadataList, Panel, PanelHeading, StatusCard } from './ui';
 import { classNames } from './ui/classNames';
 import { UpdatesSettings } from './UpdatesSettings';
+import { JevJudgmentSettings, type JevConfigSettingsPort } from './JevJudgmentSettings';
+
+const JEV_CONFIG_API: JevConfigSettingsPort = {
+  getConfig: () => window.videoTool.getJevConfig(),
+  setConfig: config => window.videoTool.setJevConfig(config)
+};
 
 const SETTINGS_SECTIONS = [
   { id: 'appearance', title: 'Appearance', description: 'Theme mode and command desk presets.' },
@@ -22,6 +28,7 @@ const SETTINGS_SECTIONS = [
   { id: 'providers', title: 'Providers', description: 'Connected providers, and popular providers to connect.' },
   { id: 'models', title: 'Models', description: 'Search the model catalog and choose which models appear in pickers.' },
   { id: 'edit-agent', title: 'Edit Agent', description: 'Model preference for the persistent right-side agent.' },
+  { id: 'jev-judgment', title: 'Jev Judgments', description: 'Optional typed observation judgments with a separate secure key.' },
   { id: 'shortcuts', title: 'Shortcuts', description: 'Timeline editor keyboard shortcut remapping.' },
   { id: 'updates', title: 'Updates', description: 'Installed version and how new releases reach this build.' },
   { id: 'data-privacy', title: 'Data & Privacy', description: 'Local storage, provider authorization, and deletion expectations.' }
@@ -433,6 +440,8 @@ export function SettingsWorkspace({ onReplayFirstRunOnboarding }: SettingsWorksp
             {testState.status === 'error' && <StatusCard tone="danger">{testState.error}</StatusCard>}
           </>
         );
+      case 'jev-judgment':
+        return <JevJudgmentSettings configApi={JEV_CONFIG_API} />;
       case 'shortcuts':
         return (
           <>

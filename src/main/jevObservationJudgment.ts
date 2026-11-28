@@ -1,23 +1,17 @@
 import { z } from 'zod';
 import type { CuaFrame } from '../shared/cua';
+import { DEFAULT_JEV_CONFIG, resolveJevConfig, type JevConfig } from '../shared/jevConfig';
 
-export const JEV_MODEL = 'jev-1.14.0' as const;
+export { DEFAULT_JEV_CONFIG } from '../shared/jevConfig';
+
+export const JEV_MODEL = DEFAULT_JEV_CONFIG.model;
 export const JEV_ENDPOINT = 'https://api.typesafe.ai/v1/systemone';
 export const JEV_MAX_REQUESTS_PER_RUN = 3;
 export const JEV_REOBSERVE_CANDIDATES: readonly JevCandidate[] = Object.freeze([
   Object.freeze({ id: 'reobserve', description: 'The supplied observation evidence is insufficient for the stated information goal; request a separate explicit observation.' }),
   Object.freeze({ id: 'sufficient', description: 'Continue evaluating the supplied evidence with the existing LLM; this does not establish correctness, visual sufficiency when no image is supplied, or action authority.' })
 ]);
-export interface JevJudgmentConfig {
-  readonly enabled: boolean;
-  readonly model: typeof JEV_MODEL;
-  /** Model probability cutoff, not measured application accuracy. */
-  readonly minSelectedProbability: number;
-  readonly timeoutMs: number;
-}
-export const DEFAULT_JEV_CONFIG: JevJudgmentConfig = Object.freeze({
-  enabled: false, model: JEV_MODEL, minSelectedProbability: 0.95, timeoutMs: 2500
-});
+export type JevJudgmentConfig = JevConfig;
 export interface JevCandidate { readonly id: string; readonly description: string }
 export type JevFrameIdentity = Pick<CuaFrame, 'sessionId' | 'runId' | 'windowId' | 'frameId' | 'layoutRevision' | 'contentRevision' | 'capturedAt'>;
 export type JevQuestionKind = 'candidate-selection' | 'semantic-result' | 'reobserve';
@@ -93,10 +87,8 @@ export function createJevObservationHook(options: {
     let abort: (() => void) | undefined;
     let contextSignal: AbortSignal | undefined;
     try {
-      const config = { ...options.getConfig() };
-      if (!config.enabled || config.model !== JEV_MODEL || signal?.aborted
-        || !Number.isFinite(config.minSelectedProbability) || config.minSelectedProbability < 0.5 || config.minSelectedProbability > 1
-        || !Number.isInteger(config.timeoutMs) || config.timeoutMs < 1 || config.timeoutMs > 5000) return null;
+      const config = { ...resolveJevConfig(options.getConfig()) };
+      if (!config.enabled || signal?.aborted) return null;
       if (typeof output === 'string' && output.length > 2_100_000) return null;
       const observationOutput: unknown = typeof output === 'string' ? JSON.parse(output) : output;
       const observation = z.object({ success: z.literal(true), frame: frameSchema, summary: z.string().max(4000).optional() }).safeParse(observationOutput);
@@ -112,7 +104,7 @@ export function createJevObservationHook(options: {
       let activeLease: JevJudgmentLease | null = null;
       const valid = () => {
         const current = options.getObservationContext(conversationId);
-        const currentConfig = options.getConfig();
+        const currentConfig = resolveJevConfig(options.getConfig());
         const age = now() - frame.capturedAt;
         return current !== null && !signal?.aborted && !current.signal.aborted
           && currentConfig.enabled === true && currentConfig.model === config.model
