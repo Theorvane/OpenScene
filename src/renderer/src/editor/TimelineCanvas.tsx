@@ -11,11 +11,6 @@ import { clipDurationMs, playheadForClipSelection } from '../../../shared/timeli
 import { nextVisualBoundaryMs, previousVisualBoundaryMs } from '../../../shared/timelinePlayback';
 import { snapTimelinePosition } from '../../../shared/timelineSnapping';
 import {
-  isActiveTimelineDragAborted,
-  registerActiveTimelineDrag
-} from '../cua/cuaDragGuard';
-import { runWithCuaActionAttribution } from '../cua/cuaActionSettlement';
-import {
   computeClipDropPositionMs,
   computeTrimPositionMs,
   hasExceededDragThreshold,
@@ -345,15 +340,12 @@ export function TimelineCanvas({ editor, id, showHistoryControls = true }: Timel
       }
     };
 
-    let unregisterDragGuard: (() => void) | null = null;
 
     const detach = (): void => {
       window.removeEventListener('pointermove', onWindowPointerMove);
       window.removeEventListener('pointerup', onWindowPointerUp);
       window.removeEventListener('pointercancel', onWindowPointerCancel);
       window.removeEventListener('keydown', onWindowKeyDown);
-      unregisterDragGuard?.();
-      unregisterDragGuard = null;
       releaseCapture();
       dragCleanupRef.current = null;
     };
@@ -368,7 +360,6 @@ export function TimelineCanvas({ editor, id, showHistoryControls = true }: Timel
 
     // Register synchronous module-level rollback handler so renderer Stop or
     // main-process `stopping` cancels this drag BEFORE synthetic `mouseUp` lands.
-    unregisterDragGuard = registerActiveTimelineDrag(cancelDrag);
 
     const onWindowKeyDown = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') {
@@ -377,7 +368,7 @@ export function TimelineCanvas({ editor, id, showHistoryControls = true }: Timel
     };
 
     const onWindowPointerMove = (event: PointerEvent): void => {
-      if (aborted || isActiveTimelineDragAborted()) {
+      if (aborted) {
         cancelDrag();
         return;
       }
@@ -450,7 +441,7 @@ export function TimelineCanvas({ editor, id, showHistoryControls = true }: Timel
       if (active === null || active.pointerId !== event.pointerId) return;
       // Synchronous check BEFORE any commit: if Stop/cancel aborted this drag,
       // discard the synthetic mouseUp release with zero timeline or Undo mutation.
-      const wasAborted = aborted || isActiveTimelineDragAborted();
+      const wasAborted = aborted;
       const ctx = dragContextRef.current;
       detach();
       pointerDragRef.current = null;
@@ -459,7 +450,7 @@ export function TimelineCanvas({ editor, id, showHistoryControls = true }: Timel
 
       if (wasAborted) return;
 
-      runWithCuaActionAttribution('drag', () => {
+      (() => {
         if (!active.moved || ctx.project === null || ctx.view === null) return;
 
         suppressNextClickClipIdRef.current = active.clipId;
@@ -505,7 +496,7 @@ export function TimelineCanvas({ editor, id, showHistoryControls = true }: Timel
           snapMs
         });
         ctx.editor.trimClipTo(active.clipId, active.edge, position);
-      });
+      })();
     };
 
     const onWindowPointerCancel = (event: PointerEvent): void => {
@@ -678,9 +669,6 @@ export function TimelineCanvas({ editor, id, showHistoryControls = true }: Timel
   const onStackPointerUp = (event: React.PointerEvent<HTMLDivElement>): void => {
     panOriginRef.current = null;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-    if (event.type === 'pointerup' && !isActiveTimelineDragAborted() && pointerDragRef.current === null) {
-      runWithCuaActionAttribution('drag', () => undefined);
-    }
   };
 
   // Razor tool: clicking a clip splits it at the clicked timeline position.
@@ -698,7 +686,6 @@ export function TimelineCanvas({ editor, id, showHistoryControls = true }: Timel
       id={id}
       className="timeline-panel editor-timeline-region"
       data-testid="timeline-canvas"
-      data-cua-safe-surface={project !== null && view !== null ? 'timeline' : undefined}
       data-dirty={editor.hasUnsavedTimeline ? 'true' : 'false'}
       data-saving={editor.isSavingTimeline ? 'true' : 'false'}
       data-save-status={editor.timelineSaveStatus}

@@ -38,7 +38,6 @@ import { useEditorShortcutPreference } from './useEditorShortcutPreference';
 import type { TimelineEditorController } from './useTimelineEditor';
 import { useTimelineShortcuts } from './useTimelineShortcuts';
 import { useAgentChat } from '../AgentChatContext';
-import { useCuaActing, useCuaOverlay } from '../cua/useCuaOverlay';
 import { WorkspaceShell } from '../../components/workspace';
 import '../../styles/workspace-shell.css';
 import type { TabDefinition } from '../ui';
@@ -51,6 +50,8 @@ export type InspectorTabId = (typeof EDITOR_INSPECTOR_DOCK_TAB_IDS)[number];
 export type EditorViewMode = 'timeline' | 'canvas' | 'shorts';
 
 type TimelineEditorProps = {
+  readonly sourcePreview?: boolean;
+  readonly onSourcePreviewChange?: (source: boolean) => void;
   readonly editorView?: EditorViewMode;
   readonly onEditorViewChange?: (view: EditorViewMode) => void;
   readonly active?: boolean;
@@ -109,13 +110,13 @@ function getDefaultInspectorTabId({ selectedAssetId, selectedClipId }: Inspector
   return 'selection';
 }
 
-export function TimelineEditor({ editorView: controlledView, onEditorViewChange, active = true, editor, onProjectSettings, onOpenSettings, onProjects, onSelectProject }: TimelineEditorProps): ReactElement {
+export function TimelineEditor({ sourcePreview, onSourcePreviewChange, editorView: controlledView, onEditorViewChange, active = true, editor, onProjectSettings, onOpenSettings, onProjects, onSelectProject }: TimelineEditorProps): ReactElement {
   const [localView, setLocalView] = useState<EditorViewMode>('shorts');
   const editorView = controlledView ?? localView;
   const [previewChoice, setPreviewChoice] = useState<{ projectId: string | null; source: boolean }>({ projectId: null, source: false });
   const inspectingSource = (editor.project?.assets.some(asset => asset.kind === 'video') ?? false) &&
-    (!(editor.project?.timeline.tracks.some(track => track.clips.length > 0) ?? false) || (previewChoice.projectId === editor.project?.id && previewChoice.source));
-  const setInspectingSource = useCallback((source: boolean) => setPreviewChoice({ projectId: editor.project?.id ?? null, source }), [editor.project?.id]);
+    (!(editor.project?.timeline.tracks.some(track => track.clips.length > 0) ?? false) || (sourcePreview ?? (previewChoice.projectId === editor.project?.id && previewChoice.source)));
+  const setInspectingSource = useCallback((source: boolean) => { setPreviewChoice({ projectId: editor.project?.id ?? null, source }); onSourcePreviewChange?.(source); }, [editor.project?.id, onSourcePreviewChange]);
   const canvasMode = editorView === 'canvas';
   const shortsMode = editorView === 'shorts';
   const fullStageMode = canvasMode || shortsMode;
@@ -141,8 +142,6 @@ export function TimelineEditor({ editorView: controlledView, onEditorViewChange,
   }, []);
   const chat = useAgentChat();
   const { isBusy: isAgentBusy, pendingApproval } = chat;
-  const cua = useCuaOverlay();
-  const isCuaActing = useCuaActing();
   const [leftDockTabId, setLeftDockTabId] = useState<EditorLeftDockTabId>('project');
   const [inspectorTabId, setInspectorTabId] = useState<InspectorTabId>('selection');
   const { layoutPreference, updateLayoutPreference } = useEditorLayoutPreference();
@@ -239,7 +238,6 @@ export function TimelineEditor({ editorView: controlledView, onEditorViewChange,
   useTimelineShortcuts({
     canSplit: editor.selectedClip !== null,
     isLocked: isAgentBusy || fullStageMode,
-    cuaActing: isCuaActing,
     clearSelection: editor.clearSelection,
     deleteSelectedClip: editor.deleteSelectedClip,
     duplicateSelectedClip: editor.duplicateSelectedClip,
@@ -275,6 +273,8 @@ export function TimelineEditor({ editorView: controlledView, onEditorViewChange,
 
   return (
     <WorkspaceShell
+      showSidebar={false}
+      showProjectMenu={false}
       persistentContent
       mode={canvasMode ? 'node' : shortsMode ? 'natural' : 'precision'}
       onModeChange={(mode) => selectEditorView(mode === 'node' ? 'canvas' : mode === 'natural' ? 'shorts' : 'timeline')}
@@ -295,15 +295,12 @@ export function TimelineEditor({ editorView: controlledView, onEditorViewChange,
       onRedo={editor.redoTimeline}
       canRedo={editor.canRedoTimeline && !isAgentBusy && !editor.isBusy}
       {...(editor.project === null || !editor.hasUnsavedTimeline || isAgentBusy || editor.isBusy || editor.isSavingTimeline ? {} : { onSave: () => { void editor.saveTimeline(); } })}
-      onStop={() => { void cua?.triggerStop(); }}
-      showAutomationStop={false}
       showProjectIdentity={false}
       showSettingsShortcut={false}
       onProjectSettings={onProjectSettings}
       actions={(fullStageMode || !floatingExportVisible) ? <ExportPanel editor={editor} /> : null}
       safety={{ sourcePreserved: editor.project !== null, dirty: editor.hasUnsavedTimeline, saving: editor.isSavingTimeline,
-        pendingApprovalCount: pendingApproval === null ? 0 : 1,
-        cuaStatus: cua?.state.phase === 'acting' || cua?.state.phase === 'ready' || cua?.state.phase === 'stopping' || cua?.state.phase === 'cleanup-failed' ? cua.state.phase : 'idle' }}
+        pendingApprovalCount: pendingApproval === null ? 0 : 1 }}
     >
     <EditorWorkspace
       mode="host"
@@ -335,9 +332,9 @@ export function TimelineEditor({ editorView: controlledView, onEditorViewChange,
           <h1 id="timeline-editor-title">OpenScene</h1>
           <span className="editor-program-region__subtitle">Timeline editor</span>
         </div>
-        <div className="editor-view" hidden={!canvasMode} data-cua-safe-surface={canvasMode && editor.project !== null ? 'canvas' : undefined}>
+        <div className="editor-view" hidden={!canvasMode}>
           {editor.project !== null && <VideoConnectionCanvas key={editor.project.id} editor={editor} showHistoryControls={false}
-            locked={(isAgentBusy && !isCuaActing) || editor.isBusy} onPreview={() => selectEditorView('timeline')} />}
+            locked={isAgentBusy || editor.isBusy} onPreview={() => selectEditorView('timeline')} />}
         </div>
         <div className={shortsMode ? 'editor-view editor-view--natural' : 'editor-view editor-view--precision'} hidden={canvasMode}>
           {active && !fullStageMode && <ReaEditorAnalysisHost editor={editor} locked={isAgentBusy || editor.isBusy} />}

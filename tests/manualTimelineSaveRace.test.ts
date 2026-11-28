@@ -43,7 +43,7 @@ beforeEach(async () => {
   Object.defineProperty(window, 'videoTool', { configurable: true, value: {
     listProjects: async () => ({ ok: true, value: [] }),
     openProject,
-    deleteProject: async () => ({ ok: true, value: null }),
+    deleteProject: async () => ({ ok: true, value: { deleted: true } }),
     detachVideoAudio: async () => ({ ok: true, value: { asset: asset('audio') } }),
     onProjectTimelineChanged: (listener: (projectId: string) => void) => { timelineChanged = listener; return () => {}; }, saveTimeline: save
   } });

@@ -7,8 +7,6 @@
  * Design rules:
  * - Pure achromatic neutral dark surfaces, hairline 1px borders, 4px spacing rhythm
  * - Zero gradients, zero glow shadows, zero pill soup, zero emojis
- * - Fixed-width non-shrinking CUA Stop button participates in the root stacking
- *   context at `--os-z-cua-stop` (9999) so Dialog/Sheet/Dropdown never obscure it
  * - Zero horizontal overflow across 1280x800, 1440x900, 1920x1080 at 100/125/150% zoom
  */
 
@@ -137,47 +135,6 @@
   height: 26px;
   padding: 0 var(--os-space-2);
   font-size: var(--os-font-size-sm);
-}
-
-.os-ws-stop-btn {
-  position: relative;
-  z-index: var(--os-z-cua-stop);
-  pointer-events: auto;
-  box-sizing: border-box;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  width: 84px;
-  min-width: 84px;
-  height: 26px;
-  padding: 0 var(--os-space-2);
-  border-radius: var(--os-ui-radius-xs);
-  border: 1px solid var(--os-ui-danger-border);
-  background-color: var(--os-ui-surface-elevated);
-  color: var(--os-ui-danger-fg);
-  font-family: var(--os-font-sans);
-  font-size: var(--os-font-size-sm);
-  font-weight: 500;
-  white-space: nowrap;
-  flex-shrink: 0;
-  cursor: pointer;
-  transition: background-color 110ms ease, border-color 110ms ease;
-}
-
-.os-ws-stop-btn:hover {
-  background-color: var(--os-ui-danger-bg);
-  border-color: var(--os-ui-danger);
-}
-
-.os-ws-stop-btn:focus-visible {
-  outline: 2px solid var(--os-ui-danger);
-  outline-offset: 1px;
-}
-
-.os-ws-stop-btn[data-cua-active="true"] {
-  background-color: var(--os-ui-danger-bg);
-  border-color: var(--os-ui-danger);
 }
 
 /* -------------------------------------------------------------------------- */

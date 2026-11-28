@@ -7,7 +7,7 @@ import {
 } from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 
-import { cn, composeCuaSafeEscapeHandler, isolateModalKeyDown, type CuaProtectedKind } from './cn';
+import { cn, composeEscapeHandler, isolateModalKeyDown, type PortalSurfaceKind } from './cn';
 
 export type SheetSide = 'right' | 'left';
 export type SheetProps = ComponentPropsWithoutRef<typeof DialogPrimitive.Root>;
@@ -16,13 +16,13 @@ export type SheetPortalProps = ComponentPropsWithoutRef<typeof DialogPrimitive.P
 export type SheetCloseProps = ComponentPropsWithoutRef<typeof DialogPrimitive.Close>;
 
 export interface SheetOverlayProps extends ComponentPropsWithoutRef<typeof DialogPrimitive.Overlay> {
-  readonly cuaProtectedKind?: Extract<CuaProtectedKind, 'modal' | 'settings' | 'approval-ui'>;
+  readonly surfaceKind?: Extract<PortalSurfaceKind, 'modal' | 'settings' | 'approval-ui'>;
 }
 
 export interface SheetContentProps extends ComponentPropsWithoutRef<typeof DialogPrimitive.Content> {
   readonly side?: SheetSide;
   readonly container?: HTMLElement | null;
-  readonly cuaProtectedKind?: Extract<CuaProtectedKind, 'modal' | 'settings' | 'approval-ui'>;
+  readonly surfaceKind?: Extract<PortalSurfaceKind, 'modal' | 'settings' | 'approval-ui'>;
   readonly showCloseButton?: boolean;
   readonly closeLabel?: string;
 }
@@ -38,12 +38,11 @@ export const SheetPortal = DialogPrimitive.Portal;
 export const SheetClose = DialogPrimitive.Close;
 
 export const SheetOverlay = forwardRef<ElementRef<typeof DialogPrimitive.Overlay>, SheetOverlayProps>(
-  function SheetOverlay({ className, cuaProtectedKind = 'modal', ...props }, ref) {
+  function SheetOverlay({ className, surfaceKind = 'modal', ...props }, ref) {
     return (
       <DialogPrimitive.Overlay
         ref={ref}
         className={cn('os-ui-sheet__overlay', className)}
-        data-cua-protected={cuaProtectedKind}
         data-os-portal="sheet"
         {...props}
       />
@@ -58,7 +57,7 @@ export const SheetContent = forwardRef<ElementRef<typeof DialogPrimitive.Content
       className,
       closeLabel = 'Close sheet',
       container,
-      cuaProtectedKind = 'modal',
+      surfaceKind = 'modal',
       onEscapeKeyDown,
       onKeyDown,
       showCloseButton = true,
@@ -74,7 +73,7 @@ export const SheetContent = forwardRef<ElementRef<typeof DialogPrimitive.Content
 
     return (
       <SheetPortal {...(container !== undefined ? { container } : {})}>
-        <SheetOverlay cuaProtectedKind={cuaProtectedKind} />
+        <SheetOverlay surfaceKind={surfaceKind} />
         <DialogPrimitive.Content
           ref={ref}
           aria-modal="true"
@@ -83,10 +82,9 @@ export const SheetContent = forwardRef<ElementRef<typeof DialogPrimitive.Content
             side === 'left' ? 'os-ui-sheet__content--left' : 'os-ui-sheet__content--right',
             className
           )}
-          data-cua-protected={cuaProtectedKind}
           data-os-portal="sheet"
           data-side={side}
-          onEscapeKeyDown={composeCuaSafeEscapeHandler(onEscapeKeyDown)}
+          onEscapeKeyDown={composeEscapeHandler(onEscapeKeyDown)}
           onKeyDown={handleKeyDown}
           {...props}
         >

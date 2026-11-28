@@ -50,8 +50,6 @@ export interface WorkspaceShellProps {
   readonly onRedo?: () => void;
   readonly onSave?: () => void;
   readonly saveScopeLabel?: string;
-  readonly onStop: () => void;
-  readonly showAutomationStop?: boolean;
   readonly onOpenAssets?: () => void;
   readonly onOpenSettings?: () => void;
   readonly assetsDrawerContent?: ReactNode;
@@ -66,6 +64,8 @@ export interface WorkspaceShellProps {
   readonly showSettingsShortcut?: boolean;
   readonly onProjectSettings?: (() => void) | undefined;
   readonly actions?: ReactNode;
+  readonly showSidebar?: boolean;
+  readonly showProjectMenu?: boolean;
 }
 
 function BrandMark(): ReactElement {
@@ -123,21 +123,6 @@ function MoreIcon(): ReactElement {
   );
 }
 
-function describeCuaStatus(safety: WorkspaceSafetyState): { readonly label: string; readonly dotClass: string } {
-  switch (safety.cuaStatus) {
-    case 'acting':
-      return { label: safety.cuaLabel ?? '자동 조작 실행 중', dotClass: 'os-ws-dot os-ws-dot--info' };
-    case 'ready':
-      return { label: safety.cuaLabel ?? '자동 조작 준비됨', dotClass: 'os-ws-dot os-ws-dot--ok' };
-    case 'stopping':
-      return { label: safety.cuaLabel ?? '자동 조작 중지 중', dotClass: 'os-ws-dot os-ws-dot--warn' };
-    case 'cleanup-failed':
-      return { label: safety.cuaLabel ?? '입력 정리 실패 · 재실행 잠김', dotClass: 'os-ws-dot os-ws-dot--danger' };
-    default:
-      return { label: safety.cuaLabel ?? '자동 조작 대기', dotClass: 'os-ws-dot' };
-  }
-}
-
 export function WorkspaceShell({
   activeCandidateId = null,
   activeProjectId,
@@ -155,8 +140,6 @@ export function WorkspaceShell({
   onSave,
   onSelectCandidate,
   onSelectProject,
-  onStop,
-  showAutomationStop = true,
   onUndo,
   canRedo = false,
   onRedo,
@@ -167,6 +150,8 @@ export function WorkspaceShell({
   showSettingsShortcut = true,
   onProjectSettings,
   actions,
+  showSidebar = true,
+  showProjectMenu = true,
   safety,
   saveScopeLabel,
   showCandidateNavigation = true,
@@ -177,10 +162,6 @@ export function WorkspaceShell({
 
   const activeProject = projects.find((project) => project.id === activeProjectId) ?? null;
   const projectDisplayName = activeProject?.name ?? '새 프로젝트';
-  const cuaDisplay = describeCuaStatus(safety);
-  const isCuaActive =
-    safety.cuaStatus === 'acting' || safety.cuaStatus === 'stopping' || safety.cuaStatus === 'cleanup-failed';
-
   const activeTabValue = mode === 'intake' ? '' : mode;
 
   const handleOpenAssets = (): void => {
@@ -209,7 +190,7 @@ export function WorkspaceShell({
         className="os-ws-shell"
         data-workspace-mode={mode}
       >
-        <header className="os-ws-header" data-cua-protected="chrome-menu" data-cua-protected-id="workspace-header">
+        <header className="os-ws-header">
           <div className="os-ws-header__left">
             {showProjectIdentity && <>
             <span className="os-ws-brand">
@@ -249,7 +230,7 @@ export function WorkspaceShell({
           </div>
 
           <div className="os-ws-header__right">
-            <DropdownMenu>
+            {showProjectMenu && <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
                   variant="ghost"
@@ -275,7 +256,7 @@ export function WorkspaceShell({
                   </>
                 )}
               </DropdownMenuContent>
-            </DropdownMenu>
+            </DropdownMenu>}
 
             <Button
               variant="ghost"
@@ -304,18 +285,6 @@ export function WorkspaceShell({
             </Button>
             {actions}
 
-            {showAutomationStop && safety.cuaStatus !== undefined && safety.cuaStatus !== 'idle' && <button
-              type="button"
-              className="os-ws-stop-btn"
-              data-cua-stop="true"
-              data-cua-protected="stop-button"
-              data-cua-active={isCuaActive ? 'true' : 'false'}
-              data-testid="workspace-cua-stop-btn"
-              onClick={onStop}
-            >
-              <StopIcon />
-              <span>자동 조작 중지</span>
-            </button>}
           </div>
         </header>
 
@@ -339,14 +308,10 @@ export function WorkspaceShell({
             )}
           </div>
 
-          <span className="os-ws-safety-item os-ws-safety-item--muted">
-            <span className={cuaDisplay.dotClass} aria-hidden="true" />
-            <span className="os-ui-truncate">{cuaDisplay.label}</span>
-          </span>
         </div>
 
         <div className="os-ws-body">
-          <aside className="os-ws-sidebar" aria-label="프로젝트 및 후보 탐색" data-cua-protected="chrome-menu" data-cua-protected-id="workspace-sidebar">
+          {showSidebar && <aside className="os-ws-sidebar" aria-label="프로젝트 및 후보 탐색">
             <ScrollArea className="os-ws-sidebar__scroll">
               <div className="os-ws-sidebar__inner">
                 {videoList ?? <section className="os-ws-sidebar__section">
@@ -434,7 +399,7 @@ export function WorkspaceShell({
                 <span>설정 · Jev</span>
               </Button>}
             </div>
-          </aside>
+          </aside>}
 
           <main className="os-ws-main">
             {mode === 'intake' && children}
@@ -472,7 +437,7 @@ export function WorkspaceShell({
 
         {settingsDrawerContent !== undefined && (
           <Sheet open={settingsOpen} onOpenChange={setSettingsOpen}>
-            <SheetContent side="right" cuaProtectedKind="settings">
+            <SheetContent side="right" surfaceKind="settings">
               <SheetHeader>
                 <SheetTitle>설정 · Jev</SheetTitle>
                 <SheetDescription>로컬 모델, 전사 엔진, Jev 연결 설정을 관리합니다.</SheetDescription>

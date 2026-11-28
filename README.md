@@ -16,9 +16,9 @@ Start with your own local video files. One core workflow turns an imported video
 
 Timeline is the sequence used for playback and export. Canvas already supports saved node graphs, four quick starts and 12 processing blocks; **Apply workflow** materializes a branch into timeline tracks. Changing a node does not start a render. Quick-start recipes are fixed starting configurations, not automatic semantic highlight detection or a general recipe marketplace.
 
-The desktop **Shorts** workspace provides candidate review, editable result projects and batch export. Results use portrait framing with contain fit; automatic subject tracking is not implemented. Model quality requires separate validation. Active development targets the desktop app; mobile support is deferred. See [current shorts scope](docs/local-shorts-backend.md) and [recorded verification limits](docs/shorts-media-validation.md).
+Request shorts or highlights in Natural chat when needed. The video list shows requested jobs and results; Precision and Nodes provide manual detail controls without a side chat. Results use portrait framing with contain fit; automatic subject tracking is not implemented. Model quality requires separate validation. Active development targets the desktop app; mobile support is deferred. See [current shorts scope](docs/local-shorts-backend.md) and [recorded verification limits](docs/shorts-media-validation.md).
 
-**Roadmap:** app-window computer-use automation (CUA) and Jev integration are separate work in progress, not capabilities promised by this introduction. Existing node editing and quick starts are available now; broader reusable recipe workflows remain a product direction.
+The left sidebar owns project creation, folder opening, rename and removal, with Settings at the bottom. Editing requests use registered project tools and explicit approvals. App-window computer-use automation has been removed. Broader reusable recipe workflows remain a product direction.
 
 ## Start editing
 

@@ -12,11 +12,8 @@ export function cn(...inputs: readonly ClassValue[]): string {
   return tokens.join(' ');
 }
 
-/**
- * Valid `data-cua-protected` kinds recognized by the self-window CUA surface
- * collector (`CUA_VALID_PROTECTED_KINDS`).
- */
-export type CuaProtectedKind =
+/** Semantic kinds for portal surfaces. */
+export type PortalSurfaceKind =
   | 'stop-button'
   | 'approval-ui'
   | 'agent-panel'
@@ -29,7 +26,7 @@ export type OsPortalKind = 'dialog' | 'sheet' | 'dropdown-menu' | 'tooltip';
 /**
  * Numeric mirror of `--os-z-*` CSS tokens in `src/renderer/styles/ui-tokens.css`.
  * Layering order:
- *   sheet (500) < dialog (600) < dropdown/popover (700) < tooltip (750) < cuaStop (9999)
+ *   sheet (500) < dialog (600) < dropdown/popover (700) < tooltip (750)
  */
 export const OS_Z_INDEX = {
   base: 0,
@@ -39,8 +36,7 @@ export const OS_Z_INDEX = {
   dialog: 600,
   popover: 700,
   dropdown: 700,
-  tooltip: 750,
-  cuaStop: 9999
+  tooltip: 750
 } as const;
 
 export function isEditableElement(target: EventTarget | null): boolean {
@@ -61,7 +57,7 @@ export function isEditableElement(target: EventTarget | null): boolean {
  * `window` Save or timeline shortcut listeners.
  *
  * Critical invariants:
- * - NEVER stops `Escape`, so capture-phase CUA emergency Stop listeners and
+ * - NEVER stops `Escape`, so capture-phase modal Escape listeners and
  *   Radix DismissableLayer escape handling always receive `Escape` normally.
  * - NEVER stops `Tab`, so Radix FocusScope focus trapping works undisturbed.
  */
@@ -85,7 +81,7 @@ export function isolateModalKeyDown(event: ReactKeyboardEvent<HTMLElement>): voi
 /**
  * Prevents `Cmd/Ctrl+S` pressed while a `DropdownMenu` is open from leaking
  * to global `window` / `document` Save listeners, without interfering with
- * menu navigation or capture-phase CUA emergency Stop `Escape` handling.
+ * menu navigation or capture-phase modal Escape `Escape` handling.
  */
 export function isolateMenuKeyDown(event: ReactKeyboardEvent<HTMLElement>): void {
   if (event.key === 'Escape' || event.key === 'Tab') {
@@ -100,11 +96,11 @@ export function isolateMenuKeyDown(event: ReactKeyboardEvent<HTMLElement>): void
 
 /**
  * Ensures Radix portal `onEscapeKeyDown` cooperates cleanly with a
- * capture-phase `window` Escape listener (e.g. CUA emergency Stop):
+ * capture-phase `window` Escape listener (e.g. modal Escape):
  * if a capture-phase listener already called `event.preventDefault()`, the
  * portal respects that and avoids competing with emergency cancellation.
  */
-export function composeCuaSafeEscapeHandler(
+export function composeEscapeHandler(
   userHandler?: (event: KeyboardEvent) => void
 ): (event: KeyboardEvent) => void {
   return (event: KeyboardEvent) => {

@@ -576,7 +576,7 @@ export function pointerDeltaToOutputOffset(input: {
 }
 
 /**
- * CUA & accessibility keyboard contract for 9:16 crop/framing viewport:
+ * Accessibility keyboard contract for 9:16 crop/framing viewport:
  * - Arrow keys: ±10px output offset (Shift + Arrow: ±50px)
  * - '+' / '=' / '-': ±0.05 scale (Shift: ±0.15)
  * - '0': Reset to Contain default (positionX: 0, positionY: 0, scale: 1)

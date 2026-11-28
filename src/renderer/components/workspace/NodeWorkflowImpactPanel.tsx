@@ -70,7 +70,7 @@ export function NodeWorkflowImpactPanel({
         </div>
 
         {impactSummary !== null && (
-          <aside className="os-ws-node__impact" aria-label="타임라인 변경 영향 미리보기" data-testid="node-impact-panel" data-cua-protected="approval-ui">
+          <aside className="os-ws-node__impact" aria-label="타임라인 변경 영향 미리보기" data-testid="node-impact-panel">
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--os-space-1)' }}>
               <h2 style={{ margin: 0, fontSize: 'var(--os-font-size-h2)', fontWeight: 600 }} className="os-ui-keep-all">
                 타임라인 변경 영향 미리보기

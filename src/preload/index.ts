@@ -1,7 +1,5 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import { REA_ANALYSIS_CHANNELS, type ReaAnalysisInput, type ReaAnalysisJob, type ReaAnalysisRuntime, type ReaPrepareImportInput } from '../shared/reaVideoAnalysis';
-import type { CuaActionSettlementAck, CuaActionSettlementTag, CuaCancelAck, CuaPrepareAck, CuaState, CuaStopResult, CuaSurfaceSnapshot } from '../shared/cua';
-import type { CuaSaveCommitAck, CuaSaveReadyAck, CuaSaveReadyRequest, CuaSaveResult, CuaSaveSnapshotReport, CuaSaveSnapshotRequest } from '../shared/cuaSave';
 
 import type {
   AgentChatApprovalInput,
@@ -76,19 +74,6 @@ export interface VideoToolApi extends JevCredentialApi, JevConfigApi {
   reaAnalysisGet(input: { readonly jobId: string }): Promise<ApiResponse<ReaAnalysisJob>>;
   reaAnalysisCancel(input: { readonly jobId: string }): Promise<ApiResponse<ReaAnalysisJob>>;
   reaAnalysisPrepareImport(input: ReaPrepareImportInput): Promise<ApiResponse<readonly unknown[]>>;
-  onCuaSaveSnapshotRequested(listener: (request: CuaSaveSnapshotRequest) => void): () => void;
-  cuaReportSaveSnapshot(report: CuaSaveSnapshotReport): Promise<ApiResponse<{ accepted: boolean }>>;
-  onCuaSaveRequested(listener: (request: CuaSaveReadyRequest) => void): () => void;
-  cuaAckSaveReady(ack: CuaSaveReadyAck): Promise<ApiResponse<{ accepted: boolean }>>;
-  onCuaSaveFinished(listener: (result: CuaSaveResult) => void): () => void;
-  cuaAckSaveCommit(ack: CuaSaveCommitAck): Promise<ApiResponse<{ accepted: boolean }>>;
-  cuaAckCancel(ack: CuaCancelAck): Promise<ApiResponse<{ accepted: boolean }>>;
-  cuaAckActionSettlement(ack: CuaActionSettlementAck): Promise<ApiResponse<{ accepted: boolean }>>;
-  cuaAckPrepare(ack: CuaPrepareAck): Promise<ApiResponse<{ accepted: boolean }>>;
-  cuaGetState(): Promise<ApiResponse<CuaState>>;
-  cuaStop(): Promise<ApiResponse<CuaStopResult>>;
-  cuaReportSurfaceSnapshot(snapshot: CuaSurfaceSnapshot, settlement?: CuaActionSettlementTag): Promise<ApiResponse<{ accepted: boolean }>>;
-  onCuaStateChanged(listener: (state: CuaState) => void): () => void;
   shortsStart(input: ShortsStartInput): Promise<ApiResponse<ShortsJob>>;
   shortsGet(input: ShortsJobInput): Promise<ApiResponse<ShortsJob>>;
   shortsList(input: ShortsListInput): Promise<ApiResponse<readonly ShortsJob[]>>;
@@ -185,39 +170,10 @@ const videoTool: VideoToolApi = {
   reaAnalysisGet: input => ipcRenderer.invoke(REA_ANALYSIS_CHANNELS.get, input),
   reaAnalysisCancel: input => ipcRenderer.invoke(REA_ANALYSIS_CHANNELS.cancel, input),
   reaAnalysisPrepareImport: input => ipcRenderer.invoke(REA_ANALYSIS_CHANNELS.prepareImport, input),
-  onCuaSaveSnapshotRequested: listener => {
-    const subscription = (_event: IpcRendererEvent, request: CuaSaveSnapshotRequest): void => listener(request);
-    ipcRenderer.on(IPC_CHANNELS.cuaSaveSnapshotRequested, subscription);
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.cuaSaveSnapshotRequested, subscription);
-  },
-  cuaReportSaveSnapshot: report => ipcRenderer.invoke(IPC_CHANNELS.cuaReportSaveSnapshot, report) as Promise<ApiResponse<{ accepted: boolean }>>,
-  onCuaSaveRequested: listener => {
-    const subscription = (_event: IpcRendererEvent, request: CuaSaveReadyRequest): void => listener(request);
-    ipcRenderer.on(IPC_CHANNELS.cuaSaveRequested, subscription);
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.cuaSaveRequested, subscription);
-  },
-  cuaAckSaveReady: ack => ipcRenderer.invoke(IPC_CHANNELS.cuaAckSaveReady, ack) as Promise<ApiResponse<{ accepted: boolean }>>,
-  onCuaSaveFinished: listener => {
-    const subscription = (_event: IpcRendererEvent, result: CuaSaveResult): void => listener(result);
-    ipcRenderer.on(IPC_CHANNELS.cuaSaveFinished, subscription);
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.cuaSaveFinished, subscription);
-  },
-  cuaAckSaveCommit: ack => ipcRenderer.invoke(IPC_CHANNELS.cuaAckSaveCommit, ack) as Promise<ApiResponse<{ accepted: boolean }>>,
-  cuaAckCancel: ack => ipcRenderer.invoke(IPC_CHANNELS.cuaAckCancel, ack) as Promise<ApiResponse<{ accepted: boolean }>>,
-  cuaAckActionSettlement: ack => ipcRenderer.invoke(IPC_CHANNELS.cuaAckActionSettlement, ack) as Promise<ApiResponse<{ accepted: boolean }>>,
-  cuaAckPrepare: ack => ipcRenderer.invoke(IPC_CHANNELS.cuaAckPrepare, ack) as Promise<ApiResponse<{ accepted: boolean }>>,
-  cuaGetState: () => ipcRenderer.invoke(IPC_CHANNELS.cuaGetState) as Promise<ApiResponse<CuaState>>,
-  cuaStop: () => ipcRenderer.invoke(IPC_CHANNELS.cuaStop) as Promise<ApiResponse<CuaStopResult>>,
-  cuaReportSurfaceSnapshot: (snapshot, settlement) => ipcRenderer.invoke(IPC_CHANNELS.cuaReportSurfaceSnapshot, snapshot, settlement) as Promise<ApiResponse<{ accepted: boolean }>>,
-  onCuaStateChanged: listener => {
-    const subscription = (_event: IpcRendererEvent, state: CuaState): void => listener(state);
-    ipcRenderer.on(IPC_CHANNELS.cuaStateChanged, subscription);
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.cuaStateChanged, subscription);
-  },
   getJevConfig: () => ipcRenderer.invoke(JEV_CONFIG_CHANNELS.get),
-  setJevConfig: (config) => ipcRenderer.invoke(JEV_CONFIG_CHANNELS.set, config),
+  setJevConfig: config => ipcRenderer.invoke(JEV_CONFIG_CHANNELS.set, config),
   getJevCredentialStatus: () => ipcRenderer.invoke(JEV_CREDENTIAL_CHANNELS.status),
-  setJevCredential: (apiKey) => ipcRenderer.invoke(JEV_CREDENTIAL_CHANNELS.set, apiKey),
+  setJevCredential: apiKey => ipcRenderer.invoke(JEV_CREDENTIAL_CHANNELS.set, apiKey),
   clearJevCredential: () => ipcRenderer.invoke(JEV_CREDENTIAL_CHANNELS.clear),
   shortsStart: input => ipcRenderer.invoke(IPC_CHANNELS.shortsStart, input) as Promise<ApiResponse<ShortsJob>>,
   shortsGet: input => ipcRenderer.invoke(IPC_CHANNELS.shortsGet, input) as Promise<ApiResponse<ShortsJob>>,

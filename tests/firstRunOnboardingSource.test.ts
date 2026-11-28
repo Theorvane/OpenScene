@@ -13,8 +13,9 @@ describe('first-run onboarding source contract', () => {
   it('renders an accessible first-run dialog over Home with the requested controls and steps', async () => {
     const onboarding = await readSource(ONBOARDING_SOURCE_URL);
 
-    expect(onboarding).toContain('role="dialog"');
-    expect(onboarding).toContain('aria-modal="true"');
+    expect(onboarding).toContain('<dialog');
+    expect(onboarding).toContain('dialog.showModal()');
+    expect(onboarding).not.toContain('aria-modal=');
     expect(onboarding).toContain('Skip setup');
     expect(onboarding).toContain('Back');
     expect(onboarding).toContain('Next');

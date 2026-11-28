@@ -3,8 +3,9 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } 
 import type { EditAgentProjectContext } from '../../shared/editAgentContext';
 import type { AgentChatRestoreRequest } from './AgentChatContext';
 import { AppShell } from './AppShell';
+import { ProjectSidebar } from './ProjectSidebar';
+import { VideoResultsList } from './editor/VideoResultsList';
 import { FirstRunOnboarding } from './FirstRunOnboarding';
-import { ProjectSettingsDialog } from './ProjectSettingsDialog';
 import { SettingsWorkspace } from './SettingsWorkspace';
 import { popPageHistory, pushPageHistory } from './appNavigationHistory';
 import type { AppPageId } from './appPages';
@@ -21,6 +22,9 @@ const [EDIT_WORKSPACE] = APP_WORKSPACES;
 export function App(): ReactElement {
   const editor = useTimelineEditor();
   const [editorView, setEditorView] = useState<EditorViewMode>('shorts');
+  const [sourcePreview, setSourcePreview] = useState(false);
+  const [navigationError, setNavigationError] = useState('');
+  useEffect(() => setSourcePreview(false), [editor.project?.id]);
   const projectPickerPending = useRef(false);
   const [activePageId, setActivePageId] = useState<AppPageId>(() => getDefaultAppPageId());
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<AppWorkspaceId>(() => getDefaultAppWorkspaceId());
@@ -136,15 +140,16 @@ export function App(): ReactElement {
     navigateToPage('edit');
   }, [activePageId, hasActiveProject, navigateToPage]);
 
-  const removeProject = useCallback(async (projectId: string): Promise<void> => {
+  const removeProject = useCallback(async (projectId: string): Promise<boolean> => {
     // Removing the open project has to clear the editor too, which
     // deleteCurrentProject already does; other rows only need the store call.
     if (editor.project?.id === projectId) {
-      await editor.deleteCurrentProject();
+      return await editor.deleteCurrentProject();
     } else {
       const response = await window.videoTool.deleteProject({ projectId });
-      if (!response.ok) return;
+      if (!response.ok || !response.value.deleted) return false;
       await editor.refreshProjects();
+      return true;
     }
   }, [editor]);
 
@@ -171,7 +176,7 @@ export function App(): ReactElement {
    * than dropping it on a tab click.
    */
   const selectProjectTab = useCallback(async (projectId: string): Promise<void> => {
-    if (editor.project?.id === projectId) return;
+    if (editor.project?.id === projectId) { navigateToPage('edit'); return; }
     if (editor.hasUnsavedTimeline && !await editor.saveTimeline()) return;
     const opened = await editor.openProject(projectId);
     if (opened) navigateToPage('edit');
@@ -183,14 +188,22 @@ export function App(): ReactElement {
     setProjectTabs(next.tabs);
     if (editor.project?.id !== projectId) return;
     if (next.activeId === null) {
+      editor.closeProject();
       navigateToPage('edit');
       return;
     }
     await editor.openProject(next.activeId);
   }, [editor, navigateToPage, projectTabs]);
-  const [projectSettingsOpen, setProjectSettingsOpen] = useState(false);
   return (
       <AppShell
+        sidebar={<>
+          <ProjectSidebar projects={editor.projects} activeProjectId={editor.project?.id ?? null} busy={editor.isBusy}
+            onSelect={id => { void selectProjectTab(id); }} onOpen={() => setActivePage('projects')}
+            onCreate={async name => { if (editor.hasUnsavedTimeline && !await editor.saveTimeline()) return false; const created = await editor.createProject(name); if (created) { setEditorView('shorts'); navigateToPage('edit'); } return created; }}
+            onRename={async (id, name) => { if (id === editor.project?.id) return await editor.renameProject(name); const response = await window.videoTool.renameProject({ projectId: id, name }); if (!response.ok) return false; await editor.refreshProjects(); return true; }}
+            onCloseProject={id => { void closeProjectTabById(id); }} onRemove={removeProject} />
+          {editor.project && <VideoResultsList editor={editor} active={workspaceIsVisible} onSelectProject={id => { void selectProjectTab(id); }} onInspectAsset={id => { editor.setSelectedAssetId(id); setSourcePreview(true); navigateToPage('edit'); }} />}
+        </>}
         inlineAgentChat={editorView === 'shorts'}
         activePage={activePage}
         hasActiveProject={hasActiveProject}
@@ -211,16 +224,15 @@ export function App(): ReactElement {
         onNavigateBack={navigateBack}
       >
       <div className="app-page-stack">
+          {(navigationError || editor.statusMessage?.tone === 'danger' || editor.statusMessage?.tone === 'warning') && <p role="alert" className="desktop-navigation-error">{navigationError || editor.statusMessage.text}</p>}
           <section className="app-stack local-edit-bay" hidden={!workspaceIsVisible}
             id={EDIT_WORKSPACE.panelId} ref={setPagePanelRef('edit')} role="region" aria-label="Editing workspace" tabIndex={-1}>
-            <TimelineEditor editor={editor} editorView={editorView} onEditorViewChange={setEditorView} active={workspaceIsVisible} onProjectSettings={() => setProjectSettingsOpen(true)} onOpenSettings={() => setActivePage('settings')}
+            <TimelineEditor editor={editor} sourcePreview={sourcePreview} onSourcePreviewChange={setSourcePreview} editorView={editorView} onEditorViewChange={setEditorView} active={workspaceIsVisible} onOpenSettings={() => setActivePage('settings')}
               onProjects={() => setActivePage('projects')} onSelectProject={(id) => { void selectProjectTab(id); }} />
           </section>
           <section
             aria-labelledby="settings-title"
             className="app-page app-page--settings"
-            data-cua-protected="settings"
-            data-cua-protected-id="settings-page"
             hidden={activePageId !== 'settings'}
             id="app-page-panel-settings"
             ref={setPagePanelRef('settings')}
@@ -230,19 +242,6 @@ export function App(): ReactElement {
             <SettingsWorkspace onReplayFirstRunOnboarding={replayFirstRunOnboarding} />
           </section>
       </div>
-      {projectSettingsOpen && editor.project !== null && (
-        <ProjectSettingsDialog
-          project={editor.project}
-          summary={editor.projects.find((item) => item.id === editor.project?.id)}
-          isBusy={editor.isBusy}
-          onRename={editor.renameProject}
-          onRemove={async () => {
-            setProjectSettingsOpen(false);
-            await removeProject(editor.project!.id);
-          }}
-          onClose={() => setProjectSettingsOpen(false)}
-        />
-      )}
       {showFirstRunOnboarding && <FirstRunOnboarding onComplete={completeFirstRunOnboarding} />}
       </AppShell>
   );

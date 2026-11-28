@@ -11,15 +11,12 @@ export interface WorkspaceProjectSummary {
   readonly sourceFileName?: string;
 }
 
-export type WorkspaceCuaStatus = 'idle' | 'ready' | 'acting' | 'stopping' | 'cleanup-failed';
 
 export interface WorkspaceSafetyState {
   readonly sourcePreserved: boolean;
   readonly dirty: boolean;
   readonly saving?: boolean;
   readonly pendingApprovalCount: number;
-  readonly cuaStatus: WorkspaceCuaStatus;
-  readonly cuaLabel?: string;
 }
 
 export type WorkspaceCandidateStatus = 'ready' | 'exporting' | 'completed' | 'failed';
